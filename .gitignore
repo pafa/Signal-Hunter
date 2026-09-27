@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+
+# Local credentials; examples must contain placeholders only.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+/secrets/
+
+# Local data, databases, logs, and generated review evidence.
+/data/raw/
+/data/private/
+/data/runtime/
+/logs/
+/session-artifacts/
+/prototype/public/recent-event-test.html
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Generated dependencies and build outputs.
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+dist/
+coverage/
+
+# Local diagnostic output
+*.log

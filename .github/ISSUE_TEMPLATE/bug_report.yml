@@ -1,0 +1,65 @@
+name: 缺陷反馈 / Bug report
+description: 报告可复现的功能、数据处理或界面问题 / Report a reproducible problem.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索已有问题。安全漏洞请按 SECURITY.md 私密报告，不要公开凭据、私人数据库或第三方正文。
+        Search existing issues first. Use SECURITY.md for vulnerabilities; do not share secrets, private databases, or article text.
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / Version
+      description: 应用版本或 commit / App version or commit
+      placeholder: v0.11.0
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 运行模式 / Runtime mode
+      options:
+        - demo — npm start
+        - research — npm run start:research
+        - legacy — compatibility only
+        - 启动前失败 / Fails before startup
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境 / Environment
+      description: 操作系统、浏览器、node --version、npm --version / OS, browser, Node and npm versions
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      description: 优先使用全新演示库和合成材料 / Prefer a fresh demo and synthetic inputs.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 预期与实际行为 / Expected and actual behavior
+      description: 行情问题请说明来源、证券、时区和数据时间 / For data issues, include source, symbol, timezone and timestamps.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 可选证据 / Optional evidence
+      description: 粘贴脱敏错误或 npm run health 结果。截图请先检查私人内容 / Share sanitized errors or health output; review screenshots before attaching.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 数据检查 / Data check
+      options:
+        - label: 不包含密钥、私人数据库、账户资料或无权分享的内容 / No secrets, private databases, account details, or unauthorized content.
+          required: true

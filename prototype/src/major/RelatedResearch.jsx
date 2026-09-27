@@ -1,0 +1,18 @@
+import React,{useEffect,useState} from 'react';
+import {Button} from './Primitives';
+import {request,time} from './api';
+import {RELATION_KINDS} from '../../shared/research-links.mjs';
+import './research-materials.css';
+export default function RelatedResearch({topic,topics,busy,mutate}){
+ const [data,setData]=useState(null),[error,setError]=useState(''),[targetId,setTargetId]=useState(''),[kind,setKind]=useState('followup'),[note,setNote]=useState(''),[base,setBase]=useState(topic.version),[targetVersion,setTargetVersion]=useState(null);
+ useEffect(()=>{let active=true;request(`/api/research/${topic.id}/related`).then(r=>{if(active)setData(r);}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[topic.id,topic.version,topics]);
+ const target=topics.find(t=>t.id===targetId);
+ const choose=id=>{setTargetId(id);setTargetVersion(topics.find(t=>t.id===id)?.version);};
+ const save=async(payload)=>{const r=await mutate(`/api/research/${topic.id}/related`,'POST',payload);if(r){setBase(r.research.topics.find(t=>t.id===topic.id).version);setNote('');}};
+ return <section className="research-materials"><h3>历史召回与多事件关联</h3><p className="m-note">相同来源、公司和标题词用于召回候选，尚不代表因果关系。确认关系并写明依据后，再判断它是同一事件进展、反证、聚合因素还是历史类比。</p>{error&&<p className="m-warning" role="alert">{error}</p>}
+ <div className="source-news-list">{data?.candidates.map(c=><button key={c.topicId} onClick={()=>choose(c.topicId)}><span>{c.status==='archived'?'已归档':'在研'} · v{c.version}</span><strong>{c.title}</strong><small>{c.reasons.join('；')}</small></button>)}{data&&!data.candidates.length&&<p className="m-note">没有找到明确重合项。可从下方完整研究列表选择；当前召回还不具备语义推理。</p>}</div>
+ <form className="m-form" onSubmit={async e=>{e.preventDefault();await save({version:base,topicId:targetId,targetVersion,kind,note,active:true});}}><label>相关事件<select required value={targetId} onChange={e=>choose(e.target.value)}><option value="">选择研究事件</option>{topics.filter(t=>t.id!==topic.id).map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></label>{target&&<p className="m-note">目标 v{targetVersion}：{target.hypothesis.logic}<br/><a href={`/?topic=${encodeURIComponent(target.id)}`} target="_blank" rel="noreferrer">打开目标研究 ↗</a></p>}<label>当前事件相对于目标的关系<select value={kind} onChange={e=>setKind(e.target.value)}>{Object.entries(RELATION_KINDS).map(([v,label])=><option key={v} value={v}>{label}</option>)}</select></label><label>关系依据或撤销原因<textarea required maxLength={1200} rows={3} value={note} onChange={e=>setNote(e.target.value)} placeholder="变化是什么，哪些来源可证明关联，是否存在共同来源或共同原因？"/></label>{(base!==topic.version||target&&targetVersion!==target.version)&&<p className="m-warning">研究版本已变化。输入仍保留，请核对历史后重新打开此页。</p>}<Button primary type="submit" disabled={busy||!target||base!==topic.version||targetVersion!==target?.version}>保存事件关系</Button>
+ <h3>已建立关系</h3>{data?.links.map(l=><div className="source-item" key={`${l.topicId}:${l.kind}`}><b>{RELATION_KINDS[l.kind]} · {l.active?'有效':'已撤销'}</b><p>{l.title}</p><p>{l.note}</p><small>基于目标 v{l.targetVersion} · {time(l.at)}{l.currentVersion!==l.targetVersion?` · 目标现已到 v${l.currentVersion}，需复核`:''}</small>{l.active&&<Button type="button" disabled={busy||!note.trim()||base!==topic.version} onClick={()=>save({version:base,topicId:l.topicId,targetVersion:l.currentVersion,kind:l.kind,note,active:false})}>按上方原因撤销关系</Button>}</div>)}{data&&!data.links.length&&<p className="m-note">尚未建立关系。关联不会把两份来源自动算作独立证据。</p>}</form>
+ {!!data?.incoming.length&&<><h3>关联到本事件的研究</h3>{data.incoming.map(l=><p className="m-note" key={`${l.topicId}:${l.kind}`}><a href={`/?topic=${encodeURIComponent(l.topicId)}`} target="_blank" rel="noreferrer">{l.title}</a> · {RELATION_KINDS[l.kind]}<br/>{l.note}</p>)}</>}
+ </section>;
+}

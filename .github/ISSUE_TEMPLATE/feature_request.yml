@@ -1,0 +1,37 @@
+name: 功能建议 / Feature request
+description: 提出研究流程、易用性或可验证性的改善 / Suggest a research or usability improvement.
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 使用场景与问题 / Use case and problem
+      description: 描述现在什么任务难以完成，以及发生在哪个研究环节 / Which task is difficult, and at which research stage?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望行为 / Proposed behavior
+      description: 用一个具体例子说明输入、操作和结果 / Give a concrete input, action, and expected result.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: 如何验证 / Acceptance criteria
+      description: 改善怎样算完成？若涉及规则，说明反例和失效条件 / How can we verify improvement? Include counterexamples for rule changes.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案与数据依赖 / Alternatives and data needs
+      description: 可选；数据源、费用或模型依赖请说明 / Optional; note data sources, costs, or model dependencies.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 范围 / Scope
+      options:
+        - label: 理解当前为本地研究与人工批准的模拟工具，功能建议不代表实盘授权 / I understand the local research and human-approved simulation scope.
+          required: true

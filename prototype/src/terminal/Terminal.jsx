@@ -1,0 +1,27 @@
+import React,{useEffect,useReducer,useRef,useState} from 'react';
+import {byId,money} from '../data';
+import {reducer} from '../state';
+import {terminalInitialState,researchFor,actionLabel} from './fixtures';
+import {TButton,Urgency} from './Primitives';
+import {EventFeed,WatchPanel,ResearchPanel} from './ContextPanels';
+import PriceChart from './PriceChart';
+import OrderQueue from './OrderQueue';
+import Holdings from './Holdings';
+import './terminal.css';
+import DataDesk from './DataDesk';
+
+function InspectDialog({kind,stock,state,onClose}){
+ const ref=useRef(null),e=researchFor(stock.id);
+ useEffect(()=>{const el=ref.current,previous=document.activeElement;el.showModal();return()=>{el.close();previous?.focus?.();};},[]);
+ return <dialog className="terminal-dialog" ref={ref} aria-labelledby="terminal-dialog-title" onCancel={event=>{event.preventDefault();onClose();}}><header><h2 id="terminal-dialog-title">{kind==='records'?'决策记录':`${stock.name} · 依据与反证`}</h2><TButton onClick={onClose} aria-label="关闭面板">关闭</TButton></header><div className="dialog-body">{kind==='records'?<><p className="muted">保留确认与拒绝；每笔模拟结果独立记录，刷新后恢复初始场景。</p><div className="decision-list">{state.records.map(r=><article key={r.id}><div><b>{byId[r.stockId].name}</b><span className={r.decision==='rejected'?'muted':'profit'}>{r.decision==='rejected'?'已拒绝':'已确认'} · {r.type==='buy'?'买入':'卖出'}</span><time>{r.time}</time></div><p className="num">{r.qty} 股 × {money(r.price,byId[r.stockId].currency)}{r.beforeQty!==undefined&&<span> · {r.beforeQty} → {r.afterQty} 股</span>}{r.realized!==undefined&&<span> · 已实现 {money(r.realized,byId[r.stockId].currency)}</span>}</p><p>{r.note||'未填写备注'}</p></article>)}</div></>:<><div className="dialog-urgency"><Urgency level={e.urgency}/><span>{e.reason}</span></div><h3>{e.title}</h3><dl className="evidence-list"><div><dt>本次来源</dt><dd>{e.source}，并非真实新闻。</dd></div><div><dt>原判断</dt><dd>{e.before}</dd></div><div><dt>新判断 · {e.version}</dt><dd>{e.after}</dd></div><div><dt>判断依据</dt><dd>{e.impact}</dd></div><div><dt>反证</dt><dd>{e.counter}</dd></div><div><dt>退出观察区间</dt><dd>{money(stock.target[0],stock.currency)}–{stock.target[1]}；仅为原型样例。</dd></div><div><dt>失效条件</dt><dd>{stock.risk}</dd></div><div><dt>下一复核</dt><dd>{e.next}</dd></div></dl><p className="dialog-boundary">新闻进入方式、“重大新闻”定义及紧急程度的实际规则尚待确定。当前标签是预设交互场景。</p></>}</div></dialog>;
+}
+
+export default function Terminal(){
+ const [state,dispatch]=useReducer((current,action)=>action.type==='reset'?terminalInitialState():reducer(current,action),undefined,terminalInitialState),[selected,setSelected]=useState('xiaomi'),[seen,setSeen]=useState([]),[dialog,setDialog]=useState(null),[toast,setToast]=useState('');
+ const stock=byId[selected];
+ useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),5000);return()=>clearTimeout(timer);},[toast]);
+ const submit=(stockId,side)=>{setSelected(stockId);if(state.applications.some(a=>a.stockId===stockId&&a.status==='pending')){setToast('已定位到右侧申请，请检查参数后决定');return;}dispatch({type:'submit',stockId,side});setToast('申请已进入队列，确认前持仓保持原状');};
+ const decide=(app,decision,price,qty,note)=>{const action=actionLabel(app,state.positions.find(p=>p.stockId===app.stockId),qty);dispatch({type:'decide',id:app.id,decision,price,qty,note});setToast(decision==='approved'?`${byId[app.stockId].name}已模拟${action}，持仓及决策记录已更新`:'已拒绝该申请，持仓未变，理由已记录');};
+ return <main className="terminal" aria-label="单屏决策终端"><header className="terminal-header"><div className="terminal-brand"><img src="/signal.svg" alt=""/><h1>信号猎手</h1><span>决策终端</span></div><div className="market-coverage"><span>A 股</span><span>港股</span><span>美股</span></div><div className="header-right"><span className="demo-mode"><i/>演示数据</span><a href="/">事件工作台</a><a href="?view=classic">原版视图</a><TButton tone="accent-outline" onClick={()=>setDialog('data')}>新闻与行情</TButton><TButton onClick={dispatchReset}>恢复演示</TButton></div></header><div className="terminal-context"><span><i className="context-dot"/>重点标的 · 分钟级观察<span className="context-divider">/</span>样例时点 <b className="num">09-24 14:32</b></span><span>事件 → 研判 → 申请 → <b>你确认</b> → 模拟持仓</span></div><div className="terminal-grid"><div className="terminal-left"><EventFeed selected={selected} onSelect={setSelected} seen={seen} onSeen={id=>setSeen(v=>v.includes(id)?v.filter(x=>x!==id):[...v,id])}/><WatchPanel selected={selected} onSelect={setSelected}/></div><div className="terminal-center"><PriceChart stock={stock} position={state.positions.find(p=>p.stockId===selected)}/><ResearchPanel stock={stock} state={state} onSubmit={submit} onInspect={()=>setDialog('research')}/></div><OrderQueue state={state} selected={selected} onSelect={setSelected} onDecide={decide} onRecords={()=>setDialog('records')}/><Holdings state={state} selected={selected} onSelect={setSelected}/></div><footer className="terminal-footer"><span>本地工作台 v0.3 <span>·</span> 主屏为演示场景</span><span>真实来源见“新闻与行情” <span>·</span> 刷新后恢复样例</span></footer>{dialog==='data'&&<DataDesk onClose={()=>setDialog(null)}/>} {dialog&&dialog!=='data'&&<InspectDialog kind={dialog} stock={stock} state={state} onClose={()=>setDialog(null)}/>} {toast&&<div className="terminal-toast" role="status"><span>{toast}</span><button aria-label="关闭提示" onClick={()=>setToast('')}>×</button></div>}</main>;
+ function dispatchReset(){dispatch({type:'reset'});setSelected('xiaomi');setSeen([]);setDialog(null);setToast('已恢复初始演示场景');}
+}

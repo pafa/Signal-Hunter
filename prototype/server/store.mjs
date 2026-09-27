@@ -1,0 +1,77 @@
+import {DatabaseSync} from 'node:sqlite';
+import {mkdirSync} from 'node:fs';
+import {dirname} from 'node:path';
+import {hash,instrument} from './providers.mjs';
+
+export function openStore(path) {
+  if(path!==':memory:') mkdirSync(dirname(path),{recursive:true});
+  const db=new DatabaseSync(path);
+  db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+    CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS news(id TEXT PRIMARY KEY,payload TEXT NOT NULL,hash TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,revision INTEGER NOT NULL,selected INTEGER NOT NULL DEFAULT 0,read INTEGER NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '');
+    CREATE TABLE IF NOT EXISTS revisions(news_id TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,received_at TEXT NOT NULL,PRIMARY KEY(news_id,version));
+    CREATE TABLE IF NOT EXISTS watches(symbol TEXT PRIMARY KEY,created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS quotes(symbol TEXT PRIMARY KEY,payload TEXT NOT NULL,received_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS bars(symbol TEXT NOT NULL,provider_time TEXT NOT NULL,close REAL NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(symbol,provider_time));
+    CREATE TABLE IF NOT EXISTS quote_bars(symbol TEXT NOT NULL,provider TEXT NOT NULL,timezone TEXT NOT NULL,provider_time TEXT NOT NULL,close REAL NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(symbol,provider,timezone,provider_time));
+    CREATE TABLE IF NOT EXISTS checks(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`);
+  db.exec(`CREATE TABLE IF NOT EXISTS daily_quotes(symbol TEXT PRIMARY KEY,payload TEXT NOT NULL,received_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS daily_snapshots(symbol TEXT NOT NULL,hash TEXT NOT NULL,payload TEXT NOT NULL,received_at TEXT NOT NULL,PRIMARY KEY(symbol,hash));`);
+  const getSettings=()=>({keywords:db.prepare("SELECT value FROM settings WHERE key='keywords'").get()?.value||''});
+  const setSettings=({keywords})=>{
+    if(typeof keywords!=='string'||keywords.length>120)throw new Error('关键词最多 120 字符');
+    db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').run('keywords',keywords.trim());return getSettings();
+  };
+  const mapNews=row=>({...JSON.parse(row.payload),firstSeen:row.first_seen,articleFirstSeen:row.first_seen,revisionFirstSeen:db.prepare('SELECT received_at FROM revisions WHERE news_id=? AND version=?').get(row.id,row.revision)?.received_at||null,lastSeen:row.last_seen,revision:row.revision,selected:!!row.selected,read:!!row.read,note:row.note});
+  const newsRows=()=>db.prepare('SELECT * FROM news ORDER BY last_seen DESC LIMIT 500').all().map(mapNews).sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt));
+  return {
+    db,getSettings,setSettings,
+    news:newsRows,
+    newsById(id){const row=db.prepare('SELECT * FROM news WHERE id=?').get(id);return row?mapNews(row):null;},
+    revisionAvailableAt(id,revision){return db.prepare('SELECT received_at FROM revisions WHERE news_id=? AND version=?').get(id,revision)?.received_at||null;},
+    ingest(items,receivedAt=new Date().toISOString()) {
+      let added=0,updated=0;db.exec('BEGIN IMMEDIATE');
+      try {
+        for(const item of items){
+          const payload=JSON.stringify(item),fingerprint=hash(payload),old=db.prepare('SELECT hash,revision FROM news WHERE id=?').get(item.id);
+          if(!old){db.prepare('INSERT INTO news(id,payload,hash,first_seen,last_seen,revision) VALUES(?,?,?,?,?,1)').run(item.id,payload,fingerprint,receivedAt,receivedAt);added++;}
+          else if(old.hash!==fingerprint){db.prepare('UPDATE news SET payload=?,hash=?,last_seen=?,revision=revision+1 WHERE id=?').run(payload,fingerprint,receivedAt,item.id);updated++;}
+          else {db.prepare('UPDATE news SET last_seen=? WHERE id=?').run(receivedAt,item.id);continue;}
+          db.prepare('INSERT INTO revisions VALUES(?,?,?,?)').run(item.id,(old?.revision||0)+1,payload,receivedAt);
+        }
+        db.exec('COMMIT');return {added,updated};
+      } catch(error){db.exec('ROLLBACK');throw error;}
+    },
+    editNews(id,changes){
+      const row=db.prepare('SELECT * FROM news WHERE id=?').get(id);if(!row)throw new Error('新闻不存在');
+      if(Object.keys(changes).some(k=>!['selected','read','note'].includes(k)))throw new Error('不支持的新闻修改');
+      if('selected' in changes&&typeof changes.selected!=='boolean'||'read' in changes&&typeof changes.read!=='boolean'||'note' in changes&&(typeof changes.note!=='string'||changes.note.length>4000))throw new Error('选读字段无效');
+      db.prepare('UPDATE news SET selected=?,read=?,note=? WHERE id=?').run(Number(changes.selected??!!row.selected),Number(changes.read??!!row.read),changes.note??row.note,id);
+    },
+    revisions(id){return db.prepare('SELECT version,payload,received_at FROM revisions WHERE news_id=? ORDER BY version DESC').all(id).map(r=>({...JSON.parse(r.payload),version:r.version,receivedAt:r.received_at}));},
+    watchlist(){return db.prepare('SELECT symbol,created_at AS createdAt FROM watches ORDER BY created_at').all();},
+    addWatch(value){const {symbol}=instrument(value);if(!db.prepare('SELECT 1 FROM watches WHERE symbol=?').get(symbol)&&db.prepare('SELECT COUNT(*) n FROM watches').get().n>=40)throw new Error('工作台最多关注 40 个标的');db.prepare('INSERT OR IGNORE INTO watches VALUES(?,?)').run(symbol,new Date().toISOString());return symbol;},
+    removeWatch(symbol){db.prepare('DELETE FROM watches WHERE symbol=?').run(symbol);},
+    quote(symbol){const row=db.prepare('SELECT * FROM quotes WHERE symbol=?').get(symbol);return row?{...JSON.parse(row.payload),receivedAt:row.received_at}:null;},
+    daily(symbol){const row=db.prepare('SELECT payload FROM daily_quotes WHERE symbol=?').get(symbol);return row?JSON.parse(row.payload):null;},
+    saveDaily(quote){
+      if(quote.interval!=='1d'||!quote.points?.length)throw new Error('日线缓存格式无效');
+      const payload=JSON.stringify(quote);db.exec('BEGIN IMMEDIATE');try{
+        db.prepare('INSERT OR REPLACE INTO daily_quotes VALUES(?,?,?)').run(quote.symbol,payload,quote.receivedAt);
+        db.prepare('INSERT OR IGNORE INTO daily_snapshots VALUES(?,?,?,?)').run(quote.symbol,hash(payload),payload,quote.receivedAt);db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
+    },
+    saveQuote(quote,at=new Date().toISOString()){
+      db.exec('BEGIN IMMEDIATE');try{
+        db.prepare('INSERT OR REPLACE INTO quotes VALUES(?,?,?)').run(quote.symbol,JSON.stringify(quote),at);
+        const stmt=db.prepare('INSERT INTO bars VALUES(?,?,?,?,?) ON CONFLICT(symbol,provider_time) DO UPDATE SET close=excluded.close,last_seen=excluded.last_seen');
+        const sourced=db.prepare('INSERT INTO quote_bars VALUES(?,?,?,?,?,?,?) ON CONFLICT(symbol,provider,timezone,provider_time) DO UPDATE SET close=excluded.close,last_seen=excluded.last_seen');
+        for(const point of quote.points){if(quote.provider!=='yahoo-public-chart')stmt.run(quote.symbol,point.time,point.close,at,at);sourced.run(quote.symbol,quote.provider||'legacy',quote.providerTimezone||'unverified',point.time,point.close,at,at);}
+        db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
+    },
+    status(id,data){const previous=db.prepare('SELECT payload FROM checks WHERE id=?').get(id);const last=previous?JSON.parse(previous.payload):{};db.prepare('INSERT OR REPLACE INTO checks VALUES(?,?)').run(id,JSON.stringify({...data,receivedAt:data.receivedAt||last.receivedAt||null}));},
+    checks(){return Object.fromEntries(db.prepare('SELECT * FROM checks').all().map(row=>[row.id,JSON.parse(row.payload)]));},
+    close(){db.close();}
+  };
+}
