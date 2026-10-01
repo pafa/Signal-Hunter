@@ -63,6 +63,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
  };
  return {
   process,get,list,screenings,
+  newsItem(id){const news=store.newsById(id);if(!news)throw new Error('新闻不存在');return {...news,triage:classifyHeadline(news)};},
   materialList(id){return materials.list(get(id));},
   packet(id){return materials.packet(withAvailability(get(id)));},
   related(id){

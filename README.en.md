@@ -78,6 +78,12 @@ Research mode attempts to retrieve **Reuters headline links aggregated through G
 
 Database mode checks prevent opening an existing database in the wrong mode. See the [operations guide](prototype/README.md) for the compatibility-only `legacy` mode, port settings, and `SIGNAL_DB_PATH`. The launcher reads process environment variables; it does not automatically load `.env` files.
 
+## Event continuity candidate
+
+The event-tracking panel retrieves repeated headlines, stage differences, possible counter-evidence, industry analogies and related research. Each suggestion retains input versions and matching reasons. Keep a link, dismiss it or reopen it; the decision history remains available. New input revisions require a new review. Links organize leads without rewriting evidence or paper orders.
+
+Priority reflects research urgency and held-company exposure, not materiality or price probability. Publisher families are not counts of independent reporting. Indexing is bounded and runs in the background; failures retain previous results and remain visible. Full-text semantic recognition and held-out accuracy evaluation are still pending.
+
 ## Research workflow
 
 **Inputs → events and themes → evidence → companies and charts → proposals → human decisions → position reviews → layered evaluation**
@@ -101,7 +107,7 @@ Database mode checks prevent opening an existing database in the wrong mode. See
 
 | Available | Boundary |
 | --- | --- |
-| Title-rule screening, news search, and manual missed-event review | No automatic full-text semantic analysis, cross-report clustering, or validated detection accuracy |
+| Title-rule screening, news search, and manual missed-event review | Rule-based cross-report candidates only; no full-text semantic clustering or validated detection accuracy |
 | Versioned evidence, material, research, claims, and counter-evidence | Analysis is primarily manual; material packs support human or conversational review without automatic model invocation |
 | A-share / Hong Kong / US company relationships and automatic following | The company catalog is limited; identities, exposure, and cross-market mappings need review |
 | Daily chart grids, common-base comparison, and minute-data observation | Public sources may be delayed or incomplete; adjustment, calendar, and provider differences need validation |
