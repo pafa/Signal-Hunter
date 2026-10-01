@@ -49,6 +49,11 @@ export function headlineCompanies(text){
 export const COMPANY_RELATIONS={mentioned:'仅被提及',direct:'事件当事方',supplier:'供应商',customer:'客户',competitor:'竞争者',industry:'行业 / 跨市场传导',listing:'同一发行人证券'};
 export const RELATION_STATUS={pending:'关系待核验',reviewed:'人工核对关系',disputed:'关系有争议'};
 export const DIRECTIONS={unclear:'方向待评估',positive:'条件利好',negative:'条件利空',mixed:'影响分化'};
+export const COMPANY_ANALYSIS_FIELDS={businessExposure:'业务敞口',impactMechanism:'传导机制',magnitudeBasis:'影响量级与依据',pricedIn:'市场已反映多少',duration:'持续时间与兑现节点',countercase:'反向情景与替代解释',nextCheck:'下一步核查'};
+export function normalizeCompanyAnalysis(value={}){
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!Object.hasOwn(COMPANY_ANALYSIS_FIELDS,k)))throw new Error('公司影响分析字段无效');
+ const out={};for(const key of Object.keys(COMPANY_ANALYSIS_FIELDS)){const v=value[key]??'';if(typeof v!=='string'||v.length>1000)throw new Error('每项公司影响分析最多 1000 字符');out[key]=v.trim();}return out;
+}
 export function normalizeCompanyRelation(data,topic,at){
  const identity=companyIdentity(data.symbol),kind=data.kind||'mentioned',relationStatus=data.relationStatus||'pending',direction=data.direction||'unclear';
  if(!Object.hasOwn(COMPANY_RELATIONS,kind)||!Object.hasOwn(RELATION_STATUS,relationStatus)||!Object.hasOwn(DIRECTIONS,direction))throw new Error('公司关系类型、状态或方向无效');
@@ -59,6 +64,6 @@ export function normalizeCompanyRelation(data,topic,at){
  if(kind==='listing'&&!topic.companies.some(c=>c.symbol!==identity.symbol&&companyIdentity(c.symbol).issuerKey===identity.issuerKey))throw new Error('同一发行人关系需有已映射的另一证券；跨行业联动请选择行业传导');
  if(data.identityReviewed!==undefined&&typeof data.identityReviewed!=='boolean')throw new Error('主体核对状态无效');
  if(identity.identityStatus==='unresolved'&&data.identityReviewed&&(!url||typeof data.name!=='string'||!data.name.trim()||data.name.trim().length>120))throw new Error('陌生上市主体需填写公司名和核对来源');
- return {...identity,name:identity.identityStatus==='unresolved'&&data.identityReviewed?data.name.trim():identity.name,kind,relationStatus,direction,note,url,evidenceIds,identityReviewed:!!data.identityReviewed,role:COMPANY_RELATIONS[kind],method:'human-relation',reviewedAt:at};
+ return {...identity,name:identity.identityStatus==='unresolved'&&data.identityReviewed?data.name.trim():identity.name,kind,relationStatus,direction,note,url,evidenceIds,identityReviewed:!!data.identityReviewed,role:COMPANY_RELATIONS[kind],method:'human-relation',reviewedAt:at,analysis:normalizeCompanyAnalysis(data.analysis)};
 }
 export function canAutoWatch(company){return company.identityStatus!=='unresolved'||company.identityReviewed===true;}

@@ -32,7 +32,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/revisions$/.test(url.pathname)){reply(200,store.revisions(url.pathname.split('/')[3]));return;}
     if(!['POST','PATCH','DELETE'].includes(req.method)){reply(404,{error:'接口不存在'});return;}
     if(req.headers['content-type']!=='application/json'){reply(415,{error:'需要 JSON 请求'});return;}
-    const maxBody=/^\/api\/research\/[^/]+\/materials$/.test(url.pathname)?300000:16384;
+    const maxBody=/^\/api\/research\/[^/]+\/materials$/.test(url.pathname)?300000:/^\/api\/research\/[^/]+\/companies$/.test(url.pathname)?64000:16384;
     const chunks=[];let bytes=0;for await(const chunk of req){const buffer=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);bytes+=buffer.length;if(bytes>maxBody){reply(413,{error:'请求过大'});return;}chunks.push(buffer);}const body=Buffer.concat(chunks).toString('utf8');
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
@@ -63,7 +63,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     else if(req.method==='POST'&&url.pathname==='/api/news/refresh'){await service.runOperation('news',{manual:true});}
     else if(req.method==='PATCH'&&url.pathname==='/api/settings'){store.setSettings(data);}
     else if(req.method==='PATCH'&&/^\/api\/news\/[a-f0-9]{64}$/.test(url.pathname)){store.editNews(url.pathname.split('/')[3],data);}
-    else if(req.method==='POST'&&url.pathname==='/api/watchlist'){const symbol=store.addWatch(data.symbol);await service.runOperation('minutes',{symbols:[symbol],manual:true});}
+    else if(req.method==='POST'&&url.pathname==='/api/watchlist'){const symbol=store.addWatch(data.symbol);if(service.mode!=='demo'&&!service.operations().tasks.minutes?.paused)await service.runOperation('minutes',{symbols:[symbol],manual:true});}
     else if(req.method==='DELETE'&&url.pathname==='/api/watchlist'){store.removeWatch(String(data.symbol));}
     else if(req.method==='POST'&&url.pathname==='/api/quotes/refresh'){await service.runOperation('minutes',{manual:true});}
     else{reply(404,{error:'接口不存在'});return;}

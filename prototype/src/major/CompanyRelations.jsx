@@ -1,14 +1,15 @@
-import React,{useState} from 'react';
+import React,{useEffect,useState} from 'react';
 import {Modal,Button} from './Primitives';
-import {companyIdentity,searchCompanies,COMPANY_RELATIONS,RELATION_STATUS,DIRECTIONS} from '../../shared/company-directory.mjs';
+import {companyIdentity,searchCompanies,COMPANY_RELATIONS,RELATION_STATUS,DIRECTIONS,COMPANY_ANALYSIS_FIELDS} from '../../shared/company-directory.mjs';
 import './screening.css';
 
 const empty={symbol:'',name:'',kind:'mentioned',relationStatus:'pending',direction:'unclear',note:'',url:'',evidenceIds:[],identityReviewed:false};
-export default function CompanyRelations({topic,onClose,busy,mutate,watch=[],deferred=[]}){
+export default function CompanyRelations({topic,onClose,busy,mutate,watch=[],deferred=[],initialSymbol=''}){
  const [query,setQuery]=useState(''),[form,setForm]=useState(empty),[editing,setEditing]=useState(false),[base,setBase]=useState(topic.version),[removeReason,setRemoveReason]=useState('');
  const update=(key,value)=>setForm(v=>({...v,[key]:value}));
  let identity=null;try{if(form.symbol)identity=companyIdentity(form.symbol);}catch{}
  function select(company,edit=false){if(edit)company=topic.companies.find(c=>c.symbol===company.symbol)||company;setForm({...empty,...company,kind:Object.hasOwn(COMPANY_RELATIONS,company.kind)?company.kind:'mentioned',relationStatus:Object.hasOwn(RELATION_STATUS,company.relationStatus)?company.relationStatus:'pending',direction:Object.hasOwn(DIRECTIONS,company.direction)?company.direction:'unclear',note:company.note||'',url:company.url||'',evidenceIds:company.evidenceIds||[]});setEditing(edit);setBase(topic.version);setQuery('');setRemoveReason('');}
+ useEffect(()=>{if(initialSymbol){const c=topic.companies.find(c=>c.symbol===initialSymbol);if(c)select(c,true);}},[]);
  const stale=base!==topic.version;
  return <Modal title="公司关联与纠错" onClose={onClose}>
  <p className="m-note">关系与消息真伪分别判断。关联会尝试加入关注，交易仍需单独申请。撤销本事件关联会保留全局关注、其他事件和持仓。</p>
@@ -30,6 +31,7 @@ export default function CompanyRelations({topic,onClose,busy,mutate,watch=[],def
  <label>公司与事件的关系依据<textarea required rows={3} maxLength={1200} value={form.note} onChange={e=>update('note',e.target.value)} placeholder="写明业务传导、事实依据及未确定之处；利好需评估规模和价格是否已反映"/></label>
  <label>关系来源链接<input type="url" value={form.url} onChange={e=>update('url',e.target.value)} placeholder="https://…"/></label>
  {topic.evidence.length>0&&<label>引用本事件证据（可多选）<select multiple value={form.evidenceIds} onChange={e=>update('evidenceIds',Array.from(e.target.selectedOptions,o=>o.value))}>{topic.evidence.map(e=><option key={e.id} value={e.id}>{e.claim}</option>)}</select></label>}
+ <details className="company-analysis-edit" open={!!initialSymbol}><summary>公司影响分析 · 人工填写</summary><p className="m-note">不确定项可以留空；量级、概率和价格优势不能从利好标签自动推得。以下随研究版本保存。</p>{Object.entries(COMPANY_ANALYSIS_FIELDS).map(([key,label])=><label key={key}>{label}<textarea rows={2} maxLength={1000} value={form.analysis?.[key]||''} onChange={e=>update('analysis',{...form.analysis,[key]:e.target.value})}/></label>)}</details>
  <Button primary disabled={busy||stale} type="submit">{editing?'保存关系新版本':'保存关联并尝试关注'}</Button>
  </form>
  {editing&&<div className="m-form company-revoke"><label>撤销此关联的原因<input value={removeReason} maxLength={1200} onChange={e=>setRemoveReason(e.target.value)} placeholder="如同名误配、关联逻辑失效"/></label><Button disabled={busy||stale||!removeReason.trim()} onClick={async()=>{if(await mutate(`/api/research/${topic.id}/companies`,'DELETE',{version:base,symbol:form.symbol,note:removeReason}))onClose();}}>撤销本事件关联</Button></div>}

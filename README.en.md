@@ -57,6 +57,10 @@ Demo changes persist across restarts. Run `npm run health` from another terminal
 
 ## Start your own research
 
+The current development candidate adds a company research drawer, a compact watch table, selected daily comparisons, and per-topic navigation context within the browser session. Company impact fields remain manual and versioned; missing analysis is visible. Direct company citations are separated from topic background, and existing positions retain their opening research version.
+
+News discovery now has separate broad and keyword queries, each with controls and collection receipts. Receipts show returned publication ranges, accepted/rejected counts, revisions, errors, and possible truncation at 100 results. Both queries use the same aggregation source and do not count as independent evidence. These changes are under review; see [the backlog](docs/BACKLOG.md) for implemented scope and remaining work.
+
 Stop the demo, then run this from `prototype`:
 
 ```sh
