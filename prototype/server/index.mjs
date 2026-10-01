@@ -18,12 +18,15 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
   try{
     const url=new URL(req.url,'http://127.0.0.1:4179');
     if(!url.pathname.startsWith('/api/')&&staticHandler){staticHandler(req,res);return;}
+    if(req.method==='GET'&&url.pathname==='/api/events'){const params=Object.fromEntries(url.searchParams);for(const key of ['offset','limit'])if(key in params)params[key]=Number(params[key]);reply(200,service.eventContinuity(params));return;}
+    if(req.method==='GET'&&/^\/api\/events\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.eventDetail(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/operations'){reply(200,service.operations());return;}
     if(req.method==='GET'&&url.pathname==='/api/health'){reply(200,service.health());return;}
     if(req.method==='GET'&&url.pathname==='/api/paper/history'){reply(200,service.paper.history());return;}
     if(req.method==='GET'&&url.pathname==='/api/bars'){const symbol=url.searchParams.get('symbol');if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅查看关注标的');const quote=store.quote(symbol);const rows=quote?store.db.prepare('SELECT provider_time AS time,close FROM quote_bars WHERE symbol=? AND provider=? AND timezone=? ORDER BY provider_time DESC LIMIT 6000').all(symbol,quote.provider||'legacy',quote.providerTimezone||'unverified'):[];reply(200,rows.reverse());return;}
     if(req.method==='GET'&&url.pathname==='/api/data'){reply(200,service.snapshot());return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/screening$/.test(url.pathname)){reply(200,service.research.screenings.packet(url.pathname.split('/')[3]));return;}
+    if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.research.newsItem(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/news/search'){reply(200,service.research.newsPage(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/materials$/.test(url.pathname)){reply(200,service.research.materialList(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/packet$/.test(url.pathname)){reply(200,service.research.packet(url.pathname.split('/')[3]));return;}
@@ -37,6 +40,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&/^\/api\/events\/[a-f0-9]{64}$/.test(url.pathname)){service.decideEvent(url.pathname.split('/')[3],data);reply(200,service.snapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/operations/restore-review'){if(data.confirm!==true)throw new Error('需要确认已核对恢复数据');service.acknowledgeRestore();reply(200,service.snapshot());return;}
     if(req.method==='POST'&&/^\/api\/operations\/[a-z]+$/.test(url.pathname)){service.controlOperation(url.pathname.split('/')[3],data.action);if(['retry','resume'].includes(data.action))void service.tick().catch(console.error);reply(200,service.snapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/daily/refresh'){
