@@ -1,0 +1,24 @@
+import React,{useState} from 'react';
+import {Modal,Button} from '../major/Primitives';
+import {time,stanceNames} from '../major/api';
+import {companyResearch} from '../../shared/company-view.mjs';
+import {COMPANY_ANALYSIS_FIELDS,DIRECTIONS} from '../../shared/company-directory.mjs';
+import {number} from './format';
+
+export default function CompanyDossier({symbol,topicId,data,onClose,onTopic,onEdit,onPropose,onCompany}){
+ const d=companyResearch(symbol,data.research.topics,data.paper),[selection,setSelection]=useState(topicId),[tab,setTab]=useState('analysis');
+ const record=d.research.find(t=>t.topicId===selection)||d.research[0],w=data.watchlist.find(w=>w.symbol===symbol),cap=data.dataCapabilities.find(c=>c.symbol===symbol);
+ return <Modal title={`${record?.relation.name||d.identity.name} · 公司研究`} onClose={onClose}><div className="company-dossier">
+ <div className="dossier-identity"><b>{symbol}</b><span>{d.identity.market} · {d.identity.currency} · {({XSHG:'上海证券交易所',XSHE:'深圳证券交易所',XHKG:'香港交易所'})[d.identity.venue]||'交易所待核对'}</span><span>收盘 {number(w?.daily?.points?.filter(p=>p.close>0).at(-1)?.close)} {d.identity.currency} · {w?.daily?.lastDate||'无日线'}</span></div>
+ <p className="m-note">{d.identity.identityBasis}；{cap?.daily.label||'尚无行情能力记录'}。场景持仓仍按冻结演练价格计值。</p>
+ {d.relatedListings.length>0&&<p className="dossier-listings">同发行人已关联证券：{d.relatedListings.map(c=><Button key={c.symbol} onClick={()=>onCompany(c.symbol)}>{c.name} · {c.symbol}</Button>)}<small>只使用已有发行人映射；行业联动不等于同等受益。</small></p>}
+ <nav className="i-segment dossier-tabs" aria-label="公司研究内容">{[['analysis','公司影响'],['evidence','证据与反证'],['portfolio','持仓与申请']].map(([v,l])=><button key={v} aria-pressed={tab===v} className={tab===v?'on':''} onClick={()=>setTab(v)}>{l}</button>)}</nav>
+ {tab!=='portfolio'&&<><label className="dossier-select">研究上下文<select value={record?.topicId||''} onChange={e=>setSelection(e.target.value)}>{d.research.map(t=><option key={t.topicId} value={t.topicId}>{t.title} · v{t.version}{t.status==='archived'?' · 已归档':''}</option>)}</select></label>
+ {record?<><div className="dossier-actions"><b>{DIRECTIONS[record.relation.direction]||'方向待评估'}</b><small>v{record.version} · {time(record.updatedAt)}</small><Button onClick={()=>onTopic(record.topicId)}>打开事件研究</Button><Button disabled={record.status!=='active'} onClick={()=>onEdit(record.topicId,symbol)}>完善公司分析</Button></div>
+ <p>{record.relation.note}</p>
+ {tab==='analysis'?<><dl className="company-impact">{Object.entries(COMPANY_ANALYSIS_FIELDS).map(([k,label])=><div key={k}><dt>{label}</dt><dd>{record.relation.analysis?.[k]||'尚未评估'}</dd></div>)}</dl><div className="dossier-increment"><b>最近研究增量</b>{record.changeSummary?.items.map((v,i)=><p key={i}>{v}</p>)}<small>主题下一步：{record.nextEvidence||'未指定'} · 复核 {record.hypothesis?.reviewAt||'待安排'}</small></div><Button primary disabled={record.status!=='active'} onClick={()=>onPropose(symbol,record.topicId)}>准备模拟申请</Button><p className="m-note">这里只打开申请表；没有自动认定买点，也没有批准交易。</p></>:<><h3>公司关系直接引用 · {record.evidence.length}</h3>{record.evidence.length===0&&<p className="m-note">尚未把证据直接关联到这家公司。主题证据不能自动证明公司层面的影响。</p>}{record.evidence.map(e=><Evidence key={e.id} e={e}/>)}{record.relation.url&&<a href={record.relation.url} target="_blank" rel="noreferrer">公司关系补充来源 ↗</a>}<details><summary>主题上下文材料 · {record.contextEvidence.length}（非公司直接引用）</summary>{record.contextEvidence.map(e=><Evidence key={e.id} e={e}/>)}</details></>}
+ </>:<p className="m-note">此证券当前没有关联研究；可以在具体事件中添加并核对公司关系。</p>}</>}
+ {tab==='portfolio'&&<><h3>场景持仓 · {d.positions.length}</h3>{d.positions.map(p=><article className="dossier-record" key={`${p.topicId}:${p.symbol}`}><b>{number(p.qty)} 股</b><p>原币成本 {number(p.avgNative)} · 开仓研究 v{p.researchVersion??'未绑定'} · 当前 v{p.currentResearchVersion??'—'}</p><Button onClick={()=>onTopic(p.topicId)}>回到持仓研究</Button></article>)}{!d.positions.length&&<p className="m-note">没有场景持仓。</p>}<h3>全部申请记录 · {d.orders.length}</h3>{d.orders.map(o=><article className="dossier-record" key={o.id}><b>{o.side==='buy'?'买入':'减仓'} {number(o.qty)} 股 · {({pending:'待本人审批',filled:'已演练成交',rejected:'已拒绝',expired:'已过期'})[o.status]||o.status}</b><p>研究 v{o.topicVersion} · {o.reason}</p><small>{time(o.createdAt)} · {o.stale?'研究已变化，需重核':''}</small></article>)}{!d.orders.length&&<p className="m-note">没有申请记录。</p>}</>}
+ </div></Modal>;
+}
+function Evidence({e}){return <article className="dossier-evidence"><b>{stanceNames[e.stance]||'待核'} · {e.claim}</b><p>{e.interpretation||'尚无公司级解释'}</p><small>{e.sourceName||'来源未填'} · {e.verification==='confirmed'?'人工已核对':e.verification||'未核实'} · 可用 {time(e.availableAt||e.firstSeen)}</small>{e.url&&<a href={e.url} target="_blank" rel="noreferrer">阅读来源 ↗</a>}</article>;}

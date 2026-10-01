@@ -14,9 +14,13 @@ export function newsUrl(keywords='') {
 }
 
 export function parseReutersFeed(xml) {
+  return parseReutersFeedResult(xml).items;
+}
+
+export function parseReutersFeedResult(xml) {
   if (/<!DOCTYPE|<!ENTITY/i.test(xml) || XMLValidator.validate(xml)!==true) throw new Error('RSS 格式无效');
   const feed=parser.parse(xml);
-  if (!feed.rss?.channel) throw new Error('上游没有返回 RSS');
+  if (!feed.rss || !Object.hasOwn(feed.rss,'channel')) throw new Error('上游没有返回 RSS');
   const items=[];
   for (const item of array(feed.rss.channel.item)) {
     const source=item.source;
@@ -31,7 +35,7 @@ export function parseReutersFeed(xml) {
     const guid=typeof item.guid==='object'?item.guid['#text']:item.guid;
     items.push({id:hash(String(guid||link.href)),title,url:link.href,publishedAt:new Date(timestamp).toISOString(),publisher:'Reuters',provider:'google-news-rss',contentScope:'headline-link'});
   }
-  return items;
+  return {items,rawCount:array(feed.rss.channel.item).length,acceptedCount:items.length,rejectedCount:array(feed.rss.channel.item).length-items.length};
 }
 
 

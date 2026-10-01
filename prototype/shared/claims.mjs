@@ -30,5 +30,6 @@ export function researchDelta(topic,previous){
  if(JSON.stringify(topic.hypothesis)!==JSON.stringify(previous.hypothesis))items.push('交易假设、期限或失效条件已修订');
  if(topic.nextEvidence!==previous.nextEvidence)items.push('下一步观察点已修订');
  if(topic.companies.length!==previous.companies.length)items.push(`关联公司 ${previous.companies.length} → ${topic.companies.length}`);
+ for(const company of topic.companies){const old=previous.companies.find(c=>c.symbol===company.symbol);if(old&&JSON.stringify(company)!==JSON.stringify(old))items.push(`公司关系 / 影响分析已修订：${company.name||company.symbol}`);}
  return {fromVersion:previous.version,toVersion:topic.version,items:items.length?items:['核验或研究状态已修订，查看完整版本差异']};
 }

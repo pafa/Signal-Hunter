@@ -4,6 +4,7 @@ import React from 'react';
 import {Modal,Button} from '../major/Primitives';
 import {time} from '../major/api';
 import {dataHealth} from './decision-model';
+import NewsCoverage from './NewsCoverage';
 export function HealthStrip({data,onOpen}){
  if(data?.runtime?.offline)return <div className="v7-health" aria-label="数据与研究状态"><span>离线演示 · 外部采集已关闭</span><button onClick={onOpen}>合成日线 {data.watchlist.length} 只 · 不评估交易日新鲜度 <b>查看状态 ↗</b></button></div>;
  const h=dataHealth(data),priority=(data?.workflow||[]).filter(w=>w.priorityRank<=4),expired=data?.paper?.orders.filter(o=>o.status==='expired').length||0;
@@ -29,6 +30,7 @@ export function Operations({data,onClose,onControl,busy}){
  <div className="ops-buttons"><Button disabled={busy} onClick={()=>onControl(name,{action:s.paused?'resume':'pause'})}>{s.paused?'恢复':'暂停'}</Button><Button disabled={busy||s.paused||s.running||data.runtime.offline&&name!=='backup'} onClick={()=>onControl(name,{action:'retry'})}>重新检查</Button></div>
  </section>)}</div>
  <p className="m-note">采集任务有限重试；全部失败达到上限后等待处理。离线演示始终禁止外部采集。定时检查与数据实时性是不同状态。</p>
+ <NewsCoverage data={data}/>
  <h3>上游来源</h3><div className="ops-scroll"><table className="i-table"><thead><tr><th>来源</th><th>状态</th><th>最近尝试</th><th>冷却至</th></tr></thead><tbody>{Object.entries(data.checks||{}).filter(([key])=>key.startsWith('source:')).map(([key,c])=><tr key={key}><td>{key.slice(7)}</td><td>{c.state==='ok'?'最近请求成功':'来源不可用'}<small>{c.error||''}</small></td><td>{time(c.attemptedAt)}</td><td>{c.retryAt?time(c.retryAt):'—'}</td></tr>)}</tbody></table>{!Object.keys(data.checks||{}).some(k=>k.startsWith('source:'))&&<p className="m-note">尚无外部来源请求记录；离线演示不会采集。</p>}</div>
  <h3>证券数据能力</h3><div className="ops-scroll"><table className="i-table"><thead><tr><th>证券</th><th>日线</th><th>分钟</th><th>分钟接收时间</th><th>模拟执行</th></tr></thead><tbody>{(data.dataCapabilities||[]).map(c=><tr key={c.symbol}><td>{c.symbol}</td><td>{c.daily.label}<small>{c.daily.providerDate||'—'}</small></td><td>{c.minutes.label}<small>{c.minutes.error||c.minutes.source||'—'}</small></td><td>{time(c.minutes.receivedAt)}</td><td>研究观察</td></tr>)}</tbody></table></div>
  <details><summary>查看最近任务记录</summary><div className="ops-scroll"><table className="i-table"><thead><tr><th>任务</th><th>开始</th><th>结束</th><th>结果</th></tr></thead><tbody>{(data.operationHistory||[]).map((r,i)=><tr key={i}><td>{labels[r.name]||r.name}</td><td>{time(r.startedAt)}</td><td>{time(r.completedAt)}</td><td>{r.outcome}<small>{r.summary?.error||''}</small></td></tr>)}</tbody></table></div></details>

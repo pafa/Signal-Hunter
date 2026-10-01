@@ -1,5 +1,6 @@
 import {demoResearchSeeds,initializeDemoData} from './demo.mjs';
-import {fetchText,parseReutersFeed,newsUrl,fetchMinutes} from './providers.mjs';
+import {fetchMinutes} from './providers.mjs';
+import {openNewsIntake,newsQueries} from './news-intake.mjs';
 import {openResearch} from './research.mjs';
 import {openPaper} from './paper.mjs';
 import {assessTopic,syncResearchWatches} from './workflow.mjs';
@@ -15,6 +16,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const clock=()=>new Date(now()).toISOString();
   const research=openResearch(store,{clock,seed:mode!=='research',...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:{})});
   const paper=openPaper(store,research,{clock,seed:mode!=='research'});
+  const intake=openNewsIntake(store,{clock});
   let newsJob=null;const quoteJobs=new Map();let lastNewsAttempt=0;const quoteAttempts=new Map();
   const dailyJobs=new Map(),dailyAttempts=new Map();
   const active=(name,context)=>{context?.assertActive?.();if(scheduler.snapshot()[name]?.paused)throw new Error('任务已暂停，请先在运行控制中恢复');};
@@ -38,7 +40,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
     runOperation(name,input=null){if(offline&&name!=='backup')denyNetwork();active(name);return scheduler.run(name,{force:true,input});},
     close(){return scheduler.stop();},
     syncWatches(){autoWatch=syncResearchWatches(store,research.list());return autoWatch;},
-    snapshot(){const topics=research.list(),book=paper.snapshot();return {runtime:{mode,offline},paper:book,workflow:topics.map(t=>assessTopic(t,{book})),operations:scheduler.snapshot(),operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,clock(),{offline}),serviceHealth:service.health(),autoWatch,settings:store.getSettings(),news:store.news(),watchlist:store.watchlist().map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks:store.checks(),serverTime:clock(),newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:research.snapshot()};},
+    snapshot(){const topics=research.list(),book=paper.snapshot();return {runtime:{mode,offline},paper:book,workflow:topics.map(t=>assessTopic(t,{book})),operations:scheduler.snapshot(),operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,clock(),{offline}),serviceHealth:service.health(),newsIntake:intake.snapshot(),autoWatch,settings:store.getSettings(),news:store.news(),watchlist:store.watchlist().map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks:store.checks(),serverTime:clock(),newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:research.snapshot()};},
     async refreshDaily(symbol,force=false,context){
       if(offline)denyNetwork();active('daily',context);
       if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅获取关注标的日线');
@@ -55,10 +57,15 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       if(offline)denyNetwork();active('news',context);
       if(newsJob)return newsJob;
       if(now()-Math.max(lastNewsAttempt,Date.parse(store.checks().news?.attemptedAt)||0)<newsCooldown)return {skipped:'cooldown'};
+      const queries=newsQueries(store.getSettings()).filter(q=>q.enabled);
+      if(!queries.length){store.status('news',{state:'disabled'});return {skipped:'all-queries-disabled'};}
       lastNewsAttempt=now();const attemptedAt=clock();const keywords=store.getSettings().keywords;
       newsJob=(async()=>{try{
-        const xml=await fetchText(newsUrl(keywords),scopedFetcher(context)),items=parseReutersFeed(xml);active('news',context);const result=store.ingest(items,clock());research.process();
-        store.status('news',{state:'ok',attemptedAt,receivedAt:clock(),count:items.length,keywords,...result});return result;
+        const results=[];
+        for(const query of queries){active('news',context);results.push(await intake.run(query,scopedFetcher(context),context));}
+        active('news',context);research.process();
+        const success=results.filter(r=>r.state==='ok'),errors=results.filter(r=>r.error).map(r=>errorText(new Error(r.error)));
+        store.status('news',{state:errors.length?(success.length?'partial':'error'):'ok',attemptedAt,...(success.length?{receivedAt:clock()}:{}),count:success.reduce((n,r)=>n+r.acceptedCount,0),added:success.reduce((n,r)=>n+r.added,0),updated:success.reduce((n,r)=>n+r.updated,0),keywords,...(errors.length?{error:errors.join('；')}:{}),queryCount:queries.length});return results;
       }catch(error){active('news',context);store.status('news',{state:'error',attemptedAt,error:errorText(error),keywords});return {error:errorText(error)};}finally{newsJob=null;}})();
       return newsJob;
     },
