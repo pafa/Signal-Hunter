@@ -4,11 +4,12 @@ import './research-dossier.css';
 
 export default function ResearchDossier({topic}){
  const dossier=topic.dossier;if(!dossier)return <p>此主题尚无详细研判。</p>;
- return <article className="research-dossier" aria-label="附件详细研判">
+ const attachment=topic.attachment,window=attachment?{from:attachment.windowStart,to:attachment.windowEnd}:topic.analysisProvenance?.sourceWindow;
+ return <article className="research-dossier" aria-label="详细研判">
   <p className="dossier-meta">{dossier.preparedBy} · {time(dossier.preparedAt)} · 基于研究 v{dossier.basedOnResearchVersion}</p>
   {topic.version!==dossier.basedOnResearchVersion&&<p className="m-warning">这是导入时的研判快照。研究已更新，请同时核对当前概率、假设和版本历史。</p>}
-  <p className="dossier-scope">附件窗口 {time(topic.attachment.windowStart)} — {time(topic.attachment.windowEnd)}。系统首次获取 {time(topic.firstSeen)}，不是在原文发布时发现。情景概率为研究助手的主观工作估计，未校准；未提交交易。</p>
-  {dossier.sections.map((s,index)=><section key={s.id}><h3><span>{String(index+1).padStart(2,'0')}</span>{s.title}</h3>{s.paragraphs.map((p,i)=><p key={i}>{p}</p>)}{s.table&&<div className="dossier-table"><table><thead><tr>{s.table.columns.map((c,i)=><th key={i}>{c}</th>)}</tr></thead><tbody>{s.table.rows.map((row,i)=><tr key={i}>{row.map((c,j)=><td key={j}>{c}</td>)}</tr>)}</tbody></table></div>}{s.sourceIds.length>0&&<div className="dossier-sources">依据：{s.sourceIds.map(id=>{const e=topic.evidence.find(e=>e.id===id);return <a key={id} href={e.url} target="_blank" rel="noreferrer">{e.sourceName} ↗</a>;})}</div>}</section>)}
-  <p className="dossier-meta">原附件：{topic.attachment.fileName} · SHA-256 {topic.attachment.sha256}</p>
+  <p className="dossier-scope">{window?.from&&window?.to?<>{attachment?'附件':'新闻'}窗口 {time(window.from)} — {time(window.to)}。</>:<>材料窗口未记录。</>}系统首次获取 {time(topic.firstSeen)}；历史补采不代表原文发布时已发现。若填写情景概率，它是主观工作估计，未经校准。保存研判不会提交交易。</p>
+  {dossier.sections.map((s,index)=><section key={s.id}><h3><span>{String(index+1).padStart(2,'0')}</span>{s.title}</h3>{s.paragraphs.map((p,i)=><p key={i}>{p}</p>)}{s.table&&<div className="dossier-table"><table><thead><tr>{s.table.columns.map((c,i)=><th key={i}>{c}</th>)}</tr></thead><tbody>{s.table.rows.map((row,i)=><tr key={i}>{row.map((c,j)=><td key={j}>{c}</td>)}</tr>)}</tbody></table></div>}{s.sourceIds?.length>0&&<div className="dossier-sources">依据：{s.sourceIds.map(id=>{const e=topic.evidence.find(e=>e.id===id);return e?.url?<a key={id} href={e.url} target="_blank" rel="noreferrer">{e.sourceName} ↗</a>:<span key={id}>来源记录缺失或无链接 · {id}</span>;})}</div>}</section>)}
+  {attachment&&<p className="dossier-meta">原附件：{attachment.fileName} · SHA-256 {attachment.sha256}</p>}
  </article>;
 }
