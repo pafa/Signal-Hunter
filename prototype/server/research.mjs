@@ -1,3 +1,5 @@
+import {validateDossierSections} from '../shared/research-dossier.mjs';
+import {researchReadiness} from '../shared/research-readiness.mjs';
 import {normalizeCompanyRelation} from '../shared/company-directory.mjs';
 import {openScreeningSamples} from './screening-samples.mjs';
 import {claimsOf,validateClaim,assessmentFields,researchDelta,assertClaimIdentity} from '../shared/claims.mjs';
@@ -134,6 +136,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    if(data.hypothesis?.action!=='observe'||!data.hypothesis?.invalidation||!Number.isFinite(Date.parse(data.firstSeen))||Date.parse(data.firstSeen)>Date.parse(clock()))throw new Error('实测只允许观察且获取时间不可在未来');
    for(const c of data.companies){instrument(c.symbol);assertText(c.note,'公司关联',500);}
    for(const e of data.evidence){safeUrl(e.url);assertText(e.claim,'事实',1200);if(!['primary','reported'].includes(e.verification)||!enums.stance.includes(e.stance)||!data.chain.some(s=>s.id===e.step))throw new Error('实测证据字段无效');}
+   if(data.dossier){data={...data,dossier:{preparedAt:clock(),preparedBy:'研究者 · 实测人工研判',basedOnResearchVersion:1,sections:validateDossierSections(data.dossier.sections,data.evidence),reviewStatus:'draft'}};}
    return commit({...data,type:'event',status:'active',createdAt:clock()},'真实数据测试批次导入：研究者复核，首次获取在今日；未生成或批准交易');
   },
   snapshot(){const topics=list(),news=store.news();const rows=new Map(db.prepare('SELECT * FROM triage WHERE rules_version=?').all(triageKey).map(r=>[`${r.news_id}:${r.news_revision}`,r]));
@@ -144,7 +147,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    return commit({id:randomUUID(),title,summary,type:'cluster',label:'自建主题',origin:'user',status:'active',createdAt:at,chain:[{id:'fact',title:'事实变化',question:'什么证据能证实变化？'},{id:'mechanism',title:'影响机制',question:'变化如何传到目标公司的业务？'},{id:'earnings',title:'财务兑现',question:'如何改变预期与盈利？'}],evidence:[],companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'添加支持、反对或待核实线索，建立可证伪的因果链。'},'用户创建主题');
   },
   update(id,data){const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
-   const allowed=['version','status','hypothesis','assessment','nextEvidence'];if(Object.keys(data).some(k=>!allowed.includes(k)))throw new Error('不支持的研究修改');
+   const allowed=['version','status','hypothesis','assessment','nextEvidence','dossier'];if(Object.keys(data).some(k=>!allowed.includes(k)))throw new Error('不支持的研究修改');
    if(data.nextEvidence!==undefined)topic.nextEvidence=assertText(data.nextEvidence,'下一步观察点');
    if(data.status!==undefined){if(!['active','archived'].includes(data.status))throw new Error('研究状态无效');topic.status=data.status;}
    if(data.assessment!==undefined){
@@ -158,7 +161,13 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
     topic.hypothesis={...topic.hypothesis,...h};
     topic.researchUpdatedAt=clock();
    }
-   return commit(topic,data.status?'主题归档状态变更':data.assessment?'保存消息状态、概率与影响评估（未提交交易）':'保存交易假设（未提交交易申请）',data.version);
+   if(data.dossier!==undefined){
+    const d=data.dossier;if(!d||Object.keys(d).some(k=>!['sections','reviewStatus','revisionReason'].includes(k))||!['draft','complete'].includes(d.reviewStatus))throw new Error('研判修改字段无效');
+    const sections=validateDossierSections(d.sections,topic.evidence),reason=assertText(d.revisionReason,'研判修订原因',1000);
+    if(d.reviewStatus==='complete'&&(researchReadiness(topic).gaps.length||sections.some(s=>!s.sourceIds.length)))throw new Error('完成研判前需补齐研究记录并为每章关联来源；未知事项须说明核查方法');
+    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1};topic.researchUpdatedAt=clock();
+   }
+   return commit(topic,data.status?'主题归档状态变更':data.dossier?'保存详细研判与人工完成状态（未提交交易）':data.assessment?'保存消息状态、概率与影响评估（未提交交易）':'保存交易假设（未提交交易申请）',data.version);
   },
   saveClaim(id,data){
    const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');

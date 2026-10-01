@@ -1,3 +1,4 @@
+import {researchReadiness} from '../shared/research-readiness.mjs';
 import {canAutoWatch} from '../shared/company-directory.mjs';
 import {claimsOf} from '../shared/claims.mjs';
 import {CLAIM_STATES} from '../shared/uncertainty.mjs';
@@ -16,7 +17,7 @@ export function assessTopic(topic,{today=new Date().toLocaleDateString('en-CA',{
  const researchAgainst=!positions.length&&coverage.against;
  const reason=invalidated.length?'持仓逻辑已失效':unreviewedAgainst?'持仓出现反向线索':weakened?'持仓逻辑减弱':researchAgainst?'研究有反证':reviewDue?'复核已到期':orders.some(o=>o.stale)?'申请研究版本变化':positions.some(p=>p.topicId===topic.id&&reviewedVersion(book,p)!==topic.version)?'持仓研究已更新':orders.length?'有待批申请':'补证与观察';
  const rank=topic.status==='archived'?9:invalidated.length?0:unreviewedAgainst?1:researchAgainst||weakened?2:reviewDue?3:reason==='申请研究版本变化'||reason==='持仓研究已更新'?4:orders.length?5:6;
- return {assessment:topic.assessment||null,assessmentLabel:CLAIM_STATES[topic.assessment?.status]||'状态待评估',version:WORKFLOW_VERSION,topicId:topic.id,topicVersion:topic.version,reviewDue,priority:rank<=4?'优先复核':'常规跟进',priorityRank:rank,priorityReason:reason,positionSymbols:positions.map(p=>p.symbol),pendingCount:orders.length,invalidatedSymbols:invalidated.map(p=>p.symbol),unreviewedAgainst,stage:topic.status==='archived'?'已归档':invalidated.length?'退出复核':researchAgainst||unreviewedAgainst?'反证复核':blockers.length?'带不确定性研判':'人工复核',action:invalidated.length?'先核对退出申请，暂停新增相关风险':researchAgainst||unreviewedAgainst?'核验反证对原假设的影响':blockers.length?'评估真伪概率、条件影响与补证路径':'核验预期差与交易条件',blockers,coverage,automaticBuy:false,
+ return {readiness:researchReadiness(topic),assessment:topic.assessment||null,assessmentLabel:CLAIM_STATES[topic.assessment?.status]||'状态待评估',version:WORKFLOW_VERSION,topicId:topic.id,topicVersion:topic.version,reviewDue,priority:rank<=4?'优先复核':'常规跟进',priorityRank:rank,priorityReason:reason,positionSymbols:positions.map(p=>p.symbol),pendingCount:orders.length,invalidatedSymbols:invalidated.map(p=>p.symbol),unreviewedAgainst,stage:topic.status==='archived'?'已归档':invalidated.length?'退出复核':researchAgainst||unreviewedAgainst?'反证复核':blockers.length?'带不确定性研判':'人工复核',action:invalidated.length?'先核对退出申请，暂停新增相关风险':researchAgainst||unreviewedAgainst?'核验反证对原假设的影响':blockers.length?'评估真伪概率、条件影响与补证路径':'核验预期差与交易条件',blockers,coverage,automaticBuy:false,
   next:topic.nextEvidence,marketExpectations:'待核验事前涨幅、估值与盈利预期',execution:'关联公司可自动关注；研究未直接生成买卖批准'};
 }
 export function syncResearchWatches(store,topics){
