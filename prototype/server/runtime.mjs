@@ -10,7 +10,8 @@ export function runtimeConfig(env=process.env) {
  const apiPort=port('SIGNAL_API_PORT',4179),frontendPort=port('SIGNAL_FRONTEND_PORT',4178);
  if(apiPort===frontendPort)throw new Error('网页与 API 必须使用不同端口');
  const filename={legacy:'workbench.sqlite',demo:'demo.sqlite',research:'research.sqlite'}[mode];
- return {mode,apiPort,frontendPort,dbPath:resolve(env.SIGNAL_DB_PATH||fileURLToPath(new URL(`../../data/runtime/${filename}`,import.meta.url)))};
+ const production=env.SIGNAL_SERVE_STATIC==='1';
+ return {mode,apiPort,frontendPort,production,dbPath:resolve(env.SIGNAL_DB_PATH||fileURLToPath(new URL(`../../data/runtime/${filename}`,import.meta.url)))};
 }
 
 export function assertDatabaseMode(store,mode,{persist=true}={}) {
