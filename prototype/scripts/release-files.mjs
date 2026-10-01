@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 export const releaseRoot=fileURLToPath(new URL('../../',import.meta.url));
 const files=['README.md','README.en.md','CHANGELOG.md','LICENSE','.nvmrc','.gitignore','.editorconfig','.gitattributes','AGENTS.md','CONTRIBUTING.md','SECURITY.md','THIRD_PARTY_NOTICES.md',
- 'docs/BRANDING.md','docs/ARCHITECTURE.md','docs/DATA-POLICY.md','docs/OPEN-SOURCE.md','docs/DECISIONS.md','docs/BACKLOG.md','docs/EVALUATION-PROTOCOL.md','docs/MAJOR-EVENT-SYSTEM.md',
+ 'docs/DEPLOYMENT.md','docs/BRANDING.md','docs/ARCHITECTURE.md','docs/DATA-POLICY.md','docs/OPEN-SOURCE.md','docs/DECISIONS.md','docs/BACKLOG.md','docs/EVALUATION-PROTOCOL.md','docs/MAJOR-EVENT-SYSTEM.md',
  'docs/assets/README.md','docs/assets/workbench.png','docs/assets/product-logic.png',
  '.github/workflows/ci.yml','.github/pull_request_template.md','.github/ISSUE_TEMPLATE/bug_report.yml','.github/ISSUE_TEMPLATE/feature_request.yml','.github/ISSUE_TEMPLATE/config.yml',
  'prototype/README.md','prototype/package.json','prototype/package-lock.json','prototype/index.html','prototype/vite.config.js','prototype/public/signal.svg','prototype/public/major-event-design.html'];

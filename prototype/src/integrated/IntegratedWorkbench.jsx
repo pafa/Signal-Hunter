@@ -47,7 +47,7 @@ export default function IntegratedWorkbench(){
  {book&&<Holdings book={book} selectedTopic={topic?.id} selectedSymbol={stock} topics={topics} watch={watch} onSelect={p=>{const t=topics.find(t=>t.id===p.topicId);if(t)choose(t);setStock(p.symbol);}} onSell={sell} onReview={p=>open({type:'review',symbol:p.symbol})} onRecords={()=>open({type:'records'})}/>}
  <footer className="i-footer"><span>v0.11 · 公司关系可纠错 · 初筛留样 · 本人批准演练</span><span>{data?.autoWatch?.deferred?.length?`关注待处理 ${data.autoWatch.deferred.length} · `:''}{busy?'保存中':data?'本机存储已连接':'连接中'} · {watch.length}/40 重点标的</span></footer>
  {notice&&<div className="m-toast" role="status">{notice}<button aria-label="关闭提示" onClick={()=>setNotice('')}>×</button></div>}
- {dialog?.type==='operations'&&data&&<Operations data={data} onClose={close}/>}
+ {dialog?.type==='operations'&&data&&<Operations data={data} onClose={close} busy={busy} onControl={(name,payload)=>mutate(`/api/operations/${name}`,'POST',payload)}/>}
  {dialog?.type==='data'&&<DataDesk onClose={()=>{close();void load();}}/>}{dialog?.type==='rules'&&<Rulebook onClose={close}/>}
  {dialog?.type==='new'&&<NewTopic onClose={close} busy={busy} onCreate={async p=>{const r=await mutate('/api/research','POST',p);if(r){setSelected(r.createdTopicId);close();}}}/>}
  {dialog?.type==='evidence'&&topic&&<AddEvidence topic={topic} onClose={close} busy={busy} mutate={mutate}/>}{dialog?.type==='company'&&topic&&<CompanyForm topic={topic} onClose={close} busy={busy} mutate={mutate} watch={watch} deferred={data?.autoWatch?.deferred||[]}/>}

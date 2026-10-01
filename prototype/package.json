@@ -16,7 +16,10 @@
     "health": "node scripts/health.mjs",
     "check": "npm test && npm run build",
     "release:prepare": "node scripts/prepare-release.mjs",
-    "release:check": "node scripts/check-release.mjs"
+    "release:check": "node scripts/check-release.mjs",
+    "start:production": "node scripts/start.mjs --production",
+    "backup": "node scripts/backup.mjs",
+    "service:config": "node scripts/service-config.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",

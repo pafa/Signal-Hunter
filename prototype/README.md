@@ -51,3 +51,7 @@ SIGNAL_FRONTEND_PORT=4278 SIGNAL_API_PORT=4279 npm start
 运行数据位于项目根目录 `data/runtime` 并被 Git 忽略。备份时先正常停止该实例，再复制数据库及其同目录文件，避免 SQLite WAL 的不完整快照。不要把数据库、`.env`、日志或含私人材料的截图放进 issue/PR。
 
 演示与研究的数据库模式标记不构成跨进程的安全隔离：有权读取本机文件的人仍可读取数据。本工具不提供账户、加密存储或公网访问控制。
+
+## 生产运行候选
+
+使用 `npm run build` 后执行 `npm run start:production`，同源页面/API 使用网页端口。任务暂停与运行记录持久保存，新增一致备份及恢复确认。完整命令、控制边界和未验收项见[本机生产运行与恢复](../docs/DEPLOYMENT.md)。

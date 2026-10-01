@@ -6,7 +6,7 @@ import {hash,instrument} from './providers.mjs';
 export function openStore(path) {
   if(path!==':memory:') mkdirSync(dirname(path),{recursive:true});
   const db=new DatabaseSync(path);
-  db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+  db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS news(id TEXT PRIMARY KEY,payload TEXT NOT NULL,hash TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,revision INTEGER NOT NULL,selected INTEGER NOT NULL DEFAULT 0,read INTEGER NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS revisions(news_id TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,received_at TEXT NOT NULL,PRIMARY KEY(news_id,version));
