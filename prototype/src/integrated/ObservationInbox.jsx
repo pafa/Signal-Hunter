@@ -1,0 +1,9 @@
+import React,{useState} from 'react';
+import {Modal,Button} from '../major/Primitives';
+import {request,time} from '../major/api';
+const states={pending:'待处理',read:'已读，待处理',completed:'已完成'};
+export default function ObservationInbox({data,busy,mutate,onClose,onTopic}){
+ const [notes,setNotes]=useState({}),[history,setHistory]=useState({}),[error,setError]=useState('');
+ const rows=data?.observationInbox?.items||[];
+ return <Modal title="观察与持仓待办" onClose={onClose}><p>到期、研究更新和新反证由后台形成待办。已读不会解除风险；回执只记录处理情况，不改变研究或执行交易。</p>{error&&<p role="alert">{error}</p>}{!rows.length&&<p>尚无条件命中。未知日期或缺失行情不会被当作命中。</p>}{rows.map(item=><section className="m-form" key={item.id}><h3>{item.title} · v{item.topicVersion}</h3><p>{item.reason} · {states[item.state]} · {time(item.createdAt)}</p><p>{item.symbols.join(' / ')||'研究观察，无关联持仓'}</p><Button onClick={()=>onTopic(item.topicId)}>查看当前研究</Button><label>处理说明<input maxLength={1000} value={notes[item.id]||''} onChange={e=>setNotes({...notes,[item.id]:e.target.value})}/></label><div className="m-form-actions">{(item.state==='completed'?['reopen']:['read','complete']).map(action=><Button key={action} disabled={busy||!notes[item.id]?.trim()} onClick={async()=>{const result=await mutate(`/api/observations/${item.id}`,'POST',{revision:item.revision,action,note:notes[item.id]});if(result){setNotes(n=>({...n,[item.id]:''}));setHistory(h=>({...h,[item.id]:null}));}}}>{{read:'标记已读',complete:'记录已处理',reopen:'重新打开'}[action]}</Button>)}<Button onClick={async()=>{try{const receipts=await request(`/api/observations/${item.id}/receipts`);setHistory(h=>({...h,[item.id]:receipts}));setError('');}catch(e){setError(e.message);}}}>查看回执</Button></div>{history[item.id]?.map(r=><p key={r.id}>{time(r.at)} · {r.action} · {r.note}</p>)}</section>)}</Modal>;
+}
