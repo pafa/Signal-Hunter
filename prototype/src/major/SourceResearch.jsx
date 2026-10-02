@@ -2,6 +2,7 @@ import React,{useEffect,useRef,useState} from 'react';
 import {Button} from './Primitives';
 import {EvidenceFields} from './ResearchForms';
 import {request,time,stanceNames} from './api';
+import ModelResearch from './ModelResearch';
 import './research-materials.css';
 
 const scopes={'extracted-text':'网页提取正文 · 完整性待核','user-supplied-text':'人工提供正文 · 完整性未保证',excerpt:'摘录 · 仅此范围'};
@@ -13,12 +14,13 @@ export default function SourceResearch({topic,busy,mutate}){
  async function save(e){e.preventDefault();const result=await mutate(`/api/research/${topic.id}/${mode==='web'?'read-source':'materials'}`,'POST',{...form,version:base});if(!active.current)return;setRefresh(n=>n+1);if(result){setBase(result.research.topics.find(t=>t.id===topic.id).version);setForm(f=>({...f,body:'',interpretation:''}));setPacket(null);}}
  async function makePacket(){setPacketBusy(true);setError('');try{const p=await request(`/api/research/${topic.id}/packet`);if(active.current)setPacket(p);}catch(e){if(active.current)setError(e.message);}finally{if(active.current)setPacketBusy(false);}}
  return <div className="research-materials">
+ <ModelResearch key={topic.id} topic={topic} busy={busy} mutate={mutate}/>
  <div className="source-intro"><div><h3>材料 → 研判 → 条件</h3><p>只读取当前候选需要的来源。保存材料后，在“概率与影响”和“交易假设”记录研判。</p></div><Button onClick={makePacket} disabled={busy||packetBusy}>{packetBusy?'整理中…':'生成研判材料包'}</Button></div>
  {error&&<p className="m-warning" role="alert">{error}</p>}
- {packet&&<details className="source-packet" open><summary>研判材料包 · 研究 v{packet.input.topicVersion} · {packet.inputHash.slice(0,12)}</summary><p className="m-note">包括事实、传闻、反证、公司关系、期限与买卖条件的分析要求。可复制给研究助手；当前没有自动调用模型。此包固定于生成时的版本。{packet.input.topicVersion!==topic.version?' 当前研究已有更新，请重新生成。':''}</p><textarea readOnly aria-label="研判材料包" rows={9} value={JSON.stringify(packet,null,2)} onFocus={e=>e.target.select()}/></details>}
+ {packet&&<details className="source-packet" open><summary>研判材料包 · 研究 v{packet.input.topicVersion} · {packet.inputHash.slice(0,12)}</summary><p className="m-note">包括事实、传闻、反证、公司关系、期限与买卖条件的分析要求。可复制给研究助手；生成材料包本身不会调用模型。此包固定于生成时的版本。{packet.input.topicVersion!==topic.version?' 当前研究已有更新，请重新生成。':''}</p><textarea readOnly aria-label="研判材料包" rows={9} value={JSON.stringify(packet,null,2)} onFocus={e=>e.target.select()}/></details>}
  <details className="source-add" open={!data?.materials.length}><summary>＋ 补充正文 / 公告材料</summary><nav className="source-modes" aria-label="材料导入方式">{[['manual','粘贴材料'],['web','读取公开网页']].map(([v,label])=><Button key={v} aria-pressed={mode===v} disabled={busy} onClick={()=>setMode(v)}>{label}</Button>)}</nav>
  <form className="m-form" onSubmit={save}>
- <p className="m-note">{mode==='web'?'读取公开 HTML 正文，最长等待 20 秒；付费、登录、PDF 或无法提取的来源可自行阅读后粘贴。提取成功不表示内容已证实。':'记录原文或摘录，保留其阅读范围；不要把研判意见混入来源正文。材料仅存本机。'}</p>
+ <p className="m-note">{mode==='web'?'读取公开 HTML 正文，最长等待 20 秒；付费、登录、PDF 或无法提取的来源可自行阅读后粘贴。提取成功不表示内容已证实。':'记录原文或摘录，保留其阅读范围；不要把研判意见混入来源正文。保存时仅存本机；主动调用 Codex 时会发送当前事件材料用于研判。'}</p>
  <label>来源链接{mode==='manual'?'（可选）':''}<input type="url" required={mode==='web'} maxLength={2000} value={form.url} onChange={e=>change('url',e.target.value)} placeholder="https://…"/></label>
  {mode==='manual'&&<><label>材料标题<input required maxLength={200} value={form.title} onChange={e=>change('title',e.target.value)}/></label><div className="m-form-row"><label>来源名称<input required maxLength={160} value={form.sourceName} onChange={e=>change('sourceName',e.target.value)}/></label><label>来源日期（未知可留空）<input type="date" value={form.publishedAt} onChange={e=>change('publishedAt',e.target.value)}/></label></div><label>阅读范围<select value={form.scope} onChange={e=>change('scope',e.target.value)}><option value="excerpt">部分摘录</option><option value="user-supplied-text">人工提供正文</option></select></label><label>材料正文<textarea required rows={7} maxLength={80000} value={form.body} onChange={e=>change('body',e.target.value)}/><small>{form.body.length.toLocaleString()} / 80,000 字符</small></label></>}
  <EvidenceFields topic={topic} form={form} setForm={setForm}/>

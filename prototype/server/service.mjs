@@ -13,12 +13,14 @@ import {createPersistentScheduler} from './persistent-scheduler.mjs';
 import {createProviderGate} from './provider-gate.mjs';
 import {dataCapabilities} from './data-capabilities.mjs';
 import {dailyHealth} from '../shared/market-clock.mjs';
-export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCooldown=60000,now=()=>Date.now(),mode='legacy',backupTask=null}={}){
+import {openModelResearchRuns} from './model-research-runs.mjs';
+export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCooldown=60000,now=()=>Date.now(),mode='legacy',backupTask=null,modelConfig=null,modelRunner}={}){
   const offline=mode==='demo';
   const denyNetwork=()=>{throw new Error('离线演示不访问外部数据；请另行启动空白研究模式');};
   const clock=()=>new Date(now()).toISOString();
   const research=openResearch(store,{clock,seed:mode!=='research',...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:{})});
   const paper=openPaper(store,research,{clock,seed:mode!=='research'});
+  const modelResearch=openModelResearchRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(modelRunner?{runner:modelRunner}:{}),now});
   const intake=openNewsIntake(store,{clock});
   const continuity=openContinuity(store,{clock});
   const observations=openObservationInbox(store,{clock});
@@ -31,7 +33,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   if(offline)initializeDemoData(store);
   const service={
     mode,
-    research,paper,observations,
+    research,paper,observations,modelResearch,
     processEvents(){try{const changed=continuity.process(research.list());if(changed||store.checks().events?.state==='error')store.status('events',{state:'ok',receivedAt:clock()});return {ok:true,changed};}catch(error){store.status('events',{state:'error',attemptedAt:clock(),error:errorText(error)});return {error:errorText(error)};}},
     eventContinuity(params={}){return {...continuity.snapshot({...params,positions:paper.snapshot().positions,watchlist:store.watchlist()}),health:store.checks().events||{state:'pending'}};},
     eventDetail(id){return continuity.detail(id);},
@@ -47,7 +49,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       catch(error){store.db.exec('ROLLBACK');throw error;}
     },
     runOperation(name,input=null){if(offline&&!['backup','observations'].includes(name))denyNetwork();active(name);return scheduler.run(name,{force:true,input});},
-    close(){return scheduler.stop();},
+    close(){return Promise.all([scheduler.stop(),modelResearch.close()]);},
     syncWatches(){autoWatch=syncResearchWatches(store,research.list());return autoWatch;},
     snapshot(){const topics=research.list(),book=paper.snapshot();const queue=continuity.queue({positions:book.positions,watchlist:store.watchlist()}),priorities=new Map(queue.map((n,i)=>[n.id,{priority:n.priority,rank:i}])),researchView=research.snapshot();researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));return {observationInbox:observations.snapshot(),eventContinuity:{...continuity.summary(),health:store.checks().events||{state:'pending'}},runtime:{mode,offline},paper:book,workflow:topics.map(t=>assessTopic(t,{book})),operations:scheduler.snapshot(),operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,clock(),{offline}),serviceHealth:service.health(),newsIntake:intake.snapshot(),autoWatch,settings:store.getSettings(),news:store.news(),watchlist:store.watchlist().map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks:store.checks(),serverTime:clock(),newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:researchView};},
     async refreshDaily(symbol,force=false,context){

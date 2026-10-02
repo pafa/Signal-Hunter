@@ -68,6 +68,14 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   newsItem(id){const news=store.newsById(id);if(!news)throw new Error('新闻不存在');return {...news,triage:classifyHeadline(news)};},
   materialList(id){return materials.list(get(id));},
   packet(id){return materials.packet(withAvailability(get(id)));},
+  adoptModelDraft(id,data,candidate,beforeWrite=()=>{}){
+   const topic=get(id),packet=materials.packet(withAvailability(topic));
+   if(data.version!==topic.version||candidate?.trace?.inputHash!==packet.inputHash||candidate?.trace?.topicId!==id||candidate?.trace?.topicVersion!==topic.version||candidate?.status!=='candidate')throw new Error('模型候选与当前研究不匹配，请重新生成');
+   const sections=validateDossierSections(candidate.sections,topic.evidence);
+   topic.dossier={sections,reviewStatus:'draft',revisionReason:'本人采纳 Codex 候选为待复核草稿',preparedBy:'Codex 模型候选 · 本人采纳，尚待复核',preparedAt:clock(),basedOnResearchVersion:topic.version+1,sourceModelRun:{id:data.runId,...candidate.trace},missingEvidence:candidate.missingEvidence};
+   topic.researchUpdatedAt=clock();
+   return commit(topic,'采纳模型研判草稿：未标记完成、未提交交易',data.version,beforeWrite);
+  },
   related(id){
    const topic=get(id),topics=list();
    const links=(topic.relatedEvents||[]).map(link=>({...link,title:get(link.topicId).title,currentVersion:get(link.topicId).version}));
@@ -165,7 +173,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
     const d=data.dossier;if(!d||Object.keys(d).some(k=>!['sections','reviewStatus','revisionReason'].includes(k))||!['draft','complete'].includes(d.reviewStatus))throw new Error('研判修改字段无效');
     const sections=validateDossierSections(d.sections,topic.evidence,{allowIncomplete:d.reviewStatus==='draft'}),reason=assertText(d.revisionReason,'研判修订原因',1000);
     if(d.reviewStatus==='complete'&&(researchReadiness(topic).gaps.length||sections.some(s=>!s.sourceIds.length)))throw new Error('完成研判前需补齐研究记录并为每章关联来源；未知事项须说明核查方法');
-    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1};topic.researchUpdatedAt=clock();
+    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1,...(topic.dossier?.sourceModelRun?{sourceModelRun:topic.dossier.sourceModelRun}:{})};topic.researchUpdatedAt=clock();
    }
    return commit(topic,data.status?'主题归档状态变更':data.dossier?'保存详细研判与人工完成状态（未提交交易）':data.assessment?'保存消息状态、概率与影响评估（未提交交易）':'保存交易假设（未提交交易申请）',data.version);
   },
