@@ -41,7 +41,7 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
  const expired=(r,expiry)=>r.status==='running'&&expiry<now()?{...r,status:'interrupted',failure:{message:'上次比较未完成；原输入保留，可重新生成'}}:r;
  const read=id=>{const row=db.prepare('SELECT * FROM semantic_runs WHERE id=?').get(id);if(!row)fail(2);return expired(JSON.parse(row.payload),row.expires_at);};
  const write=run=>db.prepare('UPDATE semantic_runs SET status=?,payload=? WHERE id=?').run(run.status,JSON.stringify(run),run.id);
- const recover=()=>{for(const row of db.prepare("SELECT * FROM semantic_runs WHERE status='running' AND expires_at<?").all(now()))write(expired(JSON.parse(row.payload),row.expires_at));};recover();
+ const recover=()=>{if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')return;for(const row of db.prepare("SELECT * FROM semantic_runs WHERE status='running' AND expires_at<?").all(now()))write(expired(JSON.parse(row.payload),row.expires_at));};recover();
  const decisions=key=>db.prepare('SELECT payload FROM semantic_decisions WHERE pair_key=? ORDER BY version DESC').all(key).map(r=>JSON.parse(r.payload));
  const stale=run=>{try{return comparisonPacket(store,Object.fromEntries(['left','right'].map(s=>[s,{id:run.packet.input[s].id,revision:run.packet.input[s].revision}]))).inputHash!==run.packet.inputHash;}catch{return true;}};
  const view=run=>{const history=decisions(run.pairKey),latest=history[0]||null;return {...run,stale:stale(run),decisionVersion:latest?.version||0,decision:latest,history,active:!!latest&&latest.runId===run.id&&latest.action==='accept'&&!stale(run)};};
@@ -50,6 +50,7 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
   list(){return {enabled:enabled&&!closed,model:config.model||null,runs:db.prepare('SELECT payload,expires_at FROM semantic_runs ORDER BY rowid DESC LIMIT 50').all().map(r=>summary(expired(JSON.parse(r.payload),r.expires_at)))};},
   get(id){return view(read(id));},
   start(input){
+   if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw new Error('恢复副本需先完成核对确认');
    if(!enabled||closed)throw new Error('当前未启用本机 Codex 研判');
    if(!config.binary||!config.model)throw new Error('请先配置本机 Codex 路径与模型');
    const packet=comparisonPacket(store,input),timeoutMs=config.timeoutMs??180000;if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>600000)throw new Error('模型超时配置无效');

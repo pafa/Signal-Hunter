@@ -24,7 +24,8 @@
     "market:verify": "node scripts/verify-market-sources.mjs",
     "research:codex": "node scripts/codex-research.mjs",
     "instance:create": "node scripts/create-instance.mjs",
-    "start:instance": "node scripts/start.mjs --instance"
+    "start:instance": "node scripts/start.mjs --instance",
+    "recovery:rehearse": "node scripts/recovery-rehearsal.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",

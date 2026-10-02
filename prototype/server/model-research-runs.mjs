@@ -10,6 +10,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
  const read=id=>{const row=db.prepare('SELECT payload,expires_at FROM model_research_runs WHERE id=?').get(id);if(!row)throw new Error('模型研判记录不存在');return expiredView(JSON.parse(row.payload),row.expires_at);};
  const write=run=>db.prepare('UPDATE model_research_runs SET status=?,payload=? WHERE id=?').run(run.status,JSON.stringify(run),run.id);
  function recover(){
+  if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')return;
   const rows=db.prepare("SELECT payload FROM model_research_runs WHERE status='running' AND expires_at<?").all(now());
   for(const row of rows){const run=JSON.parse(row.payload);write({...run,status:'interrupted',finishedAt:new Date(now()).toISOString(),failure:{code:'interrupted',message:'上次调用未完成；保留输入，可手动重新生成'}});}
  }
@@ -20,6 +21,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
   list(topicId){research.get(topicId);return db.prepare('SELECT payload,expires_at FROM model_research_runs WHERE topic_id=? ORDER BY rowid DESC LIMIT 50').all(topicId).map(row=>summary(expiredView(JSON.parse(row.payload),row.expires_at)));},
   get(topicId,id){const run=read(id);if(run.topicId!==topicId)throw new Error('模型研判不属于此研究');return run;},
   start(topicId,{version}={}){
+   if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw new Error('恢复副本需先完成核对确认');
    if(!enabled||closed)throw new Error('当前未启用本机 Codex 研判');
    if(!config.binary||!config.model)throw new Error('请先配置本机 Codex 路径与模型');
    const packet=validatePacket(research.packet(topicId));if(version!==packet.input.topicVersion)throw new Error('研究已更新，请刷新后再生成');
