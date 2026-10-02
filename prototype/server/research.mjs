@@ -21,7 +21,7 @@ const enums={stance:['supports','against','context','unverified'],family:['adopt
 const dateValid=value=>{try{return /^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(`${value}T00:00:00Z`).toISOString().slice(0,10)===value;}catch{return false;}};
 const defaultChain=()=>[{id:'fact',title:'事实变化',question:'相对原有信息改变了什么？'},{id:'mechanism',title:'影响机制',question:'变化如何传到公司的业务？'},{id:'earnings',title:'财务兑现',question:'如何改变盈利及事前预期？'}];
 
-export function openResearch(store,{seed=true,clock=()=>new Date().toISOString(),sourceReader=readPublicArticle,seeds=researchSeeds,semanticEvents=null}={}) {
+export function openResearch(store,{seed=true,clock=()=>new Date().toISOString(),sourceReader=readPublicArticle,seeds=researchSeeds,semanticEvents=null,eventClusters=null}={}) {
  const db=store.db;
  const screenings=openScreeningSamples(db,{clock}),triageKey=`${RULES_VERSION}@${screenings.rulesHash}`;
  const materials=openMaterials(db,{clock}),sourceJobs=new Set();
@@ -85,7 +85,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    const topic=get(id),topics=list();
    const links=(withSemanticStatus(topic).relatedEvents||[]).map(link=>({...link,title:get(link.topicId).title,currentVersion:get(link.topicId).version}));
    const incoming=topics.flatMap(t=>(t.relatedEvents||[]).filter(link=>link.topicId===id&&link.active).map(link=>({...link,topicId:t.id,title:t.title,currentVersion:t.version,...(link.semanticBasis?{basisStatus:semanticBasisStatus(semanticEvents,t,topic,link.semanticBasis)}:{})})));
-   return {candidates:relatedCandidates(topic,topics),semantic:semanticResearchCandidates(store,semanticEvents,topic,topics,params),links,incoming,method:'source-entity-title-retrieval-1'};
+   return {eventClusters:eventClusters?.forResearch(topic)||[],candidates:relatedCandidates(topic,topics),semantic:semanticResearchCandidates(store,semanticEvents,topic,topics,params),links,incoming,method:'source-entity-title-retrieval-1'};
   },
   linkTopic(id,data){
    const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再关联');

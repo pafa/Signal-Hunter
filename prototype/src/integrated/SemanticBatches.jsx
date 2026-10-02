@@ -1,4 +1,5 @@
 import React,{useEffect,useState} from 'react';
+import EventClusters from './EventClusters';
 import {Button} from '../major/Primitives';
 import NewsLibrary from '../major/NewsLibrary';
 import SemanticMaterialLibrary from './SemanticMaterialLibrary';
@@ -17,11 +18,13 @@ export function BatchDetail({batch,busy,onControl,onResult}){
  </section>;
 }
 export default function SemanticBatches({onBack,onResult}){
+ const [clusters,setClusters]=useState(null);
  const [inputs,setInputs]=useState([]),[picker,setPicker]=useState(''),[plan,setPlan]=useState(null),[requestId,setRequestId]=useState(''),[data,setData]=useState(null),[selected,setSelected]=useState(''),[batch,setBatch]=useState(null),[refresh,setRefresh]=useState(0),[busy,setBusy]=useState(false),[error,setError]=useState('');
  useEffect(()=>{let live=true,timer;Promise.all([request('/api/semantic-batches'),selected?request(`/api/semantic-batches/${selected}`):Promise.resolve(null)]).then(([d,b])=>{if(!live)return;setData(d);setBatch(b);setSelected(id=>id||d.batches[0]?.id||'');}).catch(e=>{if(live)setError(e.message);}).finally(()=>{if(live)timer=setTimeout(()=>setRefresh(n=>n+1),3000);});return()=>{live=false;clearTimeout(timer);};},[selected,refresh]);
  const add=r=>{if(!inputs.some(x=>x.id===r.id&&(x.kind||'news')===(r.kind||'news'))&&inputs.length<10){setInputs(v=>[...v,r]);setPlan(null);}setPicker('');};
  const act=async(fn)=>{setBusy(true);setError('');try{await fn();setRefresh(n=>n+1);}catch(e){setError(e.message);}finally{setBusy(false);}};
  const detail=batch?.id===selected?batch:null;
+ if(clusters)return <EventClusters batchId={clusters} onBack={()=>setClusters(null)} onResult={onResult}/>;
  return <section className="semantic-events" aria-label="持久比较批次"><Button onClick={onBack}>返回单次比较</Button><h3>预览全部配对，再逐项比较</h3><p>选择2至10份新闻或已保存材料。不按关键词预筛选，比较所选范围内每一对；10份输入最多45次本机Codex调用。持续扫描新新闻尚未启用。</p>{error&&<p role="alert" className="m-warning">{error}</p>}
  <div className="event-actions"><Button disabled={busy||inputs.length>=10} onClick={()=>setPicker('news')}>加入新闻</Button><Button disabled={busy||inputs.length>=10} onClick={()=>setPicker('material')}>加入已保存材料</Button></div>
  <ol>{inputs.map((r,i)=><li key={`${r.kind}:${r.id}`}>{r.title} · {semanticScopeLabels[r.contentScope]||'仅标题'} · v{r.revision} <Button disabled={busy} onClick={()=>{setInputs(v=>v.filter((_,n)=>n!==i));setPlan(null);}}>移除第 {i+1} 份</Button></li>)}</ol>
@@ -31,6 +34,7 @@ export default function SemanticBatches({onBack,onResult}){
  {data&&!data.enabled&&<p className="m-warning">当前未启用本机 Codex，无法建立调用批次。</p>}
  <p className="m-note">批次调度：{!data?'正在读取':data?.task?.paused?'已暂停':data?.task?.blocked?'运行异常，等待检查':'已启用'}。恢复调度会继续所有未暂停的批次；当前调用与单次比较、五章研判共用模型名额。</p><Button disabled={busy||!data?.enabled} onClick={()=>act(()=>request('/api/operations/semantic','POST',{action:data?.task?.paused?'resume':'pause'}))}>{data?.task?.paused?'恢复批次调度':'暂停批次调度'}</Button>{data?.task?.blocked&&<Button disabled={busy} onClick={()=>act(()=>request('/api/operations/semantic','POST',{action:'retry'}))}>检查并重试调度</Button>}
  <h3>已保存批次</h3><div className="source-news-list">{data?.batches.map(b=><button key={b.id} aria-pressed={selected===b.id} disabled={busy} onClick={()=>setSelected(b.id)}>{time(b.createdAt)} · {batchStates[b.state]} · {b.pairCount} 对</button>)}</div>{detail&&<BatchDetail batch={detail} busy={busy} onResult={onResult} onControl={(action,ordinal)=>act(async()=>{const b=await request(`/api/semantic-batches/${detail.id}/control`,'POST',{action,...(ordinal===undefined?{}:{ordinal})});setBatch(b);})}/>}
+ {detail&&<Button onClick={()=>setClusters(detail.id)}>核对事件簇</Button>}
  <small>显示最近50个批次；更早批次和全部调用仍保存在数据库中。</small>
  </section>;
 }
