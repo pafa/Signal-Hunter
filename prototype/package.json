@@ -21,7 +21,8 @@
     "backup": "node scripts/backup.mjs",
     "service:config": "node scripts/service-config.mjs",
     "storage:preview": "node scripts/storage-preview.mjs",
-    "market:verify": "node scripts/verify-market-sources.mjs"
+    "market:verify": "node scripts/verify-market-sources.mjs",
+    "research:codex": "node scripts/codex-research.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",

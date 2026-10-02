@@ -32,6 +32,8 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/news/search'){reply(200,service.research.newsPage(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/materials$/.test(url.pathname)){reply(200,service.research.materialList(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/packet$/.test(url.pathname)){reply(200,service.research.packet(url.pathname.split('/')[3]));return;}
+    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/model-runs$/.test(url.pathname)){reply(200,{...service.modelResearch.status(),runs:service.modelResearch.list(url.pathname.split('/')[3])});return;}
+    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/model-runs\/[^/]+$/.test(url.pathname)){reply(200,service.modelResearch.get(url.pathname.split('/')[3],url.pathname.split('/')[5]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/related$/.test(url.pathname)){reply(200,service.research.related(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/history$/.test(url.pathname)){reply(200,service.research.history(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/revisions$/.test(url.pathname)){reply(200,store.revisions(url.pathname.split('/')[3]));return;}
@@ -42,6 +44,16 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&/^\/api\/research\/[^/]+\/model-runs$/.test(url.pathname)){
+      if(Object.keys(data).some(k=>k!=='version'))throw new Error('模型调用仅接受研究版本；模型配置由本机服务管理');
+      reply(202,service.modelResearch.start(url.pathname.split('/')[3],data));return;
+    }
+    if(req.method==='POST'&&/^\/api\/research\/[^/]+\/model-runs\/[^/]+\/(cancel|adopt)$/.test(url.pathname)){
+      if(Object.keys(data).some(k=>k!=='version'))throw new Error('模型候选操作参数无效');
+      const parts=url.pathname.split('/');
+      if(parts[6]==='cancel'){reply(200,service.modelResearch.cancel(parts[3],parts[5]));return;}
+      service.modelResearch.adopt(parts[3],parts[5],data);reply(200,updatedSnapshot());return;
+    }
     if(req.method==='POST'&&/^\/api\/events\/[a-f0-9]{64}$/.test(url.pathname)){service.decideEvent(url.pathname.split('/')[3],data);reply(200,service.snapshot());return;}
     if(req.method==='POST'&&/^\/api\/observations\/[a-f0-9]{64}$/.test(url.pathname)){service.observations.respond(url.pathname.split('/')[3],data);reply(200,service.snapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/operations/restore-review'){if(data.confirm!==true)throw new Error('需要确认已核对恢复数据');service.acknowledgeRestore();reply(200,service.snapshot());return;}
@@ -85,7 +97,8 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const store=openStore(config.dbPath);
   try{assertDatabaseMode(store,config.mode);}catch(error){store.close();throw error;}
   const staticHandler=config.production?createStaticHandler(fileURLToPath(new URL('../dist',import.meta.url))):null;
-  const service=createService(store,{mode:config.mode,backupTask:async()=>{
+  const modelConfig=process.env.SIGNAL_CODEX_BIN&&process.env.SIGNAL_CODEX_MODEL?{binary:process.env.SIGNAL_CODEX_BIN,model:process.env.SIGNAL_CODEX_MODEL,effort:process.env.SIGNAL_CODEX_EFFORT||'high',timeoutMs:Number(process.env.SIGNAL_CODEX_TIMEOUT_MS||180000)}:null;
+  const service=createService(store,{mode:config.mode,modelConfig,backupTask:async()=>{
     const result=await createBackup(config.dbPath,resolve(dirname(config.dbPath),'backups'));
     store.status('backup',{state:'ok',receivedAt:result.createdAt,directory:result.directory,sha256:result.sha256});return {ok:true};
   }}),server=http.createServer(createHandler(store,service,{...config,staticHandler}));
