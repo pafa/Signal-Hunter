@@ -55,3 +55,5 @@ SIGNAL_FRONTEND_PORT=4278 SIGNAL_API_PORT=4279 npm start
 ## 生产运行候选
 
 使用 `npm run build` 后执行 `npm run start:production`，同源页面/API 使用网页端口。任务暂停与运行记录持久保存，新增一致备份及恢复确认。完整命令、控制边界和未验收项见[本机生产运行与恢复](../docs/DEPLOYMENT.md)。
+
+已有研究不要依赖各源码副本的默认数据路径。请按[固定已有研究入口](../docs/DEPLOYMENT.md#固定已有研究入口)登记配置，再使用 `npm run start:instance -- <配置绝对路径>` 启动。路径不存在或历史指纹不符时停止，不会创建另一个空库。配置不替代代码升级前的备份与兼容性审阅。
