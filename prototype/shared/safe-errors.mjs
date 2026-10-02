@@ -4,6 +4,8 @@ export function safeErrorText(value){
  if(!value)return '';
  if(Object.hasOwn(labels,value.kind))return labels[value.kind];
  const text=typeof value==='string'?value:typeof value.message==='string'?value.message:'';
+ // Only exact, owned labels survive a second presentation pass.
+ if(Object.values(labels).includes(text))return text;
  if(value?.name==='TimeoutError'||/timeout|timed out|超时/i.test(text))return labels.timeout;
  if(/fetch failed|ECONN|ENOTFOUND|连接失败|网络/i.test(text))return labels.network;
  if(/HTTP|status code/i.test(text))return labels.http;
