@@ -80,9 +80,9 @@ function invoke(binary,args,{cwd,env,input='',timeoutMs,signal,events=false}){
   child.stdin.end(input);
  });
 }
-export async function generateCodexDraft(packet,{binary,model,effort='high',timeoutMs=180000,signal,env=process.env}={}){
- validateConfig({binary,model,effort,timeoutMs});validatePacket(packet);
- const prompt=codexPrompt(packet),startedAt=new Date().toISOString(),trace={provider:'local-codex-cli',model,effort,promptVersion:CODEX_PROMPT_VERSION,promptHash:digest(prompt),schemaHash:digest(CODEX_DRAFT_SCHEMA),inputHash:packet.inputHash,topicId:packet.input.topicId,topicVersion:packet.input.topicVersion,startedAt};
+export async function runStructuredCodex({prompt,schema,promptVersion,inputHash,metadata={},validate},{binary,model,effort='high',timeoutMs=180000,signal,env=process.env}={}){
+ validateConfig({binary,model,effort,timeoutMs});
+ const startedAt=new Date().toISOString(),trace={...metadata,provider:'local-codex-cli',model,effort,promptVersion,promptHash:digest(prompt),schemaHash:digest(schema),inputHash,startedAt};
  let dir;
  try{
   dir=await mkdtemp(join(tmpdir(),'signal-codex-'));
@@ -90,7 +90,7 @@ export async function generateCodexDraft(packet,{binary,model,effort='high',time
   if(!/^codex-cli [0-9][A-Za-z0-9.+_-]*\s*$/.test(version.stdout))throw new CodexResearchError('unavailable');
   trace.cliVersion=version.stdout.trim();
   const schemaFile=join(dir,'schema.json'),outputFile=join(dir,'result.json');
-  await writeFile(schemaFile,JSON.stringify(CODEX_DRAFT_SCHEMA),{mode:0o600,flag:'wx'});
+  await writeFile(schemaFile,JSON.stringify(schema),{mode:0o600,flag:'wx'});
   const args=['--no-daemon','-a','never','exec','--ignore-user-config','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--cd',dir,'--model',model,'--output-schema',schemaFile,'--output-last-message',outputFile,'--json','--color','never','-c',`model_reasoning_effort="${effort}"`,'-c','web_search="disabled"','-c','project_doc_max_bytes=0'];
   for(const feature of ['shell_tool','unified_exec','apps','plugins','multi_agent','browser_use','computer_use','hooks','memories','goals','code_mode_host','image_generation','view_image','skill_search','sleep_tool'])args.push('--disable',feature);
   const result=await invoke(binary,[...args,'-'],{cwd:dir,env:environment,input:prompt,timeoutMs,signal,events:true});
@@ -99,9 +99,14 @@ export async function generateCodexDraft(packet,{binary,model,effort='high',time
   try{handle=await open(outputFile,constants.O_RDONLY|constants.O_NOFOLLOW);const stat=await handle.stat();if(!stat.isFile()||stat.size>262144)throw 0;raw=await handle.readFile('utf8');}catch{throw new CodexResearchError('output');}finally{await handle?.close();}
   trace.outputHash=digest(raw);
   let parsed;try{parsed=JSON.parse(raw);}catch{throw new CodexResearchError('output');}
-  const draft=validateCodexDraft(parsed,packet);
+  const draft=validate(parsed);
   if(signal?.aborted)throw new CodexResearchError('cancelled');
   return {status:'candidate',reviewStatus:'unreviewed',...draft,trace:{...trace,finishedAt:new Date().toISOString(),toolCallsObserved:0},rawOutput:raw};
  }catch(error){throw new CodexResearchError(error instanceof CodexResearchError?error.code:'process',{...trace,finishedAt:new Date().toISOString()});}
  finally{if(dir)await rm(dir,{recursive:true,force:true});}
+}
+
+export async function generateCodexDraft(packet,config={}){
+ validatePacket(packet);
+ return runStructuredCodex({prompt:codexPrompt(packet),schema:CODEX_DRAFT_SCHEMA,promptVersion:CODEX_PROMPT_VERSION,inputHash:packet.inputHash,metadata:{topicId:packet.input.topicId,topicVersion:packet.input.topicVersion},validate:output=>validateCodexDraft(output,packet)},config);
 }
