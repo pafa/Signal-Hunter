@@ -19,7 +19,8 @@
     "release:check": "node scripts/check-release.mjs",
     "start:production": "node scripts/start.mjs --production",
     "backup": "node scripts/backup.mjs",
-    "service:config": "node scripts/service-config.mjs"
+    "service:config": "node scripts/service-config.mjs",
+    "storage:preview": "node scripts/storage-preview.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",
