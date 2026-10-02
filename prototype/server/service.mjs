@@ -33,7 +33,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const semanticEvents=openSemanticEvents(store,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(semanticRunner?{runner:semanticRunner}:{}),now});
   const intake=openNewsIntake(store,{clock});
   const continuity=openContinuity(store,{clock});
-  const observations=openObservationInbox(store,{clock,getTopic:id=>research.get(id),offline});
+  const observations=openObservationInbox(store,{clock,getTopic:id=>research.get(id),offline,getMarketSnapshots:at=>offline?[]:Object.values(marketSimulations).map(m=>m.observationSnapshot(at))});
   let newsJob=null;const quoteJobs=new Map();let lastNewsAttempt=0;const quoteAttempts=new Map();
   const dailyJobs=new Map(),dailyAttempts=new Map();
   const active=(name,context)=>{if(restorePending())throw new Error('恢复副本需先完成核对确认');context?.assertActive?.();if(scheduler.snapshot()[name]?.paused)throw new Error('任务已暂停，请先在运行控制中恢复');};

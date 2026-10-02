@@ -1,3 +1,4 @@
+import {withMarketObservationPeaks} from './market-observations.mjs';
 import {strategyRisk,entryIssues} from './strategy-risk.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {instrument} from '../shared/securities.mjs';
@@ -20,11 +21,12 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
  db.exec(sql(`CREATE TABLE IF NOT EXISTS market_sim_book(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS market_sim_events(version INTEGER PRIMARY KEY,at TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,hash TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS market_sim_commands(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,version INTEGER NOT NULL);
- CREATE TABLE IF NOT EXISTS market_sim_liquidity(key TEXT PRIMARY KEY,payload TEXT NOT NULL);`));
+ CREATE TABLE IF NOT EXISTS market_sim_liquidity(key TEXT PRIMARY KEY,payload TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS market_observation_peaks(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`));
  const read=()=>{const row=query('SELECT payload FROM market_sim_book WHERE id=1').get();return row?JSON.parse(row.payload):null;};
  const inputs=()=>{try{const x=getInputs();if(!x||typeof x!=='object'||!x.quotes||typeof x.quotes!=='object'||Array.isArray(x.quotes))throw 0;return structuredClone(x);}catch{return {quotes:{},reason:'执行适配器不可用；不能使用场景价替代'};}};
  const preview=(book,order,market,at)=>{
-  const review=assessOrder(book,order,market.quotes,at),topic=research.get(order.topicId),risk=strategyRisk(book,market.quotes,at);
+  const riskBook=withMarketObservationPeaks(db,book,accountId),review=assessOrder(book,order,market.quotes,at),topic=research.get(order.topicId),risk=strategyRisk(riskBook,market.quotes,at);
   review.reasons.push(...entryIssues(book,order,market.quotes[order.symbol]));
   if(order.side==='buy'){
    if(book.riskPaused||risk.alerts.some(a=>a.kind==='pool-stop'))review.reasons.push('策略池达到回撤暂停线；暂停新买入，需本人复核恢复');
@@ -33,7 +35,7 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
   review.eligible=review.reasons.length===0;review.strategyRisk=risk;
   if(topic.status==='archived'||topic.version!==order.topicVersion){review.eligible=false;review.reasons.push('研究版本已变化或归档');}
   const relevant=[...new Set([order.symbol,...book.lots.map(l=>l.symbol),...book.orders.filter(working).map(o=>o.symbol)])].sort();
-  const evidence={bookVersion:book.version,orderId:order.id,topicVersion:topic.version,config:book.config,profile:book.profile,quotes:Object.fromEntries(relevant.map(s=>[s,market.quotes[s]||null]))};
+  const evidence={bookVersion:book.version,orderId:order.id,topicVersion:topic.version,config:book.config,profile:book.profile,riskBasis:{highWaterCents:riskBook.highWaterCents,lots:riskBook.lots.map(l=>({id:l.id,peakPrice:l.peakPrice}))},quotes:Object.fromEntries(relevant.map(s=>[s,market.quotes[s]||null]))};
   return {...review,fingerprint:hash(evidence),evidence,checkedAt:at,sourceNote:market.reason||null};
  };
  function persist(book,kind,detail,at,request=null){
@@ -59,7 +61,11 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
   return {...api.snapshot(),appliedVersion:version};
  }
  const api={
-  snapshot(){const b=read(),market=inputs(),at=clock();if(!b)return {accountId,profile,enabled,configured:false,version:0,sourceNote:market.reason||null};const value=valuation(b,market.quotes,at);return {accountId,profile,enabled,configured:true,...b,strategyRisk:strategyRisk(b,market.quotes,at),liquidity:undefined,...value,baseCurrency:'USD',sourceNote:market.reason||null,performanceVerified:false};},
+  snapshot(){const b=read(),market=inputs(),at=clock();if(!b)return {accountId,profile,enabled,configured:false,version:0,sourceNote:market.reason||null};const value=valuation(b,market.quotes,at);return {accountId,profile,enabled,configured:true,...b,strategyRisk:strategyRisk(withMarketObservationPeaks(db,b,accountId),market.quotes,at),liquidity:undefined,...value,baseCurrency:'USD',sourceNote:market.reason||null,performanceVerified:false};},
+  observationSnapshot(at=clock()){
+   const book=read();if(!book)return {accountId,book:null};
+   const market=inputs();return {accountId,book,at,quotes:market.quotes,sourceNote:market.reason||null,valuation:valuation(book,market.quotes,at),risk:strategyRisk(withMarketObservationPeaks(db,book,accountId),market.quotes,at)};
+  },
   history(){return query('SELECT version,at,kind,hash FROM market_sim_events ORDER BY version DESC LIMIT 100').all();},
   event(version){const row=query('SELECT payload,hash FROM market_sim_events WHERE version=?').get(version);if(!row)fail(7);return {...JSON.parse(row.payload),hash:row.hash};},
   initialize(data){return command('initialize',data,(book,at)=>{
@@ -93,14 +99,14 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
    }else{if(data.action==='reject'?o.status!=='pending':!active(o))fail(8);o.status=data.action==='reject'?'rejected':'cancelled';}
    o.decisionNote=data.note.trim();return {book:b,detail:{orderId:id,action:data.action,note:data.note}};
   });},
-  resume(data){return command('resume-risk',data,(b,at)=>{if(!b)fail(0);if(!text(data.note)||!b.riskPaused)fail(8);const risk=strategyRisk(b,inputs().quotes,at);if(risk.navCents===null||risk.alerts.some(a=>a.kind==='pool-stop'))fail(10);b.riskPaused=false;return {book:b,detail:{note:data.note,risk}};});},
+  resume(data){return command('resume-risk',data,(b,at)=>{if(!b)fail(0);if(!text(data.note)||!b.riskPaused)fail(8);const risk=strategyRisk(withMarketObservationPeaks(db,b,accountId),inputs().quotes,at);if(risk.navCents===null||risk.alerts.some(a=>a.kind==='pool-stop'))fail(10);b.riskPaused=false;return {book:b,detail:{note:data.note,risk}};});},
   process(){
    if(!enabled)return api.snapshot();if(query("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')fail(15);const market=inputs(),at=clock();let changed=false;const updates=[];
    db.exec('BEGIN IMMEDIATE');try{
     const b=read();if(!b){db.exec('COMMIT');return api.snapshot();}
     for(const settlement of b.unsettled.filter(x=>Date.parse(x.at)<=Date.parse(at))){b.cashCents=sum([b.cashCents,settlement.amountCents]);updates.push({kind:'cash-settlement',...settlement});changed=true;}
     b.unsettled=b.unsettled.filter(x=>Date.parse(x.at)>Date.parse(at));
-    const risk=strategyRisk(b,market.quotes,at);
+    const risk=strategyRisk(withMarketObservationPeaks(db,b,accountId),market.quotes,at);
     if(risk.peakCents>b.highWaterCents){b.highWaterCents=risk.peakCents;changed=true;}
     for(const lot of b.lots){const q=market.quotes[lot.symbol];if(!quoteIssues(lot.symbol,q,b.config,at).length&&decimal(q.mark)>decimal(lot.peakPrice||lot.entryPrice||q.mark)){lot.peakPrice=String(q.mark);changed=true;}}
     if(hash(risk.alerts)!==hash(b.riskObservations)){b.riskObservations=risk.alerts;updates.push({kind:'risk-observation',...risk});changed=true;}
