@@ -1,10 +1,10 @@
 import {marketClock,localParts,dailyHealth,sessionFor} from '../shared/market-clock.mjs';
+import {providerMinuteTimestamp} from '../shared/provider-time.mjs';
 export function marketFailure(error){
  const text=String(error?.message??error),kind=error?.kind||(error?.name==='TimeoutError'||/超时|timeout/i.test(text)?'timeout':/fetch failed|ENOTFOUND|ECONN|连接失败/i.test(text)?'network':/HTTP \d+/.test(text)?'http':error instanceof SyntaxError?'format':/没有|未找到/.test(text)?'no-data':'invalid-data');
  return {kind,message:text.slice(0,160),...(error?.attempts?{attempts:error.attempts}:{})};
 }
 export async function marketJson(read){const text=await read();if(!text.trim()){const e=new Error('行情来源返回空响应');e.kind='empty-response';throw e;}try{return JSON.parse(text);}catch{const e=new Error('行情来源JSON格式异常');e.kind='format';throw e;}}
-function utcMinute(value){if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(value))return null;const iso=value.replace(' ','T')+':00.000Z',t=Date.parse(iso);return Number.isFinite(t)&&new Date(t).toISOString()===iso?t:null;}
 function minuteFreshness(symbol,stamp,clock,time){
  if(stamp>time+60000)return {state:'future',expectedDate:null};
  if(!clock.known)return {state:'calendar-unknown',expectedDate:null};
@@ -25,7 +25,7 @@ export function diagnoseMarketData(symbol,quote,check,at,{interval='1m',offline=
  let dataState=!validPoints.length?'missing':'unverified',dataAt=null,dataAgeSeconds=null,expectedMinuteDate=null;
  if(validPoints.length&&interval==='1d'){const h=dailyHealth(symbol,quote,at);dataAt=h.lastDate;dataState=h.status;}
  if(validPoints.length&&interval==='1m'){
-  const stamp=quote.providerTimezone==='UTC'?utcMinute(quote.providerTime):null;
+  const stamp=providerMinuteTimestamp(quote.providerTime,quote.providerTimezone);
   if(stamp!==null){dataAt=new Date(stamp).toISOString();dataAgeSeconds=(time-stamp)/1000;const freshness=minuteFreshness(symbol,stamp,clock,time);dataState=freshness.state;expectedMinuteDate=freshness.expectedDate;
   }else dataState='time-unverified';
  }

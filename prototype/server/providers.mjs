@@ -1,4 +1,5 @@
 import {marketJson,marketFailure} from './market-diagnostics.mjs';
+import {validProviderMinute} from '../shared/provider-time.mjs';
 import {instrument} from '../shared/securities.mjs';
 export {instrument} from '../shared/securities.mjs';
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
@@ -52,7 +53,7 @@ export function parseMinutes(payload, spec) {
   const points=[];
   for (const row of data.trends||[]) {
     const [time,,close]=String(row).split(',');const price=Number(close);
-    if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(time) || !Number.isFinite(price) || price<=0) continue;
+    if (!validProviderMinute(time) || !Number.isFinite(price) || price<=0) continue;
     points.push({time,close:price});
   }
   if (!points.length) throw new Error('行情没有有效分钟数据');
