@@ -80,9 +80,14 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       if(dailyJobs.has(symbol))return dailyJobs.get(symbol);
       const cached=store.daily(symbol),at=now(),last=dailyAttempts.get(symbol)||(store.checks()['daily:'+symbol]?.attemptedAt?{at:Date.parse(store.checks()['daily:'+symbol].attemptedAt)}:null),health=dailyHealth(symbol,cached,new Date(at).toISOString());
       const age=last?at-last.at:Infinity,newSession=!!health.expectedDate&&health.expectedDate!==last?.expectedDate;
-      if(age<60000||(!force&&(!newSession&&age<900000||cached&&health.status==='aligned'&&at-Date.parse(cached.receivedAt)<21600000)))return {skipped:'cooldown'};
+      if(age<60000||(!force&&(!newSession&&age<900000||cached&&health.status==='aligned'&&store.checks()['daily:'+symbol]?.state!=='error'&&at-Date.parse(cached.receivedAt)<21600000)))return {skipped:'cooldown'};
       dailyAttempts.set(symbol,{at,expectedDate:health.expectedDate});const attemptedAt=new Date(at).toISOString();
-      const job=(async()=>{try{const quote=await fetchDaily(symbol,scopedFetcher(context));active('daily',context);store.saveDaily(quote);store.status('daily:'+symbol,{state:'ok',attemptedAt,receivedAt:quote.receivedAt,noNewBar:!!cached&&cached.lastDate===quote.lastDate});return {ok:true};}
+      const job=(async()=>{try{const quote=await fetchDaily(symbol,scopedFetcher(context),clock);active('daily',context);
+        if(cached?.lastDate&&quote.lastDate<cached.lastDate){
+          store.saveDaily(quote,{activate:false});
+          const error=new Error(`来源有效日线退至 ${quote.lastDate}；已留档并保留 ${cached.lastDate} 缓存`);error.kind='daily-regression';throw error;
+        }
+        store.saveDaily(quote);store.status('daily:'+symbol,{state:'ok',attemptedAt,receivedAt:quote.receivedAt,noNewBar:!!cached&&cached.lastDate===quote.lastDate});return {ok:true};}
       catch(error){active('daily',context);store.status('daily:'+symbol,{state:'error',attemptedAt,error:errorText(error),failure:marketFailure(error)});return {error:errorText(error)};}finally{dailyJobs.delete(symbol);}})();
       dailyJobs.set(symbol,job);return job;
     },
