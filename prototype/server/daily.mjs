@@ -1,3 +1,4 @@
+import {marketJson} from './market-diagnostics.mjs';
 import {dailyEligibility,CALENDAR_VERSION} from '../shared/market-clock.mjs';
 import {instrument,yahooSymbol,fetchText} from './providers.mjs';
 
@@ -10,7 +11,7 @@ export function parseDaily(payload,symbol,receivedAt=new Date().toISOString()){
  const timezone=spec.marketTimezone,today=marketDate(receivedAt,timezone),closes=r.indicators?.quote?.[0]?.close||[];
  const points=[];let incomplete=0;
  for(const [i,t]of(r.timestamp||[]).entries()){
-  if(!Number.isFinite(t)||t<=0)continue;
+  if(!Number.isInteger(t)||t<=0||t>4102444800)continue;
   const at=new Date(t*1000).toISOString(),date=marketDate(at,timezone);
   // A local display buffer is explicit; this does not assert exchange tradability.
   if(!dailyEligibility(spec.symbol,date,receivedAt).complete){incomplete++;continue;}
@@ -23,5 +24,5 @@ export function parseDaily(payload,symbol,receivedAt=new Date().toISOString()){
 }
 export async function fetchDaily(symbol,fetcher=fetch){
  const spec=instrument(symbol),url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooSymbol(spec))+'?interval=1d&range=6mo&events=div%2Csplits';
- return parseDaily(JSON.parse(await fetchText(url,fetcher)),symbol);
+ return parseDaily(await marketJson(()=>fetchText(url,fetcher)),symbol);
 }

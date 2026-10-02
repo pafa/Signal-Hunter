@@ -1,3 +1,4 @@
+import {marketFailure} from './market-diagnostics.mjs';
 import {openObservationInbox} from './observation-inbox.mjs';
 import {demoResearchSeeds,initializeDemoData} from './demo.mjs';
 import {fetchMinutes} from './providers.mjs';
@@ -57,8 +58,8 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       const age=last?at-last.at:Infinity,newSession=!!health.expectedDate&&health.expectedDate!==last?.expectedDate;
       if(age<60000||(!force&&(!newSession&&age<900000||cached&&health.status==='aligned'&&at-Date.parse(cached.receivedAt)<21600000)))return {skipped:'cooldown'};
       dailyAttempts.set(symbol,{at,expectedDate:health.expectedDate});const attemptedAt=new Date(at).toISOString();
-      const job=(async()=>{try{const quote=await fetchDaily(symbol,scopedFetcher(context));active('daily',context);store.saveDaily(quote);store.status('daily:'+symbol,{state:'ok',attemptedAt,receivedAt:quote.receivedAt});return {ok:true};}
-      catch(error){active('daily',context);store.status('daily:'+symbol,{state:'error',attemptedAt,error:errorText(error)});return {error:errorText(error)};}finally{dailyJobs.delete(symbol);}})();
+      const job=(async()=>{try{const quote=await fetchDaily(symbol,scopedFetcher(context));active('daily',context);store.saveDaily(quote);store.status('daily:'+symbol,{state:'ok',attemptedAt,receivedAt:quote.receivedAt,noNewBar:!!cached&&cached.lastDate===quote.lastDate});return {ok:true};}
+      catch(error){active('daily',context);store.status('daily:'+symbol,{state:'error',attemptedAt,error:errorText(error),failure:marketFailure(error)});return {error:errorText(error)};}finally{dailyJobs.delete(symbol);}})();
       dailyJobs.set(symbol,job);return job;
     },
     async refreshNews(context){
@@ -84,8 +85,8 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       if(now()-Math.max(quoteAttempts.get(symbol)||0,Date.parse(store.checks()[symbol]?.attemptedAt)||0)<quoteCooldown)return {skipped:'cooldown'};
       quoteAttempts.set(symbol,now());const attemptedAt=clock();
       const job=(async()=>{try{
-        const quote=await fetchMinutes(symbol,scopedFetcher(context));active('minutes',context);store.saveQuote(quote,clock());store.status(symbol,{state:'ok',attemptedAt,receivedAt:clock()});return {ok:true};
-      }catch(error){active('minutes',context);store.status(symbol,{state:'error',attemptedAt,error:errorText(error)});return {error:errorText(error)};}finally{quoteJobs.delete(symbol);}})();quoteJobs.set(symbol,job);return job;
+        const previous=store.quote(symbol),quote=await fetchMinutes(symbol,scopedFetcher(context));const noNewBar=!!previous&&previous.provider===quote.provider&&previous.providerTime===quote.providerTime;active('minutes',context);store.saveQuote(quote,clock());store.status(symbol,{state:'ok',attemptedAt,receivedAt:clock(),noNewBar});return {ok:true};
+      }catch(error){active('minutes',context);store.status(symbol,{state:'error',attemptedAt,error:errorText(error),failure:marketFailure(error)});return {error:errorText(error)};}finally{quoteJobs.delete(symbol);}})();quoteJobs.set(symbol,job);return job;
     },
     tick(){research.process();service.processEvents();service.syncWatches();paper.expire();return scheduler.runAll();},
   };

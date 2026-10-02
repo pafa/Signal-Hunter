@@ -1,3 +1,4 @@
+import {marketJson,marketFailure} from './market-diagnostics.mjs';
 import {instrument} from '../shared/securities.mjs';
 export {instrument} from '../shared/securities.mjs';
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
@@ -70,7 +71,7 @@ export async function fetchText(url, fetcher=fetch) {
 async function fetchEastmoneyMinutes(symbol, fetcher=fetch) {
   const spec=instrument(symbol);
   for (const id of spec.ids) {
-    const payload=JSON.parse(await fetchText(minuteUrl(id),fetcher));
+    const payload=await marketJson(()=>fetchText(minuteUrl(id),fetcher));
     if (!payload.data) continue;
     return parseMinutes(payload,spec);
   }
@@ -82,8 +83,9 @@ export function yahooSymbol(spec){return spec.symbol.endsWith('.US')?spec.code:s
 export function parseYahooMinutes(payload,spec){
  const data=payload?.chart?.result?.[0],meta=data?.meta;
  if(!meta||meta.symbol?.toUpperCase()!==yahooSymbol(spec)||meta.currency!==spec.currency)throw new Error('备用行情证券或币种不匹配');
+ if(meta.exchangeTimezoneName&&meta.exchangeTimezoneName!==spec.marketTimezone)throw new Error('备用行情交易所时区不匹配');
  const closes=data.indicators?.quote?.[0]?.close||[],points=[];
- for(const [i,t] of (data.timestamp||[]).entries())if(Number.isFinite(t)&&t>0&&Number.isFinite(closes[i])&&closes[i]>0)points.push({time:new Date(t*1000).toISOString().slice(0,16).replace('T',' '),close:closes[i]});
+ for(const [i,t] of (data.timestamp||[]).entries())if(Number.isInteger(t)&&t>0&&t<=4102444800&&Number.isFinite(closes[i])&&closes[i]>0)points.push({time:new Date(t*1000).toISOString().slice(0,16).replace('T',' '),close:closes[i]});
  const unique=[...new Map(points.map(p=>[p.time,p])).values()].sort((a,b)=>a.time.localeCompare(b.time));
  if(!unique.length)throw new Error('备用行情没有有效分钟数据');
  return {symbol:spec.symbol,name:meta.longName||meta.shortName||spec.code,market:spec.market,currency:spec.currency,marketTimezone:meta.exchangeTimezoneName||spec.marketTimezone,providerTimezone:'UTC',provider:'yahoo-public-chart',interval:'1m',deliveryDelay:'unverified',adjustment:'none',lastBarMayBeIncomplete:true,points:unique,providerTime:unique.at(-1).time,last:unique.at(-1).close};
@@ -91,6 +93,6 @@ export function parseYahooMinutes(payload,spec){
 export async function fetchMinutes(symbol,fetcher=fetch){
  try{return await fetchEastmoneyMinutes(symbol,fetcher);}catch(primaryError){
   const spec=instrument(symbol),url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooSymbol(spec))+'?interval=1m&range=1d';
-  try{return {...parseYahooMinutes(JSON.parse(await fetchText(url,fetcher)),spec),fallbackReason:primaryError.message.slice(0,120)};}catch(backupError){throw new Error('主源与备用源均失败：'+backupError.message);}
+  try{return {...parseYahooMinutes(await marketJson(()=>fetchText(url,fetcher)),spec),fallbackReason:primaryError.message.slice(0,120)};}catch(backupError){const error=new Error('主源与备用源均失败：'+backupError.message);error.kind='all-sources-failed';error.attempts=[{source:'eastmoney-public',...marketFailure(primaryError)},{source:'yahoo-public-chart',...marketFailure(backupError)}];throw error;}
  }
 }
