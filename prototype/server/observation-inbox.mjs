@@ -1,3 +1,4 @@
+import {openObservationRules} from './observation-rules.mjs';
 import {hash} from './providers.mjs';
 import {claimsOf} from '../shared/claims.mjs';
 import {evidenceStamp,pendingCounterevidence,reviewedVersion,positionReference} from '../shared/review-state.mjs';
@@ -17,14 +18,16 @@ export function observationHits(topics,book,today){
  }
  return hits;
 }
-export function openObservationInbox(store,{clock=()=>new Date().toISOString()}={}){
+export function openObservationInbox(store,{clock=()=>new Date().toISOString(),getTopic,offline=false}={}){
  const db=store.db;
  db.exec(`CREATE TABLE IF NOT EXISTS observation_todos(id TEXT PRIMARY KEY,payload TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS observation_receipts(id INTEGER PRIMARY KEY,todo_id TEXT NOT NULL,revision INTEGER NOT NULL,action TEXT NOT NULL,note TEXT NOT NULL,at TEXT NOT NULL);`);
+ const rules=openObservationRules(store,{clock,getTopic,offline});
  const transaction=fn=>{db.exec('BEGIN IMMEDIATE');try{const r=fn();db.exec('COMMIT');return r;}catch(e){db.exec('ROLLBACK');throw e;}};
  return {
-  process(topics,book){const today=new Date(clock()).toLocaleDateString('en-CA',{timeZone:'Asia/Shanghai'}),hits=observationHits(topics,book,today);return transaction(()=>{let added=0;for(const hit of hits)added+=Number(db.prepare("INSERT OR IGNORE INTO observation_todos VALUES(?,?,'pending',1,?,?)").run(hit.id,JSON.stringify(hit),clock(),clock()).changes);return {ok:true,added};});},
-  snapshot(){const items=db.prepare('SELECT * FROM observation_todos ORDER BY created_at DESC,id').all().map(r=>({...JSON.parse(r.payload),state:r.state,revision:r.revision,createdAt:r.created_at,updatedAt:r.updated_at}));return {items,pending:items.filter(i=>i.state!=='completed').length,policy:'已读仍待处理；回执不改变研究、风险或订单'};},
+  rules,
+  process(topics,book){const today=new Date(clock()).toLocaleDateString('en-CA',{timeZone:'Asia/Shanghai'}),hits=observationHits(topics,book,today);return transaction(()=>{let added=0;for(const hit of [...hits,...rules.evaluate(topics,book)])added+=Number(db.prepare("INSERT OR IGNORE INTO observation_todos VALUES(?,?,'pending',1,?,?)").run(hit.id,JSON.stringify(hit),clock(),clock()).changes);return {ok:true,added};});},
+  snapshot(){const items=db.prepare('SELECT * FROM observation_todos ORDER BY created_at DESC,id').all().map(r=>({...JSON.parse(r.payload),state:r.state,revision:r.revision,createdAt:r.created_at,updatedAt:r.updated_at}));return {items,rules:rules.list(),pending:items.filter(i=>i.state!=='completed').length,policy:'已读仍待处理；回执不改变研究、风险或订单'};},
   receipts(id){return db.prepare('SELECT * FROM observation_receipts WHERE todo_id=? ORDER BY id').all(id);},
   respond(id,{revision,action,note}){if(!['read','complete','reopen'].includes(action)||typeof note!=='string'||!note.trim()||note.length>1000)throw new Error('回执动作或说明无效');return transaction(()=>{const old=db.prepare('SELECT * FROM observation_todos WHERE id=?').get(id);if(!old||old.revision!==revision)throw new Error('待办已更新，请重新打开');if(old.state==='completed'&&action!=='reopen')throw new Error('已完成待办需先重新打开');const state={read:'read',complete:'completed',reopen:'pending'}[action];db.prepare('UPDATE observation_todos SET state=?,revision=revision+1,updated_at=? WHERE id=?').run(state,clock(),id);db.prepare('INSERT INTO observation_receipts(todo_id,revision,action,note,at) VALUES(?,?,?,?,?)').run(id,revision,action,note.trim(),clock());return {id,state,revision:revision+1};});}
  };
