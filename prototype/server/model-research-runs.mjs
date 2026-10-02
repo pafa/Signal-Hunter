@@ -42,6 +42,9 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
     const failure=error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型调用失败；原研究保留，可检查配置后重试'};
     write({...run,status:failure.code==='cancelled'?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure});
    }).finally(()=>jobs.delete(run.id));
+   // HTTP starts return before completion. Observe storage failures even when nobody calls wait().
+   // The initial input record remains available for interrupted-run recovery; do not log raw SQL.
+   void done.catch(()=>console.error('模型研判记录保存失败；候选未确认落库，请检查本机存储。'));
    jobs.set(run.id,{controller,done});return summary(run);
   },
   async wait(id){await jobs.get(id)?.done;return read(id);},

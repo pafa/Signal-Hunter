@@ -20,7 +20,7 @@ test('model candidate requires explicit adoption, preserves input and paper book
  const f=setup();try{
   const original=f.research.get(f.topic.id),book=f.paper.snapshot(),packet=f.research.packet(f.topic.id);
   const start=f.runs.start(f.topic.id,{version:1});assert.equal(start.status,'running');
-  const run=await f.runs.wait(start.id);assert.equal(run.status,'candidate');assert.deepEqual(run.packet,packet);assert.deepEqual(f.research.get(f.topic.id),original);assert.deepEqual(f.paper.snapshot(),book);
+  const run=await f.runs.wait(start.id);assert.equal(run.status,'candidate');assert.deepEqual(run.packet.input,packet.input);assert.equal(run.packet.inputHash,packet.inputHash);assert.ok(Number.isFinite(Date.parse(run.packet.generatedAt)));assert.deepEqual(f.research.get(f.topic.id),original);assert.deepEqual(f.paper.snapshot(),book);
   const adopted=f.runs.adopt(f.topic.id,start.id,{version:1});assert.equal(adopted.version,2);assert.equal(adopted.dossier.reviewStatus,'draft');assert.equal(adopted.dossier.sourceModelRun.id,start.id);assert.match(adopted.dossier.preparedBy,/Codex/);assert.equal(f.runs.get(f.topic.id,start.id).acceptedVersion,2);
   assert.throws(()=>f.runs.adopt(f.topic.id,start.id,{version:2}),/已经处理/);
   const edited=f.research.update(f.topic.id,{version:2,dossier:{sections:adopted.dossier.sections,reviewStatus:'draft',revisionReason:'本人核对后修改'}});assert.equal(edited.dossier.sourceModelRun.id,start.id);
@@ -79,4 +79,12 @@ test('HTTP exposes read-only status, async generation and explicit adoption; dem
 });
 test('model workflow errors preserve actionable owned text without permitting appended details',()=>{
  const message='研究或材料已变化；此候选保留在历史中，请重新生成';assert.equal(safeErrorText(new Error(message)),message);assert.equal(safeErrorText(safeErrorText(message)),message);assert.doesNotMatch(safeErrorText(message+' secret-provider-details'),/secret-provider/);
+});
+test('background storage failure is observed, retains initial input and never changes the research',async()=>{
+ const f=setup(),messages=[],original=console.error;console.error=value=>messages.push(String(value));
+ try{
+  f.store.db.exec("CREATE TRIGGER fail_run_save BEFORE UPDATE ON model_research_runs BEGIN SELECT RAISE(ABORT,'private SQL diagnostic'); END");
+  const started=f.runs.start(f.topic.id,{version:1});await assert.rejects(f.runs.wait(started.id),/private SQL diagnostic/);
+  await Promise.resolve();assert.deepEqual(messages,['模型研判记录保存失败；候选未确认落库，请检查本机存储。']);assert.equal(f.research.get(f.topic.id).version,1);assert.equal(f.runs.get(f.topic.id,started.id).packet.input.topicVersion,1);assert.equal(f.runs.get(f.topic.id,started.id).candidate,undefined);
+ }finally{console.error=original;await f.close();}
 });
