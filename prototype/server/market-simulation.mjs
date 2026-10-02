@@ -62,6 +62,7 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
  }
  const api={
   snapshot(){const b=read(),market=inputs(),at=clock();if(!b)return {accountId,profile,enabled,configured:false,version:0,sourceNote:market.reason||null};const value=valuation(b,market.quotes,at);return {accountId,profile,enabled,configured:true,...b,strategyRisk:strategyRisk(withMarketObservationPeaks(db,b,accountId),market.quotes,at),liquidity:undefined,...value,baseCurrency:'USD',sourceNote:market.reason||null,performanceVerified:false};},
+  executionState(){const b=read();return {accountId,configured:!!b,version:b?.version||0,oldestApproval:b?.orders.filter(working).map(o=>o.approvedAt).sort()[0]||null};},
   observationSnapshot(at=clock()){
    const book=read();if(!book)return {accountId,book:null};
    const market=inputs();return {accountId,book,at,quotes:market.quotes,sourceNote:market.reason||null,valuation:valuation(book,market.quotes,at),risk:strategyRisk(withMarketObservationPeaks(db,book,accountId),market.quotes,at)};
@@ -100,8 +101,9 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
    o.decisionNote=data.note.trim();return {book:b,detail:{orderId:id,action:data.action,note:data.note}};
   });},
   resume(data){return command('resume-risk',data,(b,at)=>{if(!b)fail(0);if(!text(data.note)||!b.riskPaused)fail(8);const risk=strategyRisk(withMarketObservationPeaks(db,b,accountId),inputs().quotes,at);if(risk.navCents===null||risk.alerts.some(a=>a.kind==='pool-stop'))fail(10);b.riskPaused=false;return {book:b,detail:{note:data.note,risk}};});},
-  process(){
-   if(!enabled)return api.snapshot();if(query("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')fail(15);const market=inputs(),at=clock();let changed=false;const updates=[];
+  process({assertActive=()=>{},runToken=null}={}){
+   const guard=()=>{assertActive();if(query("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')fail(15);};
+   guard();if(!enabled)return api.snapshot();const market=inputs(),at=clock();guard();let changed=false;const updates=[];
    db.exec('BEGIN IMMEDIATE');try{
     const b=read();if(!b){db.exec('COMMIT');return api.snapshot();}
     for(const settlement of b.unsettled.filter(x=>Date.parse(x.at)<=Date.parse(at))){b.cashCents=sum([b.cashCents,settlement.amountCents]);updates.push({kind:'cash-settlement',...settlement});changed=true;}
@@ -145,7 +147,7 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
      query('INSERT INTO market_sim_liquidity VALUES(?,?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload').run(liquidityKey,JSON.stringify(b.liquidity[liquidityKey]));
      updates.push({kind:'fill',fillId:fill.id,orderId:o.id,qty,status:o.status});changed=true;
     }
-    if(changed)persist(b,'execution-cycle',{updates,inputHash:hash(market)},at);db.exec('COMMIT');
+    guard();if(changed)persist(b,'execution-cycle',{updates,inputHash:hash(market),origin:runToken?'scheduler':'manual',runToken},at);db.exec('COMMIT');
    }catch(e){db.exec('ROLLBACK');throw e;}
    return api.snapshot();
   }

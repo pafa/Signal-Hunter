@@ -19,19 +19,20 @@ function SourceDetails({data}){
 }
 
 export function Operations({data,onClose,onControl,busy}){
- const labels={news:'新闻采集',daily:'日线采集',minutes:'分钟采集',observations:'观察与持仓检查',backup:'本地备份'};
+ const labels={execution:'自动模拟执行',news:'新闻采集',daily:'日线采集',minutes:'分钟采集',observations:'观察与持仓检查',backup:'本地备份'};
  const stateText=s=>s.paused?'已暂停':s.recovering?'等待恢复':s.running?'执行中':s.blocked?'失败待处理':s.outcome==='partial'?'部分失败':s.outcome==='error'?'等待重试':s.outcome==='ok'?'已完成':s.outcome==='skipped'?'无需更新':'等待运行';
  return <Modal title="运行控制与数据状态" onClose={onClose}>
- <p className="m-note">{data.runtime.mode} · 服务启动 {time(data.serviceHealth?.startedAt)} · 任务与控制状态保存到本机。暂停可中断采集，已保存的数据保留；这里不会批准或执行交易。</p>
+ <p className="m-note">{data.runtime.mode} · 服务启动 {time(data.serviceHealth?.startedAt)} · 任务与控制状态保存到本机。暂停保留已保存结果；此处不能批准订单。自动模拟执行启用后只处理已获本人批准的模拟订单，不连接真实交易。</p>
  {data.serviceHealth?.restoreReviewRequired&&<div className="m-warning"><p>这是恢复的副本。请先核对研究、持仓和申请，再确认恢复；确认不会自动恢复任务。</p><Button disabled={busy} onClick={()=>onControl('restore-review',{confirm:true})}>已核对恢复数据</Button></div>}
  <div className="v7-lanes ops-lanes">{Object.entries(data.operations||{}).map(([name,s])=><section className="ops-task" key={name} aria-label={labels[name]||name}>
  <b>{labels[name]||name}</b><strong>{stateText(s)}</strong>
  <small>最近完成 {time(s.completedAt)}</small><small>最近成功 {time(s.lastSuccessAt)}</small>
+ {name==='execution'&&<small>默认暂停；启用后每10秒检查两个模拟池。仅处理本人已批准订单；暂停只停止自动检查，手动检查仍可用。</small>}
  <small>{s.paused?'恢复后继续':s.blocked?'连续失败达到上限，请检查后重试':s.running?'完成后安排下次检查':s.nextRunAt?`下次检查 ${time(s.nextRunAt)}`:'等待调度'}</small>
  {s.error&&<small className="m-warning">{safeErrorText(s.error)}</small>}
  <div className="ops-buttons"><Button disabled={busy} onClick={()=>onControl(name,{action:s.paused?'resume':'pause'})}>{s.paused?'恢复':'暂停'}</Button><Button disabled={busy||s.paused||s.running||data.runtime.offline&&name!=='backup'} onClick={()=>onControl(name,{action:'retry'})}>重新检查</Button></div>
  </section>)}</div>
- <p className="m-note">采集任务有限重试；全部失败达到上限后等待处理。离线演示始终禁止外部采集。定时检查与数据实时性是不同状态。</p>
+ <p className="m-note">采集任务有限重试；全部失败达到上限后等待处理。离线演示始终禁止外部采集。定时检查与数据实时性是不同状态。模拟执行完成一次检查不代表已经成交；来源与等待原因见市场模拟账户。</p>
  <NewsCoverage data={data}/>
  <h3>上游来源</h3><div className="ops-scroll"><table className="i-table"><thead><tr><th>来源</th><th>状态</th><th>最近尝试</th><th>冷却至</th></tr></thead><tbody>{Object.entries(data.checks||{}).filter(([key])=>key.startsWith('source:')).map(([key,c])=><tr key={key}><td>{({'source:news.google.com':'Google News / Reuters 聚合','source:www.federalreserve.gov':'美联储官方 RSS','source:api.hkma.gov.hk':'金管局公开 API','source:www.csrc.gov.cn':'证监会公开列表','source:query1.finance.yahoo.com':'Yahoo 公共图表','source:query2.finance.yahoo.com':'Yahoo 公共图表','source:push2his.eastmoney.com':'东方财富公共来源','source:yahoo-public-chart':'Yahoo 公共图表','source:eastmoney-public':'东方财富公共来源'})[key]||'外部来源'}</td><td>{c.state==='ok'?'最近请求成功':'来源不可用'}<small>{safeErrorText(c.error)}</small></td><td>{time(c.attemptedAt)}</td><td>{c.retryAt?time(c.retryAt):'—'}</td></tr>)}</tbody></table>{!Object.keys(data.checks||{}).some(k=>k.startsWith('source:'))&&<p className="m-note">尚无外部来源请求记录；离线演示不会采集。</p>}</div>
  <MarketSourceStatus capabilities={data.dataCapabilities||[]}/>

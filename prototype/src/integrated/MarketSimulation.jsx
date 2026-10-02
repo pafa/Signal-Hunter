@@ -22,7 +22,7 @@ function MarketAccount({data,onClose,accountId,onAccount}){
  const savedConfig=b=>{if(b.config)setDraft(d=>d.configEdited?d:{...d,...b.config,allowOvernight:String(b.config.allowOvernight)});};
  useEffect(()=>{try{sessionStorage.setItem(key,JSON.stringify(draft));}catch{}},[draft,key]);
  async function load(){const [b,h]=await Promise.all([request(endpoint('')),request(endpoint('/history'))]);setBook(b);savedConfig(b);setHistory(h);setReview(null);}
- useEffect(()=>{let live=true;Promise.all([request(endpoint('')),request(endpoint('/history'))]).then(([b,h])=>{if(live){setBook(b);savedConfig(b);setHistory(h);}}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[]);
+ useEffect(()=>{if(busy)return;let live=true;Promise.all([request(endpoint('')),request(endpoint('/history'))]).then(([b,h])=>{if(live){setBook(b);savedConfig(b);setHistory(h);if(book&&book.version!==b.version)setReview(null);}}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[data?.serverTime,busy]);
  const topicId=draft.topicId||data.research.topics[0]?.id||'',topic=data.research.topics.find(t=>t.id===topicId),order=book?.orders?.find(o=>o.id===selected);
  const change=(key,value)=>setDraft(d=>({...d,[key]:value,...(key in fields||key==='allowOvernight'?{configEdited:true}:{})}));
  async function act(path,payload,{command=true}={}){
@@ -36,6 +36,7 @@ function MarketAccount({data,onClose,accountId,onAccount}){
   <div className="market-actions" aria-label="策略池选择">{Object.values(strategyProfiles).map(p=><Button key={p.id} disabled={busy} primary={accountId===p.id} onClick={()=>onAccount(p.id)}>{p.name} · 50万 USD</Button>)}</div><h3>{profile.name}</h3><p>{profile.description} 建议首次建仓占本池 {profile.initialPositionPct}%（{(profile.allocationUSD*profile.initialPositionPct/100).toLocaleString('zh-CN')} USD）；这是设计起点，逐笔申请仍需填写数量与预算。</p><p>单票退出复核线 {profile.risk.hardStopPct}%；浮盈达到 {profile.risk.trailingArmPct}% 后，较已记录高点回撤 {profile.risk.trailingDrawdownPct}% 触发复核。策略池回撤 {profile.risk.poolWarningPct}% 预警，{profile.risk.poolStopPct}% 暂停新增买入。触发不等于已经卖出或保证损失上限。</p>
   <p>与原“结构演练”账本分开。每笔申请需本人批准；仅在服务端具备有效报价、数量、交易规则和 FX 时才可能模拟成交。当前不会调用券商接口。</p>
   {error&&<p className="m-warning" role="alert">{error}</p>}
+  <p className="m-note">自动模拟执行：{data?.operations?.execution?.paused?'已暂停':data?.operations?.execution?.blocked?'失败待处理':data?.operations?.execution?'已启用，约每10秒检查':'状态未提供'}。在“查看状态”中启停；账户随工作台刷新，暂停自动检查后仍可手动检查。</p>
   {book?.sourceNote&&<p className="m-warning" role="status">{book.sourceNote}。现有研究收盘价不能用于市场模拟成交。</p>}
   {!book?<p>正在读取账户…</p>:<>
    <div className="market-actions"><Button disabled={busy} onClick={async()=>{setBusy(true);try{await load();}catch(e){setError(e.message);}finally{setBusy(false);}}}>刷新账户</Button>{book.configured&&<Button disabled={busy||!book.enabled} onClick={()=>act('process',{}, {command:false})}>检查订单、成交与结算</Button>}<small>账本 v{book.version} · {book.configured?'已配置':'尚未初始化'}</small></div>

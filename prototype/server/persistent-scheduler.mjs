@@ -1,8 +1,8 @@
 import {randomUUID} from 'node:crypto';
 import {summarizeResults} from './scheduler.mjs';
 
-// Recurring acquisition lanes only. Trade execution is never registered here.
-export function createPersistentScheduler(db, tasks, {now=Date.now, intervals={}, leaseMs=90000, maxFailures=3}={}) {
+// Persistent background lanes. Market execution, if registered, is simulation only.
+export function createPersistentScheduler(db, tasks, {now=Date.now, intervals={}, leaseMs=90000, maxFailures=3, initiallyPaused=[]}={}) {
  db.exec(`CREATE TABLE IF NOT EXISTS operation_tasks(
   name TEXT PRIMARY KEY, paused INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'waiting',
   token TEXT, lease_until INTEGER, next_run INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
@@ -15,7 +15,7 @@ export function createPersistentScheduler(db, tasks, {now=Date.now, intervals={}
  CREATE INDEX IF NOT EXISTS operation_runs_name ON operation_runs(name,id);`);
  if(!db.prepare('PRAGMA table_info(operation_runs)').all().some(c=>c.name==='input'))db.exec("ALTER TABLE operation_runs ADD COLUMN input TEXT NOT NULL DEFAULT 'null'");
  const restored=db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1';
- for(const name of Object.keys(tasks))db.prepare('INSERT OR IGNORE INTO operation_tasks(name,paused) VALUES(?,?)').run(name,Number(restored));
+ for(const name of Object.keys(tasks))db.prepare('INSERT OR IGNORE INTO operation_tasks(name,paused) VALUES(?,?)').run(name,Number(restored||initiallyPaused.includes(name)));
  const flights=new Map(),controllers=new Map();
  let stopped=false;
  const iso=()=>new Date(now()).toISOString();
