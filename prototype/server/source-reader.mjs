@@ -1,10 +1,11 @@
+import {collectPublicationDates,publicationDateResult} from './publication-date.mjs';
 import https from 'node:https';
 import {lookup} from 'node:dns/promises';
 import {isIP} from 'node:net';
 import {JSDOM} from 'jsdom';
 import {Readability} from '@mozilla/readability';
 
-export const READER_VERSION='public-article-1';
+export const READER_VERSION='public-article-2';
 export const MAX_SOURCE_BYTES=1_000_000;
 export function publicSourceUrl(value){
  let url;try{url=new URL(value);}catch{throw new Error('请输入公开网页的 HTTPS 链接');}
@@ -39,12 +40,13 @@ export function extractArticle(html,url){
  if(['news.google.com','consent.google.com','accounts.google.com'].includes(new URL(url).hostname))throw new Error('这是聚合或登录入口，请在阅读来源后粘贴发布方的文章链接');
  const dom=new JSDOM(html,{url});
  try{
+  const dates=collectPublicationDates(dom.window.document,url);
   const article=new Readability(dom.window.document,{maxElemsToParse:18000,charThreshold:200}).parse();
   const body=article?.textContent?.replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
   if(!body||body.length<200||/^(?:access denied|just a moment|request blocked|enable javascript|verify you are human)/i.test(article.title||''))throw new Error('未提取到足够正文，可能是访问限制或非文章页面；可手动补充');
   if(body.length>80000)throw new Error('正文超过 8 万字符，请手动补充必要段落');
-  const publishedAt=article.publishedTime&&Number.isFinite(Date.parse(article.publishedTime))?new Date(article.publishedTime).toISOString():null;
-  return {title:(article.title||new URL(url).hostname).slice(0,200),sourceName:(article.siteName||new URL(url).hostname).slice(0,160),body,publishedAt,scope:'extracted-text',method:READER_VERSION};
+  const publication=publicationDateResult(dates);
+  return {title:(article.title||new URL(url).hostname).slice(0,200),sourceName:(article.siteName||new URL(url).hostname).slice(0,160),body,...publication,scope:'extracted-text',method:READER_VERSION};
  }finally{dom.window.close();}
 }
 export async function readPublicArticle(value,{resolver=lookup,request=transport,timeoutMs=20000}={}){

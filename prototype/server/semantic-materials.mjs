@@ -10,8 +10,8 @@ export function materialComparisonSnapshot(db,ref){
  if(!row)fail();
  try{
   const m=JSON.parse(row.payload),clean=materialInput(m,m.availableAt),latest=db.prepare('SELECT MAX(revision) n FROM research_materials WHERE document_id=?').get(row.document_id).n;
-  if(m.id!==ref.id||m.documentId!==row.document_id||m.revision!==ref.revision||row.revision!==ref.revision||latest!==ref.revision||!Number.isFinite(Date.parse(m.availableAt))||Object.keys(clean).some(k=>clean[k]!==m[k])||digest(clean)!==m.contentHash||digest(`${m.documentId}:${m.contentHash}`)!==m.id)fail();
-  return {kind:'material',id:m.id,documentId:m.documentId,revision:m.revision,title:m.title,url:m.url,publisher:m.sourceName,publishedAt:m.publishedAt,datePrecision:m.datePrecision,availableAt:m.availableAt,receivedAt:m.receivedAt,contentScope:m.scope,contentHash:m.contentHash,body:m.body,method:m.method,readerVersion:m.readerVersion,verification:m.verification};
+  if(m.id!==ref.id||m.documentId!==row.document_id||m.revision!==ref.revision||row.revision!==ref.revision||latest!==ref.revision||!Number.isFinite(Date.parse(m.availableAt))||Object.keys(clean).some(k=>JSON.stringify(clean[k])!==JSON.stringify(m[k]))||digest(clean)!==m.contentHash||digest(`${m.documentId}:${m.contentHash}`)!==m.id)fail();
+  return {kind:'material',id:m.id,documentId:m.documentId,revision:m.revision,title:m.title,url:m.url,publisher:m.sourceName,publishedAt:m.publishedAt,...(m.publicationDateEvidence?{publicationDateEvidence:m.publicationDateEvidence}:{}),datePrecision:m.datePrecision,availableAt:m.availableAt,receivedAt:m.receivedAt,contentScope:m.scope,contentHash:m.contentHash,body:m.body,method:m.method,readerVersion:m.readerVersion,verification:m.verification};
  }catch{fail();}
 }
 export function comparisonMaterials(db,params={}){
