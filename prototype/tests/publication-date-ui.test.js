@@ -12,5 +12,6 @@ test('publication UI distinguishes legacy, missing and conflicting dates and esc
  const html=render({evidence});for(const t of ['已读取','文章元数据','2026-10-02T23:30:00-07:00','不是事件发生时间','多个独立来源'])assert.ok(html.includes(t),t);
  for(const [status,label] of [['missing','没有找到明确发布日期'],['invalid','格式或时区无法确认'],['conflict','来源日期互相冲突'],['overflow','日期字段过多或过长']])assert.ok(render({evidence:{...evidence,status}}).includes(label));
  const escaped=render({evidence:{...evidence,truncated:true,candidates:[{source:'jsonld:datePublished',raw:'<script>fixture</script>'}]}});assert.match(escaped,/&lt;script&gt;/);assert.doesNotMatch(escaped,/<script>/);assert.match(escaped,/未据此选择发布日期/);
+ const excluded=render({evidence:{...evidence,schema:'publication-date-2',profile:'csrc-article-1',excluded:[{source:'meta:pubdate',raw:'2026-08-01 21:56:31',reason:'page-generation',context:'页面生成时间 <script>fixture</script>'}]}});for(const t of ['未作为文章发布日期','页面生成元数据','2026-08-01 21:56:31','&lt;script&gt;'])assert.ok(excluded.includes(t),t);assert.doesNotMatch(excluded,/<script>/);
  }finally{await vite.close();}
 });

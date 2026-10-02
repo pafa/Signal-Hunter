@@ -5,7 +5,7 @@ import {isIP} from 'node:net';
 import {JSDOM} from 'jsdom';
 import {Readability} from '@mozilla/readability';
 
-export const READER_VERSION='public-article-2';
+export const READER_VERSION='public-article-3';
 export const MAX_SOURCE_BYTES=1_000_000;
 export function publicSourceUrl(value){
  let url;try{url=new URL(value);}catch{throw new Error('请输入公开网页的 HTTPS 链接');}

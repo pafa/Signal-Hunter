@@ -1,0 +1,237 @@
+{
+  "schema": "chinese-source-evaluation-1",
+  "baseCommit": "4afb2c29dee917ca6736e2a1e0476592ecefb4e7",
+  "readerVersion": "public-article-3",
+  "evidenceSchema": "publication-date-2",
+  "scope": "Selected historical Chinese regulator pages; source extraction and immutable persistence only, not model quality or forward validation",
+  "results": [
+    {
+      "id": "csrc-huijin",
+      "url": "https://www.csrc.gov.cn/csrc/c100028/c7462111/content.shtml",
+      "oldId": "4fa3b2ef153150265e726e3a1b905fa189fd80c099d89c53b2865eba8c929d03",
+      "newId": "029d26df34f7a199b5bd42b5de2f05dc2267c71ba8c6027622d7d9aea1dbca49",
+      "revision": 2,
+      "oldPublishedAt": null,
+      "publishedAt": "2024-02-06",
+      "readerVersion": "public-article-3",
+      "evidence": {
+        "schema": "publication-date-2",
+        "status": "known",
+        "candidates": [
+          {
+            "source": "csrc:article-date",
+            "raw": "2024-02-06"
+          }
+        ],
+        "truncated": false,
+        "profile": "csrc-article-1",
+        "excluded": [
+          {
+            "source": "meta:pubdate",
+            "raw": "2026-08-01 21:56:31",
+            "reason": "page-generation",
+            "context": "页面生成时间 2026-08-01 21:56:31"
+          }
+        ]
+      },
+      "chars": 338,
+      "bodyUnchanged": true,
+      "bodyHash": "ab2c6869af2418bff8dff929523c2a2114ba68e2bbe5bbd5290be4f32325111d",
+      "fetchReceivedAt": "2026-10-02T22:13:32.326Z",
+      "availableAt": "2026-10-02T22:16:03.182Z"
+    },
+    {
+      "id": "hkma-mortgage",
+      "url": "https://www.hkma.gov.hk/chi/news-and-media/press-releases/2024/10/20241016-4/",
+      "oldId": "ef0fffa93a08fa6b046506fdc4a94eacc43ed8ecebc3ff01d88883220836363c",
+      "newId": "8ddd212ffe677c1437bfe4a36e04c2381b56fdce589d21df2e257b126eca315c",
+      "revision": 2,
+      "oldPublishedAt": null,
+      "publishedAt": "2024-10-16",
+      "readerVersion": "public-article-3",
+      "evidence": {
+        "schema": "publication-date-2",
+        "status": "known",
+        "candidates": [
+          {
+            "source": "hkma:release-date",
+            "raw": "2024年10月16日"
+          }
+        ],
+        "truncated": false,
+        "profile": "hkma-release-1",
+        "excluded": []
+      },
+      "chars": 1107,
+      "bodyUnchanged": true,
+      "bodyHash": "24692f65fdb854a78723f0cda99a6536d6c18c1b93a8684763c315264d0386c9",
+      "fetchReceivedAt": "2026-10-02T22:13:35.573Z",
+      "availableAt": "2026-10-02T22:16:03.183Z"
+    },
+    {
+      "id": "hkma-completion",
+      "url": "https://www.hkma.gov.hk/chi/news-and-media/press-releases/2024/12/20241204-5/",
+      "oldId": "236420109120926f126c128545eefb282cf8e7f003a64300cc467c85fbc54168",
+      "newId": "43a0c4da3e1920174c0c0eecc97f03cb7bbc0147a35be9ed634295392ae56c4b",
+      "revision": 2,
+      "oldPublishedAt": null,
+      "publishedAt": "2024-12-04",
+      "readerVersion": "public-article-3",
+      "evidence": {
+        "schema": "publication-date-2",
+        "status": "known",
+        "candidates": [
+          {
+            "source": "hkma:release-date",
+            "raw": "2024年12月04日"
+          }
+        ],
+        "truncated": false,
+        "profile": "hkma-release-1",
+        "excluded": []
+      },
+      "chars": 795,
+      "bodyUnchanged": true,
+      "bodyHash": "b1d1800f52fad3636944d7b4282f32282987fa823ec2e6c060b7e134b1782e39",
+      "fetchReceivedAt": "2026-10-02T22:13:37.748Z",
+      "availableAt": "2026-10-02T22:16:03.183Z"
+    },
+    {
+      "id": "csrc-ma",
+      "url": "https://www.csrc.gov.cn/csrc/c100028/c7508366/content.shtml",
+      "oldId": null,
+      "newId": "05006b3fddf27f2bc741bab5cdadbec4fbf377c43260004749683046f600f0ae",
+      "revision": 1,
+      "oldPublishedAt": null,
+      "publishedAt": "2024-09-24",
+      "readerVersion": "public-article-3",
+      "evidence": {
+        "schema": "publication-date-2",
+        "status": "known",
+        "candidates": [
+          {
+            "source": "csrc:article-date",
+            "raw": "2024-09-24"
+          }
+        ],
+        "truncated": false,
+        "profile": "csrc-article-1",
+        "excluded": [
+          {
+            "source": "meta:pubdate",
+            "raw": "2026-08-01 21:56:55",
+            "reason": "page-generation",
+            "context": "页面生成时间 2026-08-01 21:56:55"
+          }
+        ]
+      },
+      "chars": 1027,
+      "bodyUnchanged": null,
+      "bodyHash": "6c46ba471b827c19bc824d4d373eb2face398a8235f92769c5ffce3858bea25f",
+      "fetchReceivedAt": "2026-10-02T22:12:52.169Z",
+      "availableAt": "2026-10-02T22:16:03.184Z"
+    }
+  ],
+  "paragraphAudit": [
+    {
+      "id": "csrc-huijin",
+      "selector": ".detail-news",
+      "paragraphs": 2,
+      "missing": [],
+      "scope": "whitespace-normalized paragraph inclusion only; links, tables, attachments and semantic completeness not established"
+    },
+    {
+      "id": "hkma-mortgage",
+      "selector": ".template-content-area",
+      "paragraphs": 12,
+      "missing": [],
+      "scope": "whitespace-normalized paragraph inclusion only; links, tables, attachments and semantic completeness not established"
+    },
+    {
+      "id": "csrc-ma",
+      "selector": ".detail-news",
+      "paragraphs": 9,
+      "missing": [],
+      "scope": "whitespace-normalized paragraph inclusion only; links, tables, attachments and semantic completeness not established"
+    },
+    {
+      "id": "hkma-completion",
+      "selector": ".template-content-area",
+      "paragraphs": 8,
+      "missing": [],
+      "scope": "whitespace-normalized paragraph inclusion only; links, tables, attachments and semantic completeness not established"
+    }
+  ],
+  "preserved": {
+    "preservedMaterials": 12,
+    "preservedRuns": 11,
+    "materialHash": "765854dfac6b9461f9dd2d99cc11b1729d449335e52ca6f8544cb9a0c1efbeee",
+    "runHash": "f06f999a267737fffae885e19b6a567302a06f6947ccdd065af9b6b15a0aea1f"
+  },
+  "restart": {
+    "semantic_runs": {
+      "rows": 11,
+      "hash": "f06f999a267737fffae885e19b6a567302a06f6947ccdd065af9b6b15a0aea1f"
+    },
+    "semantic_decisions": {
+      "rows": 0,
+      "hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "research_materials": {
+      "rows": 16,
+      "hash": "48132a0ca1ff60a911ef28fb6ec015fc7f926727bcaefefa09f09336ee462432"
+    },
+    "research_topics": {
+      "rows": 2,
+      "hash": "845b85e2fb1184a93fe9b78212d42f2b0e7d3f9e8b963d1d1a467ebc8964d127"
+    },
+    "research_versions": {
+      "rows": 15,
+      "hash": "ede2f8e98e745727ea337ae3924cf6d302fe708cb8e8a11f9240935daf921013"
+    },
+    "research_source_attempts": {
+      "rows": 13,
+      "hash": "4edc5cdaa7aa5f03db750a0498b53ba49247d418c77361614d13f2d4959d92a7"
+    },
+    "paper_books": {
+      "rows": 1,
+      "hash": "5bbb2c86e32e764d446b68392a6542602766c27b56fd880e8e934e4ec36bd2f2"
+    },
+    "paper_versions": {
+      "rows": 1,
+      "hash": "51359cd70fea69e5deeb192556ccf20e6652e7811293b36fb96fd8683fde3510"
+    }
+  },
+  "checks": {
+    "tests": 524,
+    "modelCalls": 0,
+    "desktop": [
+      1440,
+      1000
+    ],
+    "narrow": [
+      390,
+      844
+    ],
+    "dialogWidthPairs": [
+      [
+        778,
+        778
+      ],
+      [
+        376,
+        376
+      ]
+    ],
+    "browserErrors": 0,
+    "browserWarnings": 0,
+    "originalWeekTopics": 8
+  },
+  "limits": [
+    "Publisher profiles restricted to verified article routes; not all Chinese websites",
+    "Paragraph inclusion audit ignores whitespace and does not cover attachments, links, tables or semantics",
+    "CSRC extracted text still includes font-size controls",
+    "Old and new material linking replayed saved actual extraction results; not extra source fetches",
+    "No model calls, independent event labels, automatic merging or private instance migration"
+  ]
+}

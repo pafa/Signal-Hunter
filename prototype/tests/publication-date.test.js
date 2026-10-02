@@ -18,7 +18,7 @@ test('publication parser retains day precision and original offset without local
  for(const value of ['2026-02-29','2026-02-31','2026-13-01','2026-10-02T12:00:00','2026-10-02T24:00:00Z','2026-10-02T12:60:00Z','2026-10-02T12:00:00+25:00','10/02/2026','yesterday','February 30, 2022','October 2',null])assert.equal(parsePublicationDate(value),null,String(value));
 });
 test('explicit visible publication label repairs missing metadata without manufacturing midnight',()=>{
- const a=read('','<div class="article-date">\n February 7, 2022 \n</div>');assert.equal(a.publishedAt,'2022-02-07');assert.equal(a.publicationDateEvidence.status,'known');assert.deepEqual(a.publicationDateEvidence.candidates,[c('February 7, 2022','element:publication-label')]);assert.equal(a.method,'public-article-2');
+ const a=read('','<div class="article-date">\n February 7, 2022 \n</div>');assert.equal(a.publishedAt,'2022-02-07');assert.equal(a.publicationDateEvidence.status,'known');assert.deepEqual(a.publicationDateEvidence.candidates,[c('February 7, 2022','element:publication-label')]);assert.equal(a.method,'public-article-3');
 });
 test('article metadata, publication microdata, pubdate time and named visible labels are captured',()=>{
  for(const a of [read('<meta property="article:published_time" content="2026-10-02T23:30:00-07:00">'),read('<meta name="parsely-pub-date" content="2026-10-02T23:30:00-07:00">'),read('','<time itemprop="datePublished" datetime="2026-10-02T23:30:00-07:00">October 2, 2026</time>')])assert.equal(a.publishedAt,'2026-10-02T23:30:00-07:00');

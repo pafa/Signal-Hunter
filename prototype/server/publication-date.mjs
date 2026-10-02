@@ -1,4 +1,5 @@
-const schema='publication-date-1',limit=20;
+import {publicationProfile,profileCandidates,matchesPageGeneration} from './publication-profiles.mjs';
+const schema='publication-date-2',limit=20;
 const months=['january','february','march','april','may','june','july','august','september','october','november','december'];
 const day=(year,month,date)=>{const value=`${year}-${String(month).padStart(2,'0')}-${String(date).padStart(2,'0')}`;try{return new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value?value:null;}catch{return null;}};
 // Never ask Date.parse to guess the machine's timezone, date order or missing year.
@@ -22,10 +23,16 @@ export function resolvePublicationDate(candidates,truncated=false){
 }
 const samePage=(value,url)=>{try{const a=new URL(value,url),b=new URL(url);a.hash='';b.hash='';return a.href===b.href;}catch{return false;}};
 export function collectPublicationDates(document,url){
- const candidates=[];let truncated=false;
- const add=(source,raw)=>{if(typeof raw!=='string')return;if(candidates.length>=limit){truncated=true;return;}if(raw.length>200){truncated=true;return;}candidates.push({source,raw:raw.trim()});};
+ const candidates=[],excluded=[],profile=publicationProfile(url);let truncated=false;
+ const add=(source,raw)=>{if(typeof raw!=='string')return;if(candidates.length+excluded.length>=limit){truncated=true;return;}if(raw.length>200){truncated=true;return;}candidates.push({source,raw:raw.trim()});};
  const metaNames=new Set(['article:published_time','datepublished','pubdate','publishdate','publication_date','dc.date.issued','dcterms.issued','parsely-pub-date']);
- for(const node of document.querySelectorAll('meta')){const name=(node.getAttribute('property')||node.getAttribute('name')||node.getAttribute('itemprop')||'').toLowerCase();if(metaNames.has(name))add('meta:'+name,node.getAttribute('content')||'');}
+ const generated=profile==='csrc-article-1'?[...document.querySelectorAll('meta[name]')].filter(n=>n.getAttribute('name').toLowerCase()==='others').map(n=>(n.getAttribute('content')||'').trim()):[];
+ for(const node of document.querySelectorAll('meta')){const name=(node.getAttribute('property')||node.getAttribute('name')||node.getAttribute('itemprop')||'').toLowerCase(),raw=(node.getAttribute('content')||'').trim();
+  const context=name==='pubdate'&&generated.find(text=>matchesPageGeneration(raw,text));
+  if(context){if(candidates.length+excluded.length>=limit||raw.length>200||context.length>200)truncated=true;else excluded.push({source:'meta:pubdate',raw,reason:'page-generation',context});}
+  else if(metaNames.has(name))add('meta:'+name,raw);
+ }
+ profileCandidates(document,profile,add);
  const articleTypes=new Set(['Article','AdvertiserContentArticle','NewsArticle','AnalysisNewsArticle','AskPublicNewsArticle','BackgroundNewsArticle','OpinionNewsArticle','ReportageNewsArticle','ReviewNewsArticle','Report','SatiricalArticle','ScholarlyArticle','MedicalScholarlyArticle','SocialMediaPosting','BlogPosting','LiveBlogPosting','DiscussionForumPosting','TechArticle','APIReference']);
  for(const script of document.querySelectorAll('script[type="application/ld+json"]')){
   let root;try{root=JSON.parse(script.textContent);}catch{continue;}
@@ -43,17 +50,22 @@ export function collectPublicationDates(document,url){
   const source=node.matches('[itemprop~="datePublished"]')?'element:datePublished':node.matches('time[pubdate]')?'element:pubdate':'element:publication-label';
   add(source,node.getAttribute('datetime')||node.getAttribute('content')||node.textContent.trim());
  }
- return {candidates,truncated};
+ return {candidates,truncated,profile,excluded};
 }
 export function publicationDateResult(collected){
  const candidates=[...collected.candidates];
  const resolved=resolvePublicationDate(candidates,collected.truncated);
- return {publishedAt:resolved.publishedAt,publicationDateEvidence:{schema,status:resolved.status,candidates,truncated:collected.truncated}};
+ return {publishedAt:resolved.publishedAt,publicationDateEvidence:{schema,status:resolved.status,candidates,truncated:collected.truncated,profile:collected.profile,excluded:collected.excluded}};
 }
-export function validatePublicationEvidence(value,publishedAt){
+export function validatePublicationEvidence(value,publishedAt,url){
  const fail=()=>{throw new Error('来源日期读取依据无效');};
- if(!value||Array.isArray(value)||Object.keys(value).sort().join(',')!=='candidates,schema,status,truncated'||value.schema!==schema||typeof value.truncated!=='boolean'||!Array.isArray(value.candidates)||value.candidates.length>limit)fail();
+ const legacy=value?.schema==='publication-date-1';
+ if(!value||Array.isArray(value)||Object.keys(value).sort().join(',')!==(legacy?'candidates,schema,status,truncated':'candidates,excluded,profile,schema,status,truncated')||!['publication-date-1',schema].includes(value.schema)||typeof value.truncated!=='boolean'||!Array.isArray(value.candidates)||value.candidates.length>limit)fail();
+ if(!legacy){
+  if(value.profile!==publicationProfile(url)||!Array.isArray(value.excluded)||value.excluded.length+value.candidates.length>limit)fail();
+  for(const x of value.excluded)if(!x||Object.keys(x).sort().join(',')!=='context,raw,reason,source'||value.profile!=='csrc-article-1'||x.source!=='meta:pubdate'||x.reason!=='page-generation'||typeof x.raw!=='string'||x.raw.length>200||typeof x.context!=='string'||x.context.length>200||!matchesPageGeneration(x.raw,x.context))fail();
+ }
  const candidates=value.candidates.map(c=>{if(!c||Array.isArray(c)||Object.keys(c).sort().join(',')!=='raw,source'||typeof c.source!=='string'||!c.source.trim()||c.source.length>160||typeof c.raw!=='string'||c.raw.length>200)fail();return {source:c.source,raw:c.raw};});
  const resolved=resolvePublicationDate(candidates,value.truncated);if(resolved.status!==value.status||resolved.publishedAt!==publishedAt)fail();
- return {schema,status:value.status,candidates,truncated:value.truncated};
+ return {schema:value.schema,status:value.status,candidates,truncated:value.truncated,...(!legacy?{profile:value.profile,excluded:value.excluded.map(x=>({...x}))}:{})};
 }
