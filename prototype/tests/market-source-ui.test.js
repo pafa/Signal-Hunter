@@ -1,0 +1,9 @@
+import test from 'node:test';import assert from 'node:assert/strict';import React from 'react';import {renderToStaticMarkup} from 'react-dom/server';import {createServer} from 'vite';import {fileURLToPath} from 'node:url';
+test('market source cards render empty, stale, failed cache and closed states without raw error secrets',async()=>{
+ const server=await createServer({configFile:false,root:fileURLToPath(new URL('../',import.meta.url)),server:{middlewareMode:true,watch:null},appType:'custom'});
+ try{const {default:Status}=await server.ssrLoadModule('/src/integrated/MarketSourceStatus.jsx');const render=capabilities=>renderToStaticMarkup(React.createElement(Status,{capabilities}));assert.match(render([]),/尚无关注证券/);
+ const diagnostic={source:'yahoo-public-chart',sourceState:'failed',dataState:'stale',receivedAt:'2026-10-01T00:00:00Z',lastSuccessfulAt:'2026-10-01T00:00:00Z',dataAt:'2026-09-30T14:00:00Z',providerTimezone:'UTC',marketTimezone:'America/New_York',marketState:'休市',failure:{kind:'all-sources-failed',message:'https://secret.invalid?token=PRIVATE',attempts:[{source:'eastmoney-public',kind:'timeout',message:'PRIVATE'}]}};
+ const html=render([{symbol:'MU.US',daily:{diagnostics:{...diagnostic,dataState:'missing',dataAt:null}},minutes:{diagnostics:diagnostic}}]);assert.match(html,/数据已过期/);assert.match(html,/缺少有效数据/);assert.match(html,/上次请求失败/);assert.match(html,/2026-09-30 14:00:00 UTC/);assert.match(html,/请求超时/);assert.match(html,/执行能力未验证/);assert.doesNotMatch(html,/PRIVATE|secret.invalid/);
+ const closed=render([{symbol:'MU.US',daily:{},minutes:{diagnostics:{...diagnostic,sourceState:'last-attempt-succeeded',dataState:'closed-session-cache',failure:null,noNewBar:true}}}]);assert.match(closed,/休市或暂停交易/);assert.match(closed,/未增加新bar/);assert.match(closed,/尚无详细诊断记录/);
+ }finally{await server.close();}
+});
