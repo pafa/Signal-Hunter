@@ -3,10 +3,18 @@ import net from 'node:net';
 import {existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {runtimeConfig,checkDatabaseFile} from '../server/runtime.mjs';
-const args=process.argv.slice(2),mode=args.find(x=>!x.startsWith('--'))||process.env.SIGNAL_MODE||'demo';
+const args=process.argv.slice(2),env={...process.env};
+if(args[0]==='--instance'){
+ if(args.length!==2)throw new Error('用法：npm run start:instance -- <绝对路径.instance.json>');
+ if(env.SIGNAL_INSTANCE_PROFILE&&env.SIGNAL_INSTANCE_PROFILE!==args[1])throw new Error('实例路径与已有环境配置冲突');
+ env.SIGNAL_INSTANCE_PROFILE=args[1];args.splice(0,2);
+}
 if(args.some(x=>x.startsWith('--')&&x!=='--production'))throw new Error('未知启动选项');
-const production=args.includes('--production')||process.env.SIGNAL_SERVE_STATIC==='1';
-const env={...process.env,SIGNAL_MODE:mode,SIGNAL_SERVE_STATIC:production?'1':'0'},config=runtimeConfig(env);
+if(args.filter(x=>!x.startsWith('--')).length>1)throw new Error('只能指定一个运行模式');
+if(args.find(x=>!x.startsWith('--')))env.SIGNAL_MODE=args.find(x=>!x.startsWith('--'));
+if(args.includes('--production'))env.SIGNAL_SERVE_STATIC='1';
+if(!env.SIGNAL_INSTANCE_PROFILE){env.SIGNAL_MODE||='demo';env.SIGNAL_SERVE_STATIC||='0';}
+const config=runtimeConfig(env),{mode,production}=config;
 const cwd=fileURLToPath(new URL('../',import.meta.url));
 checkDatabaseFile(config);
 if(production&&!existsSync(cwd+'dist/index.html'))throw new Error('生产文件不存在，请先运行 npm run build');
@@ -40,7 +48,8 @@ while(!stopping){
  try{
   const base='http://127.0.0.1:',port=production?config.frontendPort:config.apiPort;
   const [api,web]=await Promise.all([fetch(base+port+'/api/health',{signal:AbortSignal.timeout(1000)}),fetch(base+config.frontendPort+'/',{signal:AbortSignal.timeout(1000)})]);
-  if(api.ok&&web.ok&&(await api.json()).mode===mode){clearTimeout(readyTimer);console.log(`工作台已就绪：http://127.0.0.1:${config.frontendPort}/\n模式：${mode} · ${production?'生产静态文件':'开发模式'}\n数据：${config.dbPath}\nCtrl+C 停止；后台常驻请使用经核对的服务配置。`);break;}
+  const health=api.ok?await api.json():null;
+  if(api.ok&&web.ok&&health.mode===mode&&health.instance?.id===config.instance.id){clearTimeout(readyTimer);console.log(`工作台已就绪：http://127.0.0.1:${config.frontendPort}/\n实例：${config.instance.label} · ${config.instance.fixed?'固定入口':'未固定入口'}\n模式：${mode} · ${production?'生产静态文件':'开发模式'}\n数据：${config.dbPath}\nCtrl+C 停止；后台常驻请使用经核对的服务配置。`);break;}
  }catch{}
  await new Promise(r=>setTimeout(r,250));
 }

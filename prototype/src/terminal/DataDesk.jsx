@@ -1,14 +1,10 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {TButton} from './Primitives';
 import './data-desk.css';
+import {request} from '../major/api';
 import NewsCoverage from '../integrated/NewsCoverage';
 
 const time=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'尚未获取';
-async function request(path,method='GET',data){
- const response=await fetch(path,{method,headers:method==='GET'?{}:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(55000)});
- if(!(response.headers.get('content-type')||'').includes('application/json'))throw new Error('本地数据服务未启动，请运行 npm run api');
- const result=await response.json();if(!response.ok)throw new Error(result.error||'数据服务不可用');return result;
-}
 
 function Trend({quote}){
  const points=quote.points,min=Math.min(...points.map(p=>p.close)),max=Math.max(...points.map(p=>p.close)),range=max-min||1;

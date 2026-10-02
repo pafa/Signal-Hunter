@@ -4,6 +4,7 @@
 # Local credentials; examples must contain placeholders only.
 .env
 .env.*
+*.instance.json
 !.env.example
 *.pem
 *.key

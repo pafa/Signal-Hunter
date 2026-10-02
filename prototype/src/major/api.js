@@ -1,7 +1,17 @@
+let instanceId=null,datasetChanged=false;
+const changedMessage='数据集已切换或尚未核对，请刷新页面后再继续';
 export async function request(path,method='GET',data){
- const response=await fetch(path,{method,headers:method==='GET'?{}:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(55000)});
+ if(datasetChanged)throw new Error(changedMessage);
+ const headers={...(method==='GET'?{}:{'Content-Type':'application/json'}),...(instanceId?{'X-Signal-Instance':instanceId}:{})};
+ const response=await fetch(path,{method,headers,body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(55000)});
  if(!(response.headers.get('content-type')||'').includes('application/json'))throw new Error('本地数据服务未连接，请启动 npm run api');
- const result=await response.json();if(!response.ok)throw new Error(result.error||'请求失败');return result;
+ const result=await response.json();
+ if(response.status===409&&result.error===changedMessage)datasetChanged=true;
+ if(!response.ok)throw new Error(result.error||'请求失败');
+ const identity=result.runtime?.instance?.id||result.instance?.id;
+ if(instanceId&&identity&&instanceId!==identity){datasetChanged=true;throw new Error(changedMessage);}
+ if(identity)instanceId=identity;
+ return result;
 }
 export const time=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'未知';
 export const stanceNames={supports:'支持',against:'反向约束',context:'背景',unverified:'待核实'};
