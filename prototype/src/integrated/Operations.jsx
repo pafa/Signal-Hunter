@@ -17,7 +17,7 @@ function SourceDetails({data}){
 }
 
 export function Operations({data,onClose,onControl,busy}){
- const labels={news:'新闻采集',daily:'日线采集',minutes:'分钟采集',backup:'本地备份'};
+ const labels={news:'新闻采集',daily:'日线采集',minutes:'分钟采集',observations:'观察与持仓检查',backup:'本地备份'};
  const stateText=s=>s.paused?'已暂停':s.recovering?'等待恢复':s.running?'执行中':s.blocked?'失败待处理':s.outcome==='partial'?'部分失败':s.outcome==='error'?'等待重试':s.outcome==='ok'?'已完成':s.outcome==='skipped'?'无需更新':'等待运行';
  return <Modal title="运行控制与数据状态" onClose={onClose}>
  <p className="m-note">{data.runtime.mode} · 服务启动 {time(data.serviceHealth?.startedAt)} · 任务与控制状态保存到本机。暂停可中断采集，已保存的数据保留；这里不会批准或执行交易。</p>
