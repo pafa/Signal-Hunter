@@ -12,6 +12,7 @@ import {validateResearchBrief} from './research-brief.mjs';
 import {openMaterials} from './research-materials.mjs';
 import {readPublicArticle,publicSourceUrl} from './source-reader.mjs';
 import {RELATION_KINDS,relatedCandidates} from '../shared/research-links.mjs';
+import {semanticResearchCandidates,freezeSemanticBasis,semanticBasisStatus} from './semantic-research.mjs';
 
 const text=(value,max=2000)=>typeof value==='string'&&value.trim().length<=max?value.trim():null;
 const assertText=(value,name,max=2000)=>{const result=text(value,max);if(result===null||!result)throw new Error(`${name}不能为空且最多 ${max} 字符`);return result;};
@@ -20,7 +21,7 @@ const enums={stance:['supports','against','context','unverified'],family:['adopt
 const dateValid=value=>{try{return /^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(`${value}T00:00:00Z`).toISOString().slice(0,10)===value;}catch{return false;}};
 const defaultChain=()=>[{id:'fact',title:'事实变化',question:'相对原有信息改变了什么？'},{id:'mechanism',title:'影响机制',question:'变化如何传到公司的业务？'},{id:'earnings',title:'财务兑现',question:'如何改变盈利及事前预期？'}];
 
-export function openResearch(store,{seed=true,clock=()=>new Date().toISOString(),sourceReader=readPublicArticle,seeds=researchSeeds}={}) {
+export function openResearch(store,{seed=true,clock=()=>new Date().toISOString(),sourceReader=readPublicArticle,seeds=researchSeeds,semanticEvents=null}={}) {
  const db=store.db;
  const screenings=openScreeningSamples(db,{clock}),triageKey=`${RULES_VERSION}@${screenings.rulesHash}`;
  const materials=openMaterials(db,{clock}),sourceJobs=new Set();
@@ -29,6 +30,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
  CREATE TABLE IF NOT EXISTS triage(news_id TEXT NOT NULL,news_revision INTEGER NOT NULL,rules_version TEXT NOT NULL,payload TEXT NOT NULL,processed_at TEXT NOT NULL,PRIMARY KEY(news_id,news_revision,rules_version));`);
  const get=id=>{const r=db.prepare('SELECT payload FROM research_topics WHERE id=?').get(id);if(!r)throw new Error('研究主题不存在');return JSON.parse(r.payload);};
  const withAvailability=topic=>({...topic,evidence:topic.evidence.map(e=>e.newsId?{...e,availableAt:store.revisionAvailableAt(e.newsId,e.newsRevision),availabilityBasis:'新闻修订实际接收时间；历史原字段保留'}:e)});
+ const withSemanticStatus=topic=>!topic.relatedEvents?.some(l=>l.semanticBasis)?topic:{...topic,relatedEvents:topic.relatedEvents.map(l=>l.semanticBasis?{...l,basisStatus:semanticBasisStatus(semanticEvents,topic,get(l.topicId),l.semanticBasis)}:l)};
  const newsEvidence=(n,at)=>({id:`news:${n.id}:v${n.revision}`,newsId:n.id,newsRevision:n.revision,claim:n.title,sourceName:n.publisher,url:n.url,publishedAt:n.publishedAt,datePrecision:n.datePrecision||'instant',firstSeen:n.revisionFirstSeen,articleFirstSeen:n.articleFirstSeen,revisionFirstSeen:n.revisionFirstSeen,availableAt:n.revisionFirstSeen,originKey:n.publisher,verification:'unverified',contentScope:'headline-only',addedAt:at});
  const commit=(topic,reason,expectedVersion,beforeWrite=()=>{})=>{
   db.exec('BEGIN IMMEDIATE');try{
@@ -67,20 +69,23 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   process,get,list,screenings,
   newsItem(id){const news=store.newsById(id);if(!news)throw new Error('新闻不存在');return {...news,triage:classifyHeadline(news)};},
   materialList(id){return materials.list(get(id));},
-  packet(id){return materials.packet(withAvailability(get(id)));},
+  packet(id){return materials.packet(withSemanticStatus(withAvailability(get(id))));},
   adoptModelDraft(id,data,candidate,beforeWrite=()=>{}){
-   const topic=get(id),packet=materials.packet(withAvailability(topic));
+   const topic=get(id),packet=materials.packet(withSemanticStatus(withAvailability(topic)));
    if(data.version!==topic.version||candidate?.trace?.inputHash!==packet.inputHash||candidate?.trace?.topicId!==id||candidate?.trace?.topicVersion!==topic.version||candidate?.status!=='candidate')throw new Error('模型候选与当前研究不匹配，请重新生成');
    const sections=validateDossierSections(candidate.sections,topic.evidence);
    topic.dossier={sections,reviewStatus:'draft',revisionReason:'本人采纳 Codex 候选为待复核草稿',preparedBy:'Codex 模型候选 · 本人采纳，尚待复核',preparedAt:clock(),basedOnResearchVersion:topic.version+1,sourceModelRun:{id:data.runId,...candidate.trace},missingEvidence:candidate.missingEvidence};
    topic.researchUpdatedAt=clock();
-   return commit(topic,'采纳模型研判草稿：未标记完成、未提交交易',data.version,beforeWrite);
+   return commit(topic,'采纳模型研判草稿：未标记完成、未提交交易',data.version,()=>{
+    if(materials.packet(withSemanticStatus(withAvailability(get(id)))).inputHash!==candidate.trace.inputHash)throw new Error('研究或材料已变化；此候选保留在历史中，请重新生成');
+    beforeWrite();
+   });
   },
-  related(id){
+  related(id,params={}){
    const topic=get(id),topics=list();
-   const links=(topic.relatedEvents||[]).map(link=>({...link,title:get(link.topicId).title,currentVersion:get(link.topicId).version}));
-   const incoming=topics.flatMap(t=>(t.relatedEvents||[]).filter(link=>link.topicId===id&&link.active).map(link=>({...link,topicId:t.id,title:t.title,currentVersion:t.version})));
-   return {candidates:relatedCandidates(topic,topics),links,incoming,method:'source-entity-title-retrieval-1'};
+   const links=(withSemanticStatus(topic).relatedEvents||[]).map(link=>({...link,title:get(link.topicId).title,currentVersion:get(link.topicId).version}));
+   const incoming=topics.flatMap(t=>(t.relatedEvents||[]).filter(link=>link.topicId===id&&link.active).map(link=>({...link,topicId:t.id,title:t.title,currentVersion:t.version,...(link.semanticBasis?{basisStatus:semanticBasisStatus(semanticEvents,t,topic,link.semanticBasis)}:{})})));
+   return {candidates:relatedCandidates(topic,topics),semantic:semanticResearchCandidates(store,semanticEvents,topic,topics,params),links,incoming,method:'source-entity-title-retrieval-1'};
   },
   linkTopic(id,data){
    const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再关联');
@@ -90,9 +95,14 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    const note=assertText(data.note,'事件关系依据',1200),links=topic.relatedEvents||[],index=links.findIndex(l=>l.topicId===target.id&&l.kind===data.kind);
    if(index<0&&links.length>=40)throw new Error('一个事件最多保存 40 条关系');
    if(index<0&&!data.active)throw new Error('该关系尚未建立');
-   const link={topicId:target.id,targetVersion:target.version,kind:data.kind,active:data.active,note,at:clock(),method:'human-linked'};
+   if(Object.hasOwn(data,'semanticBasis')&&!data.active)throw new Error('撤销关系不能替换比较依据');
+   const semanticBasis=Object.hasOwn(data,'semanticBasis')?freezeSemanticBasis(semanticEvents,topic,target,data.semanticBasis):!data.active?links[index]?.semanticBasis:null;
+   const link={topicId:target.id,targetVersion:target.version,kind:data.kind,active:data.active,note,at:clock(),method:semanticBasis?'human-linked-semantic-basis':'human-linked',...(semanticBasis?{semanticBasis}:{})};
    if(index>=0)links[index]=link;else links.push(link);topic.relatedEvents=links;
-   return commit(topic,`${data.active?'关联':'撤销'}事件关系：${RELATION_KINDS[data.kind]}；不合并证据或重复计权`,data.version);
+   return commit(topic,`${data.active?'关联':'撤销'}事件关系：${RELATION_KINDS[data.kind]}；不合并证据或重复计权`,data.version,()=>{
+    const currentTarget=get(target.id);if(currentTarget.version!==data.targetVersion)throw new Error('目标事件已有新版本，请重新核对');
+    if(data.active&&semanticBasis&&freezeSemanticBasis(semanticEvents,topic,currentTarget,data.semanticBasis).hash!==semanticBasis.hash)throw new Error('比较依据已变化或不属于这两份研究，请刷新后重新核对');
+   });
   },
   saveMaterial(id,data){return linkMaterial(id,data,{...data,scope:data.scope==='extracted-text'?null:data.scope},'manual');},
   async readMaterial(id,data){
