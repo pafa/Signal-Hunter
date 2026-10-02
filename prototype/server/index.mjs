@@ -36,6 +36,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&/^\/api\/observations\/[a-f0-9]{64}\/receipts$/.test(url.pathname)){reply(200,service.observations.receipts(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/observation-rules\/[-a-zA-Z0-9]{8,80}\/history$/.test(url.pathname)){reply(200,service.observations.rules.history(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/operations'){reply(200,service.operations());return;}
+    if(req.method==='GET'&&/^\/api\/news\/intake\/[-a-f0-9]{36}$/.test(url.pathname)){reply(200,service.newsIntakeDetail(url.pathname.split('/')[4]));return;}
     if(req.method==='GET'&&url.pathname==='/api/health'){reply(200,service.health());return;}
     if(req.method==='GET'&&url.pathname==='/api/paper/history'){reply(200,service.paper.history());return;}
     if(req.method==='GET'&&url.pathname==='/api/bars'){const symbol=url.searchParams.get('symbol');if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅查看关注标的');const quote=store.quote(symbol);const rows=quote?store.db.prepare('SELECT provider_time AS time,close FROM quote_bars WHERE symbol=? AND provider=? AND timezone=? ORDER BY provider_time DESC LIMIT 6000').all(symbol,quote.provider||'legacy',quote.providerTimezone||'unverified'):[];reply(200,rows.reverse());return;}
@@ -120,6 +121,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     else if(req.method==='POST'&&/^\/api\/research\/[^/]+\/read-source$/.test(url.pathname)){await service.research.readMaterial(url.pathname.split('/')[3],data);}
     else if(req.method==='POST'&&/^\/api\/research\/[^/]+\/related$/.test(url.pathname)){service.research.linkTopic(url.pathname.split('/')[3],data);}
     else if(req.method==='POST'&&url.pathname==='/api/news/refresh'){await service.runOperation('news',{manual:true});}
+    else if(req.method==='POST'&&url.pathname==='/api/news/backfill'){await service.backfillNews(data);}
     else if(req.method==='PATCH'&&url.pathname==='/api/settings'){store.setSettings(data);}
     else if(req.method==='PATCH'&&/^\/api\/news\/[a-f0-9]{64}$/.test(url.pathname)){store.editNews(url.pathname.split('/')[3],data);}
     else if(req.method==='POST'&&url.pathname==='/api/watchlist'){const symbol=store.addWatch(data.symbol);if(service.mode!=='demo'&&!service.operations().tasks.minutes?.paused)await service.runOperation('minutes',{symbols:[symbol],manual:true});}

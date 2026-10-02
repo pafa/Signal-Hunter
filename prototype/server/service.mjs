@@ -8,6 +8,7 @@ import {demoResearchSeeds,initializeDemoData} from './demo.mjs';
 import {fetchMinutes} from './providers.mjs';
 import {openContinuity} from './event-continuity.mjs';
 import {openNewsIntake,newsQueries} from './news-intake.mjs';
+import {officialQueries,newsWindow} from './news-sources.mjs';
 import {openResearch} from './research.mjs';
 import {openPaper} from './paper.mjs';
 import {assessTopic,syncResearchWatches} from './workflow.mjs';
@@ -58,6 +59,18 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       catch(error){store.db.exec('ROLLBACK');throw error;}
     },
     runOperation(name,input=null){if(offline&&!['backup','observations'].includes(name))denyNetwork();active(name);return scheduler.run(name,{force:true,input});},
+    newsIntakeDetail(id){return intake.detail(id);},
+    async backfillNews(input){
+      if(offline)denyNetwork();active('news');
+      const window=newsWindow(input,clock());
+      if(!store.getSettings().newsHkmaEnabled)throw new Error('请先启用香港金管局来源');
+      if(scheduler.snapshot().news.running||newsJob)throw new Error('新闻采集正在进行，请完成后再补采');
+      const last=store.db.prepare("SELECT started_at FROM news_intake_runs WHERE query_id='hkma' ORDER BY started_at DESC,rowid DESC LIMIT 1").get();
+      if(last&&now()-Date.parse(last.started_at)<60000)throw new Error('金管局最近已请求，请至少间隔一分钟后补采');
+      const result=await scheduler.run('news',{force:true,input:{kind:'backfill',...window}});
+      if(result?.skipped)throw new Error('本次补采未取得任务，请稍后重试');
+      return result;
+    },
     close(){return Promise.all([scheduler.stop(),modelResearch.close(),semanticEvents.close()]);},
     syncWatches(){if(!restorePending())autoWatch=syncResearchWatches(store,research.list());return autoWatch;},
     snapshot(){const topics=research.list(),book=paper.snapshot();const queue=continuity.queue({positions:book.positions,watchlist:store.watchlist()}),priorities=new Map(queue.map((n,i)=>[n.id,{priority:n.priority,rank:i}])),researchView=research.snapshot();researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));return {observationInbox:observations.snapshot(),eventContinuity:{...continuity.summary(),health:store.checks().events||{state:'pending'}},runtime:{mode,offline,instance},paper:book,workflow:topics.map(t=>assessTopic(t,{book})),operations:scheduler.snapshot(),operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,clock(),{offline}),serviceHealth:service.health(),newsIntake:intake.snapshot(),autoWatch,settings:store.getSettings(),news:store.news(),watchlist:store.watchlist().map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks:store.checks(),serverTime:clock(),newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:researchView};},
@@ -76,17 +89,19 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
     async refreshNews(context){
       if(offline)denyNetwork();active('news',context);
       if(newsJob)return newsJob;
-      if(now()-Math.max(lastNewsAttempt,Date.parse(store.checks().news?.attemptedAt)||0)<newsCooldown)return {skipped:'cooldown'};
-      const queries=newsQueries(store.getSettings()).filter(q=>q.enabled);
-      if(!queries.length){store.status('news',{state:'disabled'});return {skipped:'all-queries-disabled'};}
-      lastNewsAttempt=now();const attemptedAt=clock();const keywords=store.getSettings().keywords;
+      const input=context?.input,backfill=input?.kind==='backfill';
+      if(!backfill&&now()-Math.max(lastNewsAttempt,Date.parse(store.checks().news?.attemptedAt)||0)<newsCooldown)return {skipped:'cooldown'};
+      const window=backfill?newsWindow({sourceId:input.sourceId,from:input.from,to:input.to},clock()):null;
+      const queries=(backfill?officialQueries(store.getSettings(),clock(),window):newsQueries(store.getSettings(),clock())).filter(q=>q.enabled);
+      if(!queries.length){store.status(backfill?'news-backfill':'news',{state:'disabled'});return {skipped:'all-queries-disabled'};}
+      if(!backfill)lastNewsAttempt=now();const attemptedAt=clock();const keywords=store.getSettings().keywords;
       newsJob=(async()=>{try{
         const results=[];
         for(const query of queries){active('news',context);results.push(await intake.run(query,scopedFetcher(context),context));}
         active('news',context);research.process();service.processEvents();
-        const success=results.filter(r=>r.state==='ok'),errors=results.filter(r=>r.error).map(r=>errorText(new Error(r.error)));
-        store.status('news',{state:errors.length?(success.length?'partial':'error'):'ok',attemptedAt,...(success.length?{receivedAt:clock()}:{}),count:success.reduce((n,r)=>n+r.acceptedCount,0),added:success.reduce((n,r)=>n+r.added,0),updated:success.reduce((n,r)=>n+r.updated,0),keywords,...(errors.length?{error:errors.join('；')}:{}),queryCount:queries.length});return results;
-      }catch(error){active('news',context);store.status('news',{state:'error',attemptedAt,error:errorText(error),keywords});return {error:errorText(error)};}finally{newsJob=null;}})();
+        const success=results.filter(r=>r.state==='ok'||r.state==='partial'),errors=results.filter(r=>r.error).map(r=>errorText(new Error(r.error)));
+        store.status(backfill?'news-backfill':'news',{state:errors.length?(success.length?'partial':'error'):'ok',attemptedAt,...(success.length?{receivedAt:clock()}:{}),count:success.reduce((n,r)=>n+r.acceptedCount,0),added:success.reduce((n,r)=>n+r.added,0),updated:success.reduce((n,r)=>n+r.updated,0),keywords,...(errors.length?{error:errors.join('；')}:{}),queryCount:queries.length});return results.flatMap(r=>r.state==='partial'?[{ok:true},r]:[r]);
+      }catch(error){active('news',context);store.status(backfill?'news-backfill':'news',{state:'error',attemptedAt,error:errorText(error),keywords});return {error:errorText(error)};}finally{newsJob=null;}})();
       return newsJob;
     },
     async refreshQuote(symbol,context){

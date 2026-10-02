@@ -13,7 +13,7 @@ const item=(id='a',title='AMD announces a new chip',publisher='Reuters')=>`<item
 const feed=items=>`<rss><channel>${items}</channel></rss>`;
 
 test('tracking keywords cannot narrow discovery and partial settings edits preserve other fields',()=>{
- const s=openStore(':memory:');try{s.setSettings({keywords:'AMD'});const q=newsQueries(s.getSettings());assert.equal(q.length,2);assert(!new URL(q[0].url).searchParams.get('q').includes('AMD'));assert(new URL(q[1].url).searchParams.get('q').includes('AMD'));
+ const s=openStore(':memory:');try{s.setSettings({keywords:'AMD'});const q=newsQueries(s.getSettings());assert.equal(q.length,5);assert(!new URL(q[0].url).searchParams.get('q').includes('AMD'));assert(new URL(q[1].url).searchParams.get('q').includes('AMD'));
  s.setSettings({newsDiscoveryEnabled:false});assert.equal(s.getSettings().keywords,'AMD');assert.equal(s.getSettings().newsDiscoveryEnabled,false);
  assert.throws(()=>s.setSettings({keywords:'changed',newsTrackingEnabled:'false'}));assert.equal(s.getSettings().keywords,'AMD');assert.throws(()=>s.setSettings({privateFlag:true}));
  }finally{s.close();}

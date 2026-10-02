@@ -13,7 +13,7 @@ export function comparisonPacket(store,input){
  const records=['left','right'].map(side=>{
   const ref=input[side];if(Object.keys(ref).sort().join(',')!=='id,revision'||typeof ref.id!=='string'||!Number.isSafeInteger(ref.revision)||ref.revision<1)fail(0);
   const n=store.newsById(ref.id);if(!n||n.revision!==ref.revision)fail(1);
-  return {id:n.id,revision:n.revision,title:n.title,url:n.url,publisher:n.publisher,publishedAt:n.publishedAt,availableAt:n.revisionFirstSeen,contentScope:'headline-only'};
+  return {id:n.id,revision:n.revision,title:n.title,url:n.url,publisher:n.publisher,publishedAt:n.publishedAt,datePrecision:n.datePrecision||'instant',availableAt:n.revisionFirstSeen,contentScope:'headline-only'};
  });
  const value={left:records[0],right:records[1]},packet={schema:SEMANTIC_VERSION,input:value,inputHash:digest(value)};
  if(Buffer.byteLength(JSON.stringify(packet))>65536)throw new CodexResearchError('packet');
