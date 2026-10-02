@@ -196,7 +196,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   addCompany(id,data){const topic=get(id);
    if(data.replace!==undefined&&typeof data.replace!=='boolean')throw new Error('关系修订标记无效');
    if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
-   const company=normalizeCompanyRelation(data,topic,clock()),index=topic.companies.findIndex(c=>c.symbol===company.symbol);
+   const company=normalizeCompanyRelation(data,withAvailability(topic),clock()),index=topic.companies.findIndex(c=>c.symbol===company.symbol);
    if(index>=0&&!data.replace)throw new Error('公司已关联；请选择修订关系，避免静默覆盖');
    if(index<0&&data.replace)throw new Error('待修订的公司关系不存在');
    if(index<0&&topic.companies.length>=20)throw new Error('一个主题最多关联 20 个标的');
