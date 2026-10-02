@@ -1,5 +1,6 @@
 import {hash,instrument} from './providers.mjs';
 import {evidenceStamp,positionReference} from '../shared/review-state.mjs';
+import {temporalObservation} from './temporal-observations.mjs';
 import {CALENDAR_VERSION} from '../shared/market-clock.mjs';
 import {diagnoseMarketData} from './market-diagnostics.mjs';
 const ENGINE='observation-conditions/1';
@@ -16,18 +17,23 @@ export function validateObservationDefinition(input,topic){
  const conditions=input.conditions.map(c=>{
   if(c?.type==='at'&&exact(c,['type','at'])&&observationInstant(c.at)!==null)return {type:c.type,at:new Date(observationInstant(c.at)).toISOString()};
   if(['research-change','counterevidence'].includes(c?.type)&&exact(c,['type']))return {type:c.type};
-  if(c?.type==='price'&&exact(c,['type','symbol','interval','operator','value'])&&['1d','1m'].includes(c.interval)&&['gte','lte'].includes(c.operator)&&typeof c.value==='number'&&Number.isFinite(c.value)&&c.value>0&&c.value<=1e12&&topic.companies.some(x=>x.symbol===c.symbol)){
-   const spec=instrument(c.symbol);return {type:c.type,symbol:spec.symbol,currency:spec.currency,interval:c.interval,operator:c.operator,value:c.value};
+  if(c?.type==='price'&&exact(c,['type','symbol','interval','operator','value','mode','maxGapSeconds','holdSeconds'])&&['1d','1m'].includes(c.interval)&&['gte','lte'].includes(c.operator)&&typeof c.value==='number'&&Number.isFinite(c.value)&&c.value>0&&c.value<=1e12&&topic.companies.some(x=>x.symbol===c.symbol)){
+   const spec=instrument(c.symbol),base={type:c.type,symbol:spec.symbol,currency:spec.currency,interval:c.interval,operator:c.operator,value:c.value};
+   if(c.mode===undefined||c.mode==='level'){if(c.maxGapSeconds!==undefined||c.holdSeconds!==undefined)failure('时序价格条件参数无效');return base;}
+   if(!['cross','held'].includes(c.mode)||c.interval!=='1m'||!Number.isInteger(c.maxGapSeconds)||c.maxGapSeconds<60||c.maxGapSeconds>600||c.mode==='cross'&&c.holdSeconds!==undefined||c.mode==='held'&&(!Number.isInteger(c.holdSeconds)||c.holdSeconds<60||c.holdSeconds>21600))failure('时序价格条件仅支持分钟采样，最大间隔60–600秒，持续时间60–21600秒');
+   return {...base,mode:c.mode,maxGapSeconds:c.maxGapSeconds,...(c.mode==='held'?{holdSeconds:c.holdSeconds}:{})};
   }
   failure('观察规则无效；价格条件必须选择本研究关联证券并填写正数阈值');
  });
  return {label:input.label.trim(),join:input.join,conditions};
 }
 const outcome=(state,reason,input={})=>({state,reason,input});
-export function evaluateObservation(rule,topic,{at,quote,check,offline=false}={}){
+export function evaluateObservation(rule,topic,{at,quote,check,offline=false,previous=null}={}){
  const now=observationInstant(at);if(now===null)failure('观察检查时间无效');
  if(!topic||topic.status!=='active')return {state:'unknown',reason:'研究不存在或已归档',results:[]};
- const results=rule.definition.conditions.map(c=>{
+ const memories=[];
+ const results=rule.definition.conditions.map((c,index)=>{
+  const evaluate=()=>{
   if(c.type==='at')return outcome(now>=Date.parse(c.at)?'true':'false','指定复核时间',{at:c.at});
   if(c.type==='research-change')return outcome(topic.version>rule.binding.topicVersion?'true':'false','研究版本变化',{baselineVersion:rule.binding.topicVersion,currentVersion:topic.version});
   if(c.type==='counterevidence'){
@@ -39,16 +45,19 @@ export function evaluateObservation(rule,topic,{at,quote,check,offline=false}={}
   const q=quote(c.symbol,c.interval),status=check(c.symbol,c.interval),received=observationInstant(q?.receivedAt);
   if(!q||q.symbol!==c.symbol||q.currency!==c.currency||received===null||received>now)return outcome('unknown','缺少证券、币种或接收时间一致的行情',comparison);
   const d=diagnoseMarketData(c.symbol,q,status,at,{interval:c.interval,offline});
-  const provenance={symbol:c.symbol,currency:c.currency,interval:c.interval,provider:q.provider,receivedAt:q.receivedAt,dataAt:d.dataAt,dataState:d.dataState,sourceState:d.sourceState,rawProviderTime:d.rawProviderTime,quoteHash:hash(JSON.stringify(q)),calendarVersion:CALENDAR_VERSION,operator:c.operator,threshold:c.value,priceBasis:q.priceBasis||d.quoteKind,synthetic:offline,executable:false};
+  const provenance={symbol:c.symbol,currency:c.currency,interval:c.interval,provider:q.provider,providerTimezone:q.providerTimezone,receivedAt:q.receivedAt,dataAt:d.dataAt,dataState:d.dataState,sourceState:d.sourceState,rawProviderTime:d.rawProviderTime,quoteHash:hash(JSON.stringify(q)),calendarVersion:CALENDAR_VERSION,operator:c.operator,threshold:c.value,priceBasis:q.priceBasis||d.quoteKind,synthetic:offline,executable:false};
   // Offline examples remain visibly synthetic; online checks never infer a price from missing/stale caches.
   if(!offline&&(!d.configuredSources.includes(q.provider)||c.interval==='1m'&&Date.parse(d.dataAt)>now||d.sourceState!=='last-attempt-succeeded'||!(c.interval==='1d'?['aligned']:['recent-unverified','closed-session-cache']).includes(d.dataState)))return outcome('unknown','行情缺失、过期、来源失败或时间未核验',provenance);
   const point=c.interval==='1d'?q.points?.findLast(p=>p.date===q.lastDate&&Number.isFinite(p.close)&&p.close>0):q.points?.findLast(p=>p.time===q.providerTime&&Number.isFinite(p.close)&&p.close>0);
   if(!point)return outcome('unknown','行情时点与价格不一致',provenance);
   const matches=c.operator==='gte'?point.close>=c.value:point.close<=c.value;
   return outcome(matches?'true':'false','缓存收盘价与阈值比较',{...provenance,price:point.close,operator:c.operator,threshold:c.value});
+  };
+  const base=evaluate();if(c.type!=='price'||!c.mode)return base;
+  const {memory,...result}=temporalObservation(c,base,previous?.temporal?.[index],{at,armedAt:rule.updatedAt||rule.createdAt});memories[index]=memory;return result;
  });
  const state=rule.definition.join==='all'?(results.some(r=>r.state==='false')?'false':results.every(r=>r.state==='true')?'true':'unknown'):(results.some(r=>r.state==='true')?'true':results.every(r=>r.state==='false')?'false':'unknown');
- return {state,reason:{true:'配置条件命中',false:'尚未满足配置条件',unknown:'部分条件无法判断'}[state],results};
+ return {state,reason:{true:'配置条件命中',false:'尚未满足配置条件',unknown:'部分条件无法判断'}[state],results,...(memories.length?{temporal:memories}:{})};
 }
 export function openObservationRules(store,{clock=()=>new Date().toISOString(),getTopic,offline=false}={}){
  const db=store.db;
@@ -91,8 +100,8 @@ export function openObservationRules(store,{clock=()=>new Date().toISOString(),g
    const quote=(symbol,interval)=>{const key=interval+symbol;if(!quotes.has(key))quotes.set(key,interval==='1d'?store.daily(symbol):store.quote(symbol));return quotes.get(key);};
    for(const row of db.prepare('SELECT payload FROM observation_rules').all()){
     const rule=JSON.parse(row.payload);if(!rule.active)continue;
-    const topic=byTopic.get(rule.topicId),result=evaluateObservation(rule,topic,{at,offline,quote,check:(s,i)=>checks[(i==='1d'?'daily:':'')+s]});
     const prior=db.prepare('SELECT payload FROM observation_rule_checks WHERE rule_id=? AND version=?').get(rule.id,rule.version);
+    const previous=prior?JSON.parse(prior.payload):null,topic=byTopic.get(rule.topicId),result=evaluateObservation(rule,topic,{at,offline,quote,previous,check:(s,i)=>checks[(i==='1d'?'daily:':'')+s]});
     const checked={...result,checkedAt:at,firstMatchedAt:prior?JSON.parse(prior.payload).firstMatchedAt:null};
     if(result.state==='true'){
      checked.firstMatchedAt||=at;
