@@ -30,3 +30,16 @@ test('source failure preserves cached data time, successful unchanged bars and p
  try{store.addWatch('MU.US');const book=JSON.stringify(service.paper.snapshot());await service.refreshQuote('MU.US');at+=1000;await service.refreshQuote('MU.US');assert.equal(service.snapshot().dataCapabilities[0].minutes.diagnostics.noNewBar,true);const cached=store.quote('MU.US');fail=true;at+=1000;await service.refreshQuote('MU.US');const diagnostic=service.snapshot().dataCapabilities[0].minutes.diagnostics;assert.equal(diagnostic.sourceState,'failed');assert.equal(diagnostic.failure.attempts[0].kind,'network');assert.equal(diagnostic.rawProviderTime,cached.providerTime);assert.equal(diagnostic.lastSuccessfulAt,cached.receivedAt);assert.equal(JSON.stringify(service.paper.snapshot()),book);
  }finally{service.close();store.close();}
 });
+test('HK lunch and just-close use the elapsed current trading day, never daily buffering',()=>{
+ const hk={...quote,symbol:'00700.HK',providerTime:'2026-09-30 08:09'};
+ // Oct 1 holiday; Oct 2 is open. A September cache must remain stale at lunch and close.
+ for(const at of ['2026-10-02T03:59:00Z','2026-10-02T04:00:00Z','2026-10-02T08:10:00Z','2026-10-02T08:20:00Z']){const d=diagnoseMarketData('00700.HK',hk,{},at);assert.equal(d.dataState,'stale');assert.equal(d.expectedMinuteDate,'2026-10-02');}
+ const current={...hk,providerTime:'2026-10-02 03:59'};assert.equal(diagnoseMarketData('00700.HK',current,{},'2026-10-02T04:00:00Z').dataState,'closed-session-cache');
+ const oldMorning={...hk,providerTime:'2026-10-02 03:00'};assert.equal(diagnoseMarketData('00700.HK',oldMorning,{},'2026-10-02T04:00:00Z').dataState,'stale');
+ const nearClose={...hk,providerTime:'2026-10-02 08:09'};assert.equal(diagnoseMarketData('00700.HK',nearClose,{},'2026-10-02T08:20:00Z').dataState,'closed-session-cache');
+});
+test('holiday and pre-open use the previous completed minute session with age within that session',()=>{
+ const hk={...quote,symbol:'00700.HK',providerTime:'2026-09-30 08:09'};
+ for(const at of ['2026-10-01T04:00:00Z','2026-10-02T01:29:00Z']){const d=diagnoseMarketData('00700.HK',hk,{},at);assert.equal(d.expectedMinuteDate,'2026-09-30');assert.equal(d.dataState,'closed-session-cache');}
+ assert.equal(diagnoseMarketData('00700.HK',{...hk,providerTime:'2026-09-30 03:00'},{},'2026-10-01T04:00:00Z').dataState,'stale');
+});
