@@ -1,3 +1,4 @@
+import {safeErrorText,safeDiagnosticPayload} from '../shared/safe-errors.mjs';
 import {runtimeConfig,assertDatabaseMode,checkDatabaseFile} from './runtime.mjs';
 import http from 'node:http';
 import {createStaticHandler} from './static-site.mjs';
@@ -13,7 +14,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
  const hosts=new Set([`127.0.0.1:${apiPort}`,`127.0.0.1:${frontendPort}`,`localhost:${frontendPort}`]);
  const origins=new Set([...hosts].map(host=>`http://${host}`));
  return async(req,res)=>{
-  const reply=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(body));};
+  const reply=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(code<400?safeDiagnosticPayload(body):body));};
   if(!hosts.has(req.headers.host)||req.headers.origin&&!origins.has(req.headers.origin)){reply(403,{error:'仅允许本机工作台访问'});return;}
   try{
     const url=new URL(req.url,'http://127.0.0.1:4179');
@@ -44,7 +45,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='POST'&&/^\/api\/events\/[a-f0-9]{64}$/.test(url.pathname)){service.decideEvent(url.pathname.split('/')[3],data);reply(200,service.snapshot());return;}
     if(req.method==='POST'&&/^\/api\/observations\/[a-f0-9]{64}$/.test(url.pathname)){service.observations.respond(url.pathname.split('/')[3],data);reply(200,service.snapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/operations/restore-review'){if(data.confirm!==true)throw new Error('需要确认已核对恢复数据');service.acknowledgeRestore();reply(200,service.snapshot());return;}
-    if(req.method==='POST'&&/^\/api\/operations\/[a-z]+$/.test(url.pathname)){service.controlOperation(url.pathname.split('/')[3],data.action);if(['retry','resume'].includes(data.action))void service.tick().catch(console.error);reply(200,service.snapshot());return;}
+    if(req.method==='POST'&&/^\/api\/operations\/[a-z]+$/.test(url.pathname)){service.controlOperation(url.pathname.split('/')[3],data.action);if(['retry','resume'].includes(data.action))void service.tick().catch(error=>console.error(safeErrorText(error)));reply(200,service.snapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/daily/refresh'){
       if(!Array.isArray(data.symbols)||!data.symbols.length||data.symbols.length>6||data.symbols.some(s=>typeof s!=='string'||!store.watchlist().some(w=>w.symbol===s)))throw new Error('每次刷新 1–6 个关注标的');
       await service.runOperation('daily',{symbols:[...new Set(data.symbols)],manual:true});reply(200,updatedSnapshot());return;
@@ -75,7 +76,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     else if(req.method==='POST'&&url.pathname==='/api/quotes/refresh'){await service.runOperation('minutes',{manual:true});}
     else{reply(404,{error:'接口不存在'});return;}
     reply(200,updatedSnapshot());
-  }catch(error){reply(400,{error:error instanceof SyntaxError?'JSON 格式无效':error.message.slice(0,160)});}
+  }catch(error){reply(400,{error:error instanceof SyntaxError?'JSON 格式无效':safeErrorText(error)});}
 };}
 
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
@@ -88,9 +89,9 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
     const result=await createBackup(config.dbPath,resolve(dirname(config.dbPath),'backups'));
     store.status('backup',{state:'ok',receivedAt:result.createdAt,directory:result.directory,sha256:result.sha256});return {ok:true};
   }}),server=http.createServer(createHandler(store,service,{...config,staticHandler}));
-  server.on('error',error=>{console.error(error.message);store.close();process.exit(1);});
+  server.on('error',error=>{console.error(safeErrorText(error));store.close();process.exit(1);});
   const port=config.production?config.frontendPort:config.apiPort;
-  const tick=()=>service.tick().catch(error=>console.error('后台任务异常：',error.message));
+  const tick=()=>service.tick().catch(error=>console.error('后台任务异常：',safeErrorText(error)));
   server.listen(port,'127.0.0.1',()=>{console.log(`Signal Hunter: http://127.0.0.1:${port} (${config.mode}, ${config.production?'production':'API'}, loopback only)`);void tick();});
   const interval=setInterval(()=>void tick(),10000);interval.unref();
   let closing=false;

@@ -1,3 +1,4 @@
+import {safeErrorText} from '../../shared/safe-errors.mjs';
 import React,{useState} from 'react';
 import {Button} from '../major/Primitives';
 import {time} from '../major/api';
@@ -17,9 +18,9 @@ export default function NewsCoverage({data,mutate,busy}){
  <div className="coverage-queries">{(data?.newsIntake?.queries||[]).map(q=>{const r=q.last,s=q.lastSuccess;return <article key={q.id}><header><b>{q.label}</b><span>{q.enabled?'已启用':'未启用'}</span></header>
  <p>{data?.runtime?.offline?'演示模式不发起采集':state(r)} · {q.keywords||(q.id==='tracking'?'关键词为空，不请求':'无关键词限制')}</p>
  <small>最近尝试 {time(r?.startedAt)} · 最后成功 {time(s?.finishedAt)}</small>
- {r?.error&&<p className="m-warning">{r.error} · 已有标题保留</p>}
+ {r?.error&&<p className="m-warning">{safeErrorText(r.error)} · 已有标题保留</p>}
  {s&&<><small>原始 {s.rawCount} · 接受 {s.acceptedCount} · 过滤 {s.rejectedCount} · 新增 {s.added} · 修订 {s.updated}</small><small>实际返回发布时间：{s.observedFrom?`${time(s.observedFrom)} — ${time(s.observedTo)}`:'没有合格条目'}</small>{s.possiblyTruncated&&<p className="m-warning">返回条目达到 100；可能截断，不能据此判断全量覆盖。</p>}{r?.unobservedSeconds>1800&&<p className="m-warning">距离此前成功收取约 {Math.ceil(r.unobservedSeconds/60)} 分钟；未采集间隔的覆盖待核对。</p>}</>}
  </article>;})}</div>
- <details><summary>最近 30 次入口记录</summary><div className="ops-scroll"><table className="i-table"><thead><tr><th>入口 / 开始</th><th>结果</th><th>新增 / 修订</th></tr></thead><tbody>{(data?.newsIntake?.recent||[]).map(r=><tr key={r.id}><td>{r.label}<small>{time(r.startedAt)}</small></td><td>{state(r)}<small>{r.error||''}</small></td><td>{r.added??'—'} / {r.updated??'—'}</td></tr>)}</tbody></table></div></details>
+ <details><summary>最近 30 次入口记录</summary><div className="ops-scroll"><table className="i-table"><thead><tr><th>入口 / 开始</th><th>结果</th><th>新增 / 修订</th></tr></thead><tbody>{(data?.newsIntake?.recent||[]).map(r=><tr key={r.id}><td>{r.label}<small>{time(r.startedAt)}</small></td><td>{state(r)}<small>{safeErrorText(r.error)}</small></td><td>{r.added??'—'} / {r.updated??'—'}</td></tr>)}</tbody></table></div></details>
  </details>;
 }
