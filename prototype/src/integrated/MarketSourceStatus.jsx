@@ -5,7 +5,7 @@ const states={missing:'缺少有效数据',aligned:'收盘日期已对齐',laggi
 const requests={offline:'离线演示，不请求外部来源',failed:'上次请求失败','last-attempt-succeeded':'上次请求成功','not-attempted':'尚无请求记录'};
 const failures={timeout:'请求超时',network:'网络连接失败',http:'上游HTTP错误','empty-response':'来源返回空响应',format:'响应格式异常','no-data':'未返回有效数据','invalid-data':'数据标识、时区或内容异常','all-sources-failed':'主源与备用源均失败'};
 const sourceName=value=>sources[value]|| (value?'来源名称待核验':'未记录');
-const stamp=value=>{if(!value)return '未记录';const date=new Date(value);return Number.isFinite(+date)?date.toISOString().replace('T',' ').replace('.000Z',' UTC'):'时间格式待核验';};
+const stamp=value=>{if(!value)return '未记录';const date=new Date(value);return Number.isFinite(+date)?date.toISOString().replace('T',' ').replace('.000Z','Z').replace(/Z$/,' UTC'):'时间格式待核验';};
 function Channel({value,title}){
  const d=value?.diagnostics;
  if(!d)return <section className="market-source-channel"><h4>{title}</h4><p>尚无详细诊断记录</p></section>;
