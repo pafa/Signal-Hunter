@@ -20,6 +20,9 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const url=new URL(req.url,'http://127.0.0.1:4179');
     if(!url.pathname.startsWith('/api/')&&staticHandler){staticHandler(req,res);return;}
     if(service.instance?.id&&(req.headers['x-signal-instance']||['POST','PATCH','DELETE'].includes(req.method))&&req.headers['x-signal-instance']!==service.instance.id){reply(409,{error:'数据集已切换或尚未核对，请刷新页面后再继续'});return;}
+    if(req.method==='GET'&&url.pathname==='/api/evaluations'){reply(200,service.evaluations.list());return;}
+    const evaluationMatch=/^\/api\/evaluations\/([-a-f0-9]{36})(?:\/(report|export))?$/.exec(url.pathname);
+    if(req.method==='GET'&&evaluationMatch){reply(200,service.evaluations[evaluationMatch[2]||'detail'](evaluationMatch[1]));return;}
     const marketAccount=url.searchParams.get('account')||'aggressive',market=Object.hasOwn(service.marketSimulations||{},marketAccount)?service.marketSimulations[marketAccount]:null;
     if(url.pathname.startsWith('/api/market-simulation')&&!market)throw new Error('市场模拟参数无效，请填写全部风险与费用参数');
     if(req.method==='GET'&&url.pathname==='/api/market-simulation'){reply(200,market.snapshot());return;}
@@ -54,6 +57,13 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&url.pathname.startsWith('/api/evaluations')){
+      const m=/^\/api\/evaluations(?:\/([-a-f0-9]{36})\/(annotate|seal))?$/.exec(url.pathname);
+      if(!m)throw new Error('评估批次参数无效');
+      const allowed=m[2]==='annotate'?['requestId','version','label']:m[2]==='seal'?['requestId','version','confirm']:['requestId','version','title','start','end','rulesHash'];
+      if(Object.keys(data).some(k=>!allowed.includes(k)))throw new Error('评估批次参数无效');
+      reply(200,m[1]?service.evaluations[m[2]](m[1],data):service.evaluations.create(data));return;
+    }
     if(req.method==='POST'&&url.pathname.startsWith('/api/market-simulation/')){
       const part=url.pathname.slice('/api/market-simulation/'.length),m=market;
       const allowed={initialize:['requestId','version','initialUSD','config','confirmSimulation'],configure:['requestId','version','config','note'],orders:['requestId','version','order'],resume:['requestId','version','note'],process:[]};
