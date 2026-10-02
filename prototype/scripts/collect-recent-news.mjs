@@ -1,6 +1,7 @@
+import {parseCollectionWindow} from '../server/news-window.mjs';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
-import {fetchText,parseReutersFeed,hash} from '../server/providers.mjs';
+import {fetchText,hash} from '../server/providers.mjs';
 import {classifyHeadline,RULES_VERSION} from '../server/triage.mjs';
 
 // Explicit fixed window; fetching history today is never recorded as historical discovery.
@@ -22,8 +23,8 @@ for(let offset=0;offset<days.length;offset+=3){
   const next=new Date(Date.parse(day+'T00:00:00Z')+86400000).toISOString().slice(0,10),url=new URL('https://news.google.com/rss/search');
   url.search=new URLSearchParams({q:`site:reuters.com after:${day} before:${next}`,hl:'en-US',gl:'US',ceid:'US:en'});
   const requestAt=new Date().toISOString();
-  try{const xml=await fetchText(url.href),receivedAt=new Date().toISOString(),items=parseReutersFeed(xml);await writeFile(output+'/'+day+'.xml',xml);
-   return {query:{day,url:url.href,requestAt,receivedAt,returned:items.length,possiblyCapped:items.length>=100,sha256:hash(xml)},items};
+  try{const xml=await fetchText(url.href),receivedAt=new Date().toISOString(),parsed=parseCollectionWindow(xml,startAt,endAt),items=parsed.items;await writeFile(output+'/'+day+'.xml',xml);
+   return {query:{day,url:url.href,requestAt,receivedAt,returned:items.length,rawCount:parsed.rawCount,acceptedCount:parsed.acceptedCount,rejectedCount:parsed.rejectedCount,inWindowCount:parsed.inWindowCount,possiblyCapped:parsed.possiblyCapped,sha256:hash(xml)},items};
   }catch(e){return {query:{day,url:url.href,requestAt,error:e.message},items:[]};}
  }));
  for(const result of results){queries.push(result.query);for(const item of result.items){
