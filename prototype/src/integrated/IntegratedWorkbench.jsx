@@ -2,6 +2,7 @@ import {priorityLabels} from '../../shared/event-labels.mjs';
 import NewsLibrary from '../major/NewsLibrary';
 import React,{useEffect,useRef,useState} from 'react';
 import DatasetIdentity from './DatasetIdentity';
+const MarketSimulation=React.lazy(()=>import('./MarketSimulation'));
 const ObservationInbox=React.lazy(()=>import('./ObservationInbox'));
 import DataDesk from '../terminal/DataDesk';
 import '../terminal/terminal.css';
@@ -43,7 +44,7 @@ export default function IntegratedWorkbench(){
  function sell(p){proposal(p.symbol,'sell',topics.find(t=>t.id===p.topicId));}
  const openCompany=symbol=>{setStock(symbol);open({type:'dossier',symbol});};
  const close=()=>setDialog(null),dtopic=topics.find(t=>t.id===dialog?.topicId)||topic;
- return <ErrorContext.Provider value={error}><main className={`integrated major v6 v7 v8 focus-${focus}`} aria-label="全球重大事件交易工作台"><header className="i-header"><div className="m-brand"><img src="/signal.svg" alt=""/><strong>信号猎手</strong><span>Signal Hunter</span><b className="i-live-dot">{data?.runtime?.offline?'DEMO':'LOCAL'}</b></div><div className="i-header-actions"><span>美股 · 港股 · A 股</span><Button onClick={()=>open({type:'data'})}>数据源</Button><Button onClick={()=>open({type:'rules'})}>规则与执行</Button><Button disabled={!book} onClick={()=>open({type:'params'})}>组合参数</Button><Button primary disabled={!data} onClick={()=>open({type:'new'})}>＋ 新建主题</Button></div></header>
+ return <ErrorContext.Provider value={error}><main className={`integrated major v6 v7 v8 focus-${focus}`} aria-label="全球重大事件交易工作台"><header className="i-header"><div className="m-brand"><img src="/signal.svg" alt=""/><strong>信号猎手</strong><span>Signal Hunter</span><b className="i-live-dot">{data?.runtime?.offline?'DEMO':'LOCAL'}</b></div><div className="i-header-actions"><span>美股 · 港股 · A 股</span><Button onClick={()=>open({type:'data'})}>数据源</Button><Button onClick={()=>open({type:'rules'})}>规则与执行</Button><Button disabled={!book} onClick={()=>open({type:'params'})}>组合参数</Button><Button disabled={!data} onClick={()=>open({type:'market-simulation'})}>市场模拟</Button><Button primary disabled={!data} onClick={()=>open({type:'new'})}>＋ 新建主题</Button></div></header>
  {data?.runtime?.offline&&<div className="demo-banner" role="status">离线演示 · 事件、新闻与曲线均为虚构；证券代码仅作界面示例。操作只保存在独立演示库。</div>}
  <DatasetIdentity runtime={data?.runtime} count={topics.length}/>
  {book?<AccountStrip book={book}/>:<div className="i-loading">正在连接本地组合与研究…</div>}
@@ -58,6 +59,7 @@ export default function IntegratedWorkbench(){
  <footer className="i-footer"><span>v0.11 · 公司关系可纠错 · 初筛留样 · 本人批准演练</span><span>{data?.autoWatch?.deferred?.length?`关注待处理 ${data.autoWatch.deferred.length} · `:''}{busy?'保存中':data?'本机存储已连接':'连接中'} · {watch.length}/40 重点标的</span></footer>
  {notice&&<div className="m-toast" role="status">{notice}<button aria-label="关闭提示" onClick={()=>setNotice('')}>×</button></div>}
  {dialog?.type==='dossier'&&data&&<CompanyDossier key={dialog.symbol} symbol={dialog.symbol} topicId={topic?.id} data={data} onClose={close} onCompany={openCompany} onTopic={id=>{const t=topics.find(t=>t.id===id);if(t){choose(t);close();}}} onEdit={(id,symbol)=>{const t=topics.find(t=>t.id===id);if(t){choose(t);open({type:'company',symbol});}}} onPropose={(symbol,id)=>proposal(symbol,'buy',topics.find(t=>t.id===id))}/> }
+ {dialog?.type==='market-simulation'&&data&&<React.Suspense fallback={<p role="status">正在读取市场模拟…</p>}><MarketSimulation data={data} onClose={close}/></React.Suspense>}
  {dialog?.type==='observations'&&<React.Suspense fallback={<p role="status">正在读取观察待办…</p>}><ObservationInbox data={data} initialTopicId={topic?.id} busy={busy} mutate={mutate} onClose={close} onTopic={id=>{const t=topics.find(t=>t.id===id);if(t){choose(t);close();}}}/></React.Suspense>}
  {dialog?.type==='operations'&&data&&<Operations data={data} onClose={close} busy={busy} onControl={(name,payload)=>mutate(`/api/operations/${name}`,'POST',payload)}/>}
  {dialog?.type==='data'&&<DataDesk onClose={()=>{close();void load();}}/>}{dialog?.type==='rules'&&<Rulebook onClose={close}/>}

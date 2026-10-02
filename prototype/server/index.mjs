@@ -20,6 +20,12 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const url=new URL(req.url,'http://127.0.0.1:4179');
     if(!url.pathname.startsWith('/api/')&&staticHandler){staticHandler(req,res);return;}
     if(service.instance?.id&&(req.headers['x-signal-instance']||['POST','PATCH','DELETE'].includes(req.method))&&req.headers['x-signal-instance']!==service.instance.id){reply(409,{error:'数据集已切换或尚未核对，请刷新页面后再继续'});return;}
+    const marketAccount=url.searchParams.get('account')||'aggressive',market=Object.hasOwn(service.marketSimulations||{},marketAccount)?service.marketSimulations[marketAccount]:null;
+    if(url.pathname.startsWith('/api/market-simulation')&&!market)throw new Error('市场模拟参数无效，请填写全部风险与费用参数');
+    if(req.method==='GET'&&url.pathname==='/api/market-simulation'){reply(200,market.snapshot());return;}
+    if(req.method==='GET'&&url.pathname==='/api/market-simulation/history'){reply(200,market.history());return;}
+    if(req.method==='GET'&&/^\/api\/market-simulation\/history\/\d+$/.test(url.pathname)){reply(200,market.event(Number(url.pathname.split('/')[4])));return;}
+    if(req.method==='GET'&&/^\/api\/market-simulation\/orders\/[-a-z0-9]{36}\/review$/.test(url.pathname)){reply(200,market.review(url.pathname.split('/')[4]));return;}
     if(req.method==='GET'&&url.pathname==='/api/semantic-events'){reply(200,service.semanticEvents.list());return;}
     if(req.method==='GET'&&/^\/api\/semantic-events\/[-a-z0-9]{36}$/.test(url.pathname)){reply(200,service.semanticEvents.get(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/events'){const params=Object.fromEntries(url.searchParams);for(const key of ['offset','limit'])if(key in params)params[key]=Number(params[key]);reply(200,service.eventContinuity(params));return;}
@@ -48,6 +54,16 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&url.pathname.startsWith('/api/market-simulation/')){
+      const part=url.pathname.slice('/api/market-simulation/'.length),m=market;
+      const allowed={initialize:['requestId','version','initialUSD','config','confirmSimulation'],configure:['requestId','version','config','note'],orders:['requestId','version','order'],resume:['requestId','version','note'],process:[]};
+      const orderMatch=/^orders\/([-a-z0-9]{36})$/.exec(part),keys=orderMatch?['requestId','version','action','note','fingerprint','confirmSimulation']:Object.hasOwn(allowed,part)?allowed[part]:null;
+      if(!keys||Object.keys(data).some(k=>!keys.includes(k)))throw new Error('市场模拟执行数据必须由服务端适配器提供');
+      if(orderMatch)reply(200,m.decide(orderMatch[1],data));
+      else if(part==='orders')reply(200,m.propose(data));
+      else if(part==='process')reply(200,m.process());
+      else reply(200,m[part](data));return;
+    }
     if(req.method==='POST'&&url.pathname==='/api/semantic-events'){reply(202,service.semanticEvents.start(data));return;}
     if(req.method==='POST'&&/^\/api\/semantic-events\/[-a-z0-9]{36}\/(cancel|decision)$/.test(url.pathname)){
       const parts=url.pathname.split('/');

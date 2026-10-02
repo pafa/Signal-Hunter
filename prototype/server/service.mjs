@@ -1,3 +1,5 @@
+import {strategyProfiles} from '../shared/strategy-profiles.mjs';
+import {openMarketSimulation} from './market-simulation.mjs';
 import {openSemanticEvents} from './semantic-events.mjs';
 import {marketFailure} from './market-diagnostics.mjs';
 import {openObservationInbox} from './observation-inbox.mjs';
@@ -15,12 +17,14 @@ import {createProviderGate} from './provider-gate.mjs';
 import {dataCapabilities} from './data-capabilities.mjs';
 import {dailyHealth} from '../shared/market-clock.mjs';
 import {openModelResearchRuns} from './model-research-runs.mjs';
-export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCooldown=60000,now=()=>Date.now(),mode='legacy',instance=null,backupTask=null,modelConfig=null,modelRunner,semanticRunner}={}){
+export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCooldown=60000,now=()=>Date.now(),mode='legacy',instance=null,backupTask=null,modelConfig=null,modelRunner,semanticRunner,marketInputs}={}){
   const offline=mode==='demo';
   const denyNetwork=()=>{throw new Error('离线演示不访问外部数据；请另行启动空白研究模式');};
   const clock=()=>new Date(now()).toISOString();
   const research=openResearch(store,{clock,seed:mode!=='research',...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:{})});
   const paper=openPaper(store,research,{clock,seed:mode!=='research'});
+  const marketSimulations=Object.fromEntries(Object.entries(strategyProfiles).map(([accountId,profile])=>[accountId,openMarketSimulation(store,research,{accountId,profile,enabled:!offline,clock,...(marketInputs?{getInputs:()=>marketInputs(accountId)}:{})})]));
+  const marketSimulation=marketSimulations.aggressive;
   const modelResearch=openModelResearchRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(modelRunner?{runner:modelRunner}:{}),now});
   const semanticEvents=openSemanticEvents(store,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(semanticRunner?{runner:semanticRunner}:{}),now});
   const intake=openNewsIntake(store,{clock});
@@ -35,7 +39,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   if(offline)initializeDemoData(store);
   const service={
     mode,instance,
-    research,paper,observations,modelResearch,semanticEvents,
+    research,paper,observations,modelResearch,semanticEvents,marketSimulation,marketSimulations,
     processEvents(){try{const changed=continuity.process(research.list());if(changed||store.checks().events?.state==='error')store.status('events',{state:'ok',receivedAt:clock()});return {ok:true,changed};}catch(error){store.status('events',{state:'error',attemptedAt:clock(),error:errorText(error)});return {error:errorText(error)};}},
     eventContinuity(params={}){return {...continuity.snapshot({...params,positions:paper.snapshot().positions,watchlist:store.watchlist()}),health:store.checks().events||{state:'pending'}};},
     eventDetail(id){return continuity.detail(id);},
