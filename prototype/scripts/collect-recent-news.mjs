@@ -1,4 +1,4 @@
-import {parseCollectionWindow} from '../server/news-window.mjs';
+import {parseCollectionWindow,summarizeCollectionCoverage} from '../server/news-window.mjs';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {fetchText,hash} from '../server/providers.mjs';
@@ -17,24 +17,25 @@ await writeFile(output+'/baseline-triage.mjs',baselineSource,{flag:'wx'});
 const days=[];
 // Google date boundaries are not documented as Shanghai time; exact timestamp filter below is authoritative.
 for(let t=Date.parse(startDate+'T00:00:00Z')-86400000;t<=Date.parse(endDate+'T00:00:00Z');t+=86400000)days.push(new Date(t).toISOString().slice(0,10));
-const queries=[],rows=new Map();
+const queries=[],rows=new Map(),coverageResults=[];
 for(let offset=0;offset<days.length;offset+=3){
  const results=await Promise.all(days.slice(offset,offset+3).map(async day=>{
   const next=new Date(Date.parse(day+'T00:00:00Z')+86400000).toISOString().slice(0,10),url=new URL('https://news.google.com/rss/search');
   url.search=new URLSearchParams({q:`site:reuters.com after:${day} before:${next}`,hl:'en-US',gl:'US',ceid:'US:en'});
   const requestAt=new Date().toISOString();
-  try{const xml=await fetchText(url.href),receivedAt=new Date().toISOString(),parsed=parseCollectionWindow(xml,startAt,endAt),items=parsed.items;await writeFile(output+'/'+day+'.xml',xml);
-   return {query:{day,url:url.href,requestAt,receivedAt,returned:items.length,rawCount:parsed.rawCount,acceptedCount:parsed.acceptedCount,rejectedCount:parsed.rejectedCount,inWindowCount:parsed.inWindowCount,possiblyCapped:parsed.possiblyCapped,sha256:hash(xml)},items};
+  try{const xml=await fetchText(url.href),receivedAt=new Date().toISOString(),parsed=parseCollectionWindow(xml,startAt,endAt,{sliceStartAt:day+'T00:00:00Z',sliceEndAt:next+'T00:00:00Z'}),items=parsed.items;await writeFile(output+'/'+day+'.xml',xml);
+   return {query:{day,url:url.href,requestAt,receivedAt,returned:items.length,rawCount:parsed.rawCount,acceptedCount:parsed.acceptedCount,rejectedCount:parsed.rejectedCount,inWindowCount:parsed.inWindowCount,possiblyCapped:parsed.possiblyCapped,outsideWindowCount:parsed.outsideWindowCount,outsideSliceCount:parsed.outsideSliceCount,uniqueReturnedCount:parsed.uniqueReturnedCount,duplicateWithinQueryCount:parsed.duplicateWithinQueryCount,actualPublishedStartAt:parsed.actualPublishedStartAt,actualPublishedEndAt:parsed.actualPublishedEndAt,sha256:hash(xml)},items};
   }catch(e){return {query:{day,url:url.href,requestAt,error:e.message},items:[]};}
  }));
- for(const result of results){queries.push(result.query);for(const item of result.items){
+ for(const result of results){queries.push(result.query);coverageResults.push(result);for(const item of result.items){
   if(item.publishedAt<startAt||item.publishedAt>endAt)continue;
-  const old=rows.get(item.id);if(old){old.queryDays.push(result.query.day);continue;}
+  const old=rows.get(item.id);if(old){if(!old.queryDays.includes(result.query.day))old.queryDays.push(result.query.day);continue;}
   rows.set(item.id,{...item,firstSeen:result.query.receivedAt,queryDays:[result.query.day],baseline:classifyHeadline(item)});
  }console.log(JSON.stringify(result.query));}
 }
 const items=[...rows.values()].sort((a,b)=>a.publishedAt.localeCompare(b.publishedAt)||a.id.localeCompare(b.id));
+const coverage=summarizeCollectionCoverage(coverageResults);
 const buckets=Object.fromEntries(['review','clue','quiet'].map(b=>[b,items.filter(n=>n.baseline.bucket===b).length]));
 const auditIds=[...items.filter(n=>n.baseline.bucket==='review').map(n=>n.id),...['clue','quiet'].flatMap(b=>items.filter(n=>n.baseline.bucket===b).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,30).map(n=>n.id))];
-await writeFile(output+'/news.json',JSON.stringify({protocol,queries,items,buckets,auditIds,finishedAt:new Date().toISOString()},null,2));
-console.log(JSON.stringify({output,unique:items.length,buckets,failed:queries.filter(q=>q.error).length,capped:queries.filter(q=>q.possiblyCapped).length}));
+await writeFile(output+'/news.json',JSON.stringify({protocol,queries,coverage,items,buckets,auditIds,finishedAt:new Date().toISOString()},null,2));
+console.log(JSON.stringify({output,unique:items.length,buckets,coverage,failed:queries.filter(q=>q.error).length,capped:queries.filter(q=>q.possiblyCapped).length}));
