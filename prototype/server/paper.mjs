@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {instrument} from './providers.mjs';
-import {evidenceStamp,reviewedVersion} from '../shared/review-state.mjs';
+import {evidenceStamp,reviewedVersion,latestReview} from '../shared/review-state.mjs';
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
 const positive=n=>Number.isFinite(n)&&n>0;
 const clean=(v,max=1000)=>typeof v==='string'&&v.trim()&&v.length<=max?v.trim():null;
@@ -37,7 +37,7 @@ function gate(book,o){
   if(!p||o.qty>p.qty-reserved)errors.push('卖出量超过扣除待批申请后的可卖量');
  }else{
   const related=book.positions.filter(x=>x.topicId===o.topicId||issuer(x.symbol)===issuer(o.symbol));
-  if(related.some(x=>book.reviews.filter(r=>r.symbol===x.symbol&&r.at>=x.openedAt).at(-1)?.result==='invalidated'))errors.push('相关持仓逻辑已人工判定失效，复核恢复前暂停新增风险');
+  if(related.some(x=>latestReview(book,x)?.result==='invalidated'))errors.push('相关持仓逻辑已人工判定失效，复核恢复前暂停新增风险');
   const buys=[...pending.filter(x=>x.side==='buy'),o];
   if(pending.some(x=>x.side==='buy'&&x.price!==price(book,x.symbol)))errors.push('存在场景价不一致的旧待批申请，请先拒绝并按冻结价格重建');
   const marked=x=>round(x.qty*price(book,x.symbol)/fx(book,x.symbol));
@@ -64,7 +64,7 @@ export function openPaper(store,research,{clock=()=>new Date().toISOString(),see
  if(!db.prepare("SELECT 1 FROM paper_books WHERE id='structural-v5'").get()){
   const at=clock(),book={id:'structural-v5',version:0,engine:PAPER_VERSION,mode:'结构演练',baseCurrency:'USD',initial:1000000,cash:1000000,realized:0,fees:0,createdAt:at,updatedAt:at,prices:{...MARKET_PRICES},params:{cashFloorPct:35,issuerCapPct:12,themeCapPct:25,feeBps:10,slippageBps:5,fx:{USD:1,CNY:7.10,HKD:7.80}},positions:[],orders:[],fills:[],reviews:[]};
   const rows=seed?[['AMD.US',80000,'agent-cpu'],['INTC.US',60000,'agent-cpu'],['SPOT.US',60000,'spotify-access'],['03986.HK',80000,'memory-global'],['688008.SH',70000,'memory-global']]:[];
-  for(const [symbol,budget,topicId] of rows){const lot=symbol.endsWith('.US')?1:100,qty=Math.floor(budget*fx(book,symbol)/price(book,symbol)/lot)*lot,cost=round(qty*price(book,symbol)/fx(book,symbol));book.positions.push({symbol,topicId,qty,costUSD:cost,avgNative:price(book,symbol),researchVersion:topicId==='regional-basket'?null:research.get(topicId).version,origin:'结构演练初始化样例',openedAt:at});book.cash=round(book.cash-cost);}
+  for(const [symbol,budget,topicId] of rows){const lot=symbol.endsWith('.US')?1:100,qty=Math.floor(budget*fx(book,symbol)/price(book,symbol)/lot)*lot,cost=round(qty*price(book,symbol)/fx(book,symbol));book.positions.push({lifecycleId:randomUUID(),symbol,topicId,qty,costUSD:cost,avgNative:price(book,symbol),researchVersion:topicId==='regional-basket'?null:research.get(topicId).version,origin:'结构演练初始化样例',openedAt:at});book.cash=round(book.cash-cost);}
   for(const [symbol,side,qty,topicId,label] of (seed?[['ARM.US','buy',200,'agent-cpu','建仓 3% 演练'],['AMD.US','buy',100,'agent-cpu','增仓 2% 演练'],['SPOT.US','sell',40,'spotify-access','减仓 2% 演练']]:[]))book.orders.push({id:randomUUID(),clientId:'seed-'+symbol,symbol,side,qty,topicId,topicVersion:research.get(topicId).version,price:price(book,symbol),limit:price(book,symbol)*(side==='buy'?1.02:.98),status:'pending',reason:label+'；仅检验结构，不代表研究已证实',origin:'预置演练申请',createdAt:at,expiresAt:new Date(Date.parse(at)+86400000).toISOString(),holdingHorizon:'仅演练；实际期限待证据',invalidation:'原逻辑被推翻时复核，退出仍需人工批准'});
   db.exec('BEGIN IMMEDIATE');try{write(book,'100 万美元结构演练初始化；非真实入金');db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
  }
@@ -104,7 +104,7 @@ export function openPaper(store,research,{clock=()=>new Date().toISOString(),see
     const p=book.positions.find(p=>p.symbol===o.symbol);
     if(o.side==='buy'){
      book.cash=round(book.cash-e.total);
-     if(p){p.avgNative=(p.avgNative*p.qty+e.execution*o.qty)/(p.qty+o.qty);p.qty+=o.qty;p.costUSD=round(p.costUSD+e.total);}else book.positions.push({symbol:o.symbol,topicId:o.topicId,qty:o.qty,costUSD:e.total,avgNative:e.execution,researchVersion:o.topicVersion,origin:'人工批准演练',openedAt:clock()});
+     if(p){p.avgNative=(p.avgNative*p.qty+e.execution*o.qty)/(p.qty+o.qty);p.qty+=o.qty;p.costUSD=round(p.costUSD+e.total);}else book.positions.push({lifecycleId:randomUUID(),symbol:o.symbol,topicId:o.topicId,qty:o.qty,costUSD:e.total,avgNative:e.execution,researchVersion:o.topicVersion,origin:'人工批准演练',openedAt:clock()});
     }else{const basis=p.costUSD*o.qty/p.qty;book.cash=round(book.cash+e.total);book.realized=round(book.realized+e.total-basis);p.costUSD=round(p.costUSD-basis);p.qty-=o.qty;book.positions=book.positions.filter(p=>p.qty>0);}
     book.fees=round(book.fees+e.fee);o.status='filled';o.decidedAt=clock();o.decisionNote=clean(data.note)||'确认结构演练';book.fills.push({id:randomUUID(),orderId:id,symbol:o.symbol,side:o.side,qty:o.qty,...e,at:clock(),topicId:o.topicId,topicVersion:o.topicVersion,mode:'scenario'});
    });
@@ -121,7 +121,7 @@ export function openPaper(store,research,{clock=()=>new Date().toISOString(),see
    const topic=research.get(p.topicId);
    if(data.topicVersion!==topic.version)throw new Error('研究版本已变化，请重新核对后复核');
    if(!['intact','weakened','invalidated','verify'].includes(data.result)||!clean(data.note))throw new Error('填写复核结果与依据');
-   book.reviews.push({id:randomUUID(),symbol:p.symbol,result:data.result,note:data.note.trim(),at:clock(),topicId:p.topicId,positionQty:p.qty,reviewedResearchVersion:topic.version,reviewedEvidence:topic.evidence.map(evidenceStamp)});
+   book.reviews.push({id:randomUUID(),symbol:p.symbol,positionLifecycleId:p.lifecycleId||null,result:data.result,note:data.note.trim(),at:clock(),topicId:p.topicId,positionQty:p.qty,reviewedResearchVersion:topic.version,reviewedEvidence:topic.evidence.map(evidenceStamp)});
   });},
   history(){return db.prepare('SELECT version,at,reason FROM paper_versions ORDER BY version DESC LIMIT 60').all();}
  };

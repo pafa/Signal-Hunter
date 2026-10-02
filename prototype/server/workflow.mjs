@@ -3,15 +3,15 @@ import {canAutoWatch} from '../shared/company-directory.mjs';
 import {claimsOf} from '../shared/claims.mjs';
 import {CLAIM_STATES} from '../shared/uncertainty.mjs';
 import {evidenceCoverage} from './triage.mjs';
-import {reviewedVersion,pendingCounterevidence} from '../shared/review-state.mjs';
+import {reviewedVersion,pendingCounterevidence,latestReview} from '../shared/review-state.mjs';
 export const WORKFLOW_VERSION='event-workflow/0.9.0';
 export function assessTopic(topic,{today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Shanghai'}),book=null}={}){
  const coverage=evidenceCoverage(topic),h=topic.hypothesis,missing=coverage.missingSteps.map(id=>topic.chain.find(s=>s.id===id)?.title||id);
  const reviewDue=!!h.reviewAt&&h.reviewAt<=today||claimsOf(topic).some(c=>c.resolveBy&&c.resolveBy<=today&&['open','unresolved'].includes(c.outcome));
  const blockers=[...missing.map(s=>`${s}缺支持证据`),...(!h.trigger?['交易触发未定义']:[]),...(!h.invalidation?['失效条件未定义']:[])];
  const positions=(book?.positions||[]).filter(p=>p.topicId===topic.id||topic.companies.some(c=>c.symbol===p.symbol));
- const invalidated=positions.filter(p=>(book?.reviews||[]).filter(r=>r.symbol===p.symbol&&r.at>=p.openedAt).at(-1)?.result==='invalidated');
- const weakened=positions.some(p=>(book?.reviews||[]).filter(r=>r.symbol===p.symbol&&r.at>=p.openedAt).at(-1)?.result==='weakened');
+ const invalidated=positions.filter(p=>latestReview(book,p)?.result==='invalidated');
+ const weakened=positions.some(p=>latestReview(book,p)?.result==='weakened');
  const orders=(book?.orders||[]).filter(o=>o.topicId===topic.id&&o.status==='pending');
  const unreviewedAgainst=pendingCounterevidence(topic,book,positions).length;
  const researchAgainst=!positions.length&&coverage.against;

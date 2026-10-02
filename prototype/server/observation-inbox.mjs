@@ -1,19 +1,19 @@
 import {hash} from './providers.mjs';
 import {claimsOf} from '../shared/claims.mjs';
-import {evidenceStamp,pendingCounterevidence,reviewedVersion} from '../shared/review-state.mjs';
+import {evidenceStamp,pendingCounterevidence,reviewedVersion,positionReference} from '../shared/review-state.mjs';
 const validDate=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
 export function observationHits(topics,book,today){
  if(!validDate(today))throw new Error('观察检查日期无效');
  const hits=[];
  for(const t of topics.filter(t=>t.status==='active')){
   const positions=(book.positions||[]).filter(p=>p.topicId===t.id||t.companies.some(c=>c.symbol===p.symbol));
-  const add=(kind,reason,input)=>{const snapshot={ruleVersion:'observation/1',topicId:t.id,topicVersion:t.version,kind,input};hits.push({id:hash(JSON.stringify(snapshot)),topicId:t.id,topicVersion:t.version,title:t.title,kind,reason,symbols:positions.map(p=>p.symbol),input:snapshot});};
+  const add=(kind,reason,input,affected=positions)=>{const affectedPositions=affected.map(positionReference).sort((a,b)=>a.lifecycleId.localeCompare(b.lifecycleId));const snapshot={ruleVersion:'observation/2',topicId:t.id,topicVersion:t.version,kind,input,affectedPositions};hits.push({id:hash(JSON.stringify(snapshot)),topicId:t.id,topicVersion:t.version,title:t.title,kind,reason,symbols:affectedPositions.map(p=>p.symbol),affectedPositions,input:snapshot});};
   const dates=[t.hypothesis?.reviewAt,...claimsOf(t).filter(c=>['open','unresolved'].includes(c.outcome)).map(c=>c.resolveBy)].filter(v=>validDate(v)&&v<=today);
   if(dates.length)add('due','观察或主张复核已到期',[...new Set(dates)].sort());
   const changed=positions.filter(p=>p.topicId===t.id&&reviewedVersion(book,p)!==t.version);
-  if(changed.length)add('version','持仓关联研究已有新版本',changed.map(p=>[p.symbol,p.openedAt,reviewedVersion(book,p)]));
+  if(changed.length)add('version','持仓关联研究已有新版本',changed.map(p=>[p.symbol,p.openedAt,reviewedVersion(book,p)]),changed);
   const against=pendingCounterevidence(t,book,positions);
-  if(against.length)add('counterevidence','持仓出现新的反向线索',against.map(evidenceStamp).sort());
+  if(against.length)add('counterevidence','持仓出现新的反向线索',against.map(evidenceStamp).sort(),positions.filter(p=>pendingCounterevidence(t,book,[p]).length));
  }
  return hits;
 }
