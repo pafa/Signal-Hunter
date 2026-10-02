@@ -29,6 +29,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/market-simulation/history'){reply(200,market.history());return;}
     if(req.method==='GET'&&/^\/api\/market-simulation\/history\/\d+$/.test(url.pathname)){reply(200,market.event(Number(url.pathname.split('/')[4])));return;}
     if(req.method==='GET'&&/^\/api\/market-simulation\/orders\/[-a-z0-9]{36}\/review$/.test(url.pathname)){reply(200,market.review(url.pathname.split('/')[4]));return;}
+    if(req.method==='GET'&&url.pathname==='/api/semantic-events/materials'){reply(200,service.semanticEvents.materials(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/semantic-events'){reply(200,service.semanticEvents.list());return;}
     if(req.method==='GET'&&/^\/api\/semantic-events\/[-a-z0-9]{36}$/.test(url.pathname)){reply(200,service.semanticEvents.get(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/events'){const params=Object.fromEntries(url.searchParams);for(const key of ['offset','limit'])if(key in params)params[key]=Number(params[key]);reply(200,service.eventContinuity(params));return;}
