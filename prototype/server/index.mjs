@@ -35,7 +35,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/revisions$/.test(url.pathname)){reply(200,store.revisions(url.pathname.split('/')[3]));return;}
     if(!['POST','PATCH','DELETE'].includes(req.method)){reply(404,{error:'接口不存在'});return;}
     if(req.headers['content-type']!=='application/json'){reply(415,{error:'需要 JSON 请求'});return;}
-    const maxBody=/^\/api\/research\/[^/]+\/materials$/.test(url.pathname)?300000:/^\/api\/research\/[^/]+\/companies$/.test(url.pathname)?64000:16384;
+    const maxBody=/^\/api\/research\/[^/]+\/(materials|dossier)$/.test(url.pathname)?300000:/^\/api\/research\/[^/]+\/companies$/.test(url.pathname)?64000:16384;
     const chunks=[];let bytes=0;for await(const chunk of req){const buffer=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);bytes+=buffer.length;if(bytes>maxBody){reply(413,{error:'请求过大'});return;}chunks.push(buffer);}const body=Buffer.concat(chunks).toString('utf8');
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
@@ -54,6 +54,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='POST'&&url.pathname==='/api/research/exit-preview'){reply(200,planExit(data));return;}
     if(req.method==='POST'&&url.pathname==='/api/research/from-news'){const created=service.research.createFromNews(data);reply(200,{...updatedSnapshot(),createdTopicId:created.id});return;}
     if(req.method==='POST'&&url.pathname==='/api/research'){const created=service.research.create(data);reply(200,{...updatedSnapshot(),createdTopicId:created.id});return;}
+    else if(req.method==='POST'&&/^\/api\/research\/[^/]+\/dossier$/.test(url.pathname)){service.research.update(url.pathname.split('/')[3],data);}
     else if(req.method==='PATCH'&&/^\/api\/research\/[^/]+$/.test(url.pathname)){service.research.update(url.pathname.split('/')[3],data);}
     else if(req.method==='POST'&&/^\/api\/research\/[^/]+\/evidence$/.test(url.pathname)){service.research.addEvidence(url.pathname.split('/')[3],data);}
     else if(req.method==='POST'&&/^\/api\/research\/[^/]+\/claims$/.test(url.pathname)){service.research.saveClaim(url.pathname.split('/')[3],data);}
