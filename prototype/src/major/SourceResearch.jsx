@@ -1,3 +1,4 @@
+import ArticleReadingScope from './ArticleReadingScope';
 import PublicationDateEvidence from './PublicationDateEvidence';
 import React,{useEffect,useRef,useState} from 'react';
 import {Button} from './Primitives';
@@ -29,7 +30,7 @@ export default function SourceResearch({topic,busy,mutate}){
  <div className="m-form-actions"><span>按实际获取时间入库 · 尚待核验</span><Button primary type="submit" disabled={busy||base!==topic.version}>{busy?'读取 / 保存中…':mode==='web'?'读取并保存正文':'保存材料快照'}</Button></div>
  </form></details>
  <h3>已关联材料 <small>{data?.materials.length??'…'} 份</small></h3>
- {!data?<p className="m-note">正在加载材料…</p>:!data.materials.length?<p className="m-note">目前只有已有线索，尚未保存正文材料。补充来源后可逐版复核。</p>:data.materials.map(m=><details className="source-item" key={m.id}><summary><strong>{m.title}</strong><small>材料 v{m.revision} · {scopes[m.scope]} · {stanceNames[m.stance]}</small></summary><p className="m-note">{m.sourceName} · 来源 {m.publishedAt||'日期未知'}{m.datePrecision==='day'?'（仅日期）':''}<br/>本版获取 {time(m.availableAt)} · {m.verification==='unverified'?'内容未证实':'核验状态见证据链'}</p><PublicationDateEvidence evidence={m.publicationDateEvidence} showMissing={m.scope==='extracted-text'}/>{m.url&&<a href={m.url} target="_blank" rel="noreferrer">打开原始来源 ↗</a>}<p className="m-note">与事件的关系：{m.interpretation}</p><pre className="source-body">{m.body}</pre><small>内容指纹 {m.contentHash.slice(0,20)} · 旧版保留</small></details>)}
+ {!data?<p className="m-note">正在加载材料…</p>:!data.materials.length?<p className="m-note">目前只有已有线索，尚未保存正文材料。补充来源后可逐版复核。</p>:data.materials.map(m=><details className="source-item" key={m.id}><summary><strong>{m.title}</strong><small>材料 v{m.revision} · {scopes[m.scope]} · {stanceNames[m.stance]}</small></summary><p className="m-note">{m.sourceName} · 来源 {m.publishedAt||'日期未知'}{m.datePrecision==='day'?'（仅日期）':''}<br/>本版获取 {time(m.availableAt)} · {m.verification==='unverified'?'内容未证实':'核验状态见证据链'}</p><PublicationDateEvidence evidence={m.publicationDateEvidence} showMissing={m.scope==='extracted-text'}/><ArticleReadingScope evidence={m.extractionEvidence} showMissing={m.scope==='extracted-text'}/>{m.url&&<a href={m.url} target="_blank" rel="noreferrer">打开原始来源 ↗</a>}<p className="m-note">与事件的关系：{m.interpretation}</p><pre className="source-body">{m.body}</pre><small>内容指纹 {m.contentHash.slice(0,20)} · 旧版保留</small></details>)}
  {data?.attempts.some(a=>a.state==='failed')&&<details className="source-failures" open><summary>读取失败记录</summary>{data.attempts.filter(a=>a.state==='failed').map((a,i)=><p key={`${a.at}:${i}`}><b>{time(a.at)}</b> · {a.error}<small>{a.url}</small></p>)}</details>}
  </div>;
 }
