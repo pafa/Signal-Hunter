@@ -47,6 +47,34 @@ test('reingestion does not stale a comparison; a new headline revision disables 
   assert.throws(()=>f.runs.start(input),/已修订/);
  }finally{await f.close();}
 });
+test('pre-date-precision comparisons retain decisions across upgrade without rewriting frozen inputs',async()=>{
+ const f=fixture();try{
+  const started=f.runs.start(input);await f.runs.wait(started.id);
+  const saved=JSON.parse(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(started.id).payload);
+  // Reconstruct the event-pair-1 packet persisted before datePrecision was added.
+  for(const side of ['left','right'])delete saved.packet.input[side].datePrecision;
+  saved.packet.inputHash=digest(saved.packet.input);saved.candidate.trace.inputHash=saved.packet.inputHash;
+  const frozen=JSON.stringify(saved);
+  f.store.db.prepare('UPDATE semantic_runs SET payload=? WHERE id=?').run(frozen,saved.id);
+  assert.equal(f.runs.get(saved.id).stale,false);
+  const accepted=f.runs.decide(saved.id,{version:0,action:'accept',note:'Review unchanged legacy input'});
+  assert.equal(accepted.active,true);
+  const history=accepted.history;
+  f.store.ingest(news,'2026-10-02T07:00:00Z');
+  assert.equal(f.runs.get(saved.id).active,true);
+  assert.equal(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(saved.id).payload,frozen);
+  assert.deepEqual(f.runs.get(saved.id).history,history);
+  // Missing precision is compatible only with the prior instant default, not day precision.
+  const originalNews=f.store.db.prepare('SELECT payload FROM news WHERE id=?').get(news[1].id).payload;
+  const changed=JSON.parse(originalNews);changed.datePrecision='day';
+  f.store.db.prepare('UPDATE news SET payload=? WHERE id=?').run(JSON.stringify(changed),news[1].id);
+  assert.equal(f.runs.get(saved.id).stale,true);assert.equal(f.runs.get(saved.id).active,false);
+  f.store.db.prepare('UPDATE news SET payload=? WHERE id=?').run(originalNews,news[1].id);
+  assert.equal(f.runs.get(saved.id).active,true);
+  f.store.ingest([{...news[1],title:'Changed source headline'}],'2026-10-02T08:00:00Z');
+  assert.equal(f.runs.get(saved.id).stale,true);assert.deepEqual(f.runs.get(saved.id).history,history);
+ }finally{await f.close();}
+});
 test('reverse orientation shares decision sequence and preserves which result was accepted',async()=>{
  const f=fixture();try{
   const a=f.runs.start(input);await f.runs.wait(a.id);f.runs.decide(a.id,{version:0,action:'accept',note:'第一次判断'});
@@ -59,6 +87,28 @@ test('failed decision insertion rolls back without losing the candidate or prior
  const f=fixture();try{
   const s=f.runs.start(input);await f.runs.wait(s.id);f.store.db.exec("CREATE TRIGGER fail_semantic BEFORE INSERT ON semantic_decisions BEGIN SELECT RAISE(ABORT,'storage failure'); END");
   assert.throws(()=>f.runs.decide(s.id,{version:0,action:'accept',note:'核对'}),/storage failure/);assert.equal(f.runs.get(s.id).status,'candidate');assert.equal(f.runs.get(s.id).decisionVersion,0);
+ }finally{await f.close();}
+});
+test('rejecting another candidate cannot silently revoke the accepted pair decision',async()=>{
+ const f=fixture();try{
+  const old=f.runs.start(input);await f.runs.wait(old.id);
+  const current=f.runs.start({left:input.right,right:input.left});await f.runs.wait(current.id);
+  f.runs.decide(current.id,{version:0,action:'accept',note:'Accept the reviewed current candidate'});
+  const before=f.runs.get(current.id);
+  assert.throws(()=>f.runs.decide(old.id,{version:1,action:'reject',note:'Reject only the old candidate'}),/已采纳另一份候选/);
+  let status,response;
+  await createHandler(f.store,f.service)({method:'POST',url:`/api/semantic-events/${old.id}/decision`,headers:{host:'127.0.0.1:4179','content-type':'application/json'},async *[Symbol.asyncIterator](){yield JSON.stringify({version:1,action:'reject',note:'Reject only the old candidate through HTTP'});}},{writeHead:value=>status=value,end:body=>response=JSON.parse(body)});
+  assert.equal(status,400);
+  assert.equal(response.error,'此新闻对已采纳另一份候选；请先打开该候选撤销采纳');
+  assert.doesNotMatch(safeErrorText(response.error+' private upstream details'),/private upstream/);
+  assert.deepEqual(f.runs.get(current.id),before);
+  assert.equal(f.runs.get(current.id).active,true);
+  assert.equal(f.runs.get(old.id).history.length,1);
+  // Explicitly withdraw the accepted result before rejecting a different candidate.
+  f.runs.decide(current.id,{version:1,action:'withdraw',note:'Withdraw the current accepted relationship'});
+  const rejected=f.runs.decide(old.id,{version:2,action:'reject',note:'Reject the old candidate now'});
+  assert.equal(rejected.history.length,3);assert.equal(rejected.decision.action,'reject');
+  assert.equal(f.runs.get(current.id).active,false);
  }finally{await f.close();}
 });
 test('semantic and dossier jobs share a database lease; cancellation releases it in both directions',async()=>{
