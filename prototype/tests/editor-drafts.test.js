@@ -22,3 +22,7 @@ test('clean remount reads newest research while retaining generation separation 
  const s=storage(),k=key(),first=readEditorDraft(k,initial,valid,s),submitted=persistEditorDraft(k,first,{text:'old'},s);resetEditorDraft(k,{text:'discarded'},3,s);
  const remounted=readEditorDraft(k,{base:5,value:{text:'latest server'}},valid,s);assert.equal(remounted.value.text,'latest server');const newer=persistEditorDraft(k,remounted,{text:'new pending'},s);assert.notEqual(newer.generation,submitted.generation);assert.equal(acknowledgeEditorDraft(k,submitted,{text:'late old'},4,s).retained,true);assert.equal(readEditorDraft(k,initial,valid,s).value.text,'new pending');
 });
+
+test('full permitted material body survives cold storage restore including JSON-escaped characters',()=>{
+ const s=storage(),k=key(),body='\u0001'.repeat(80000);s.setItem(k,JSON.stringify({base:3,generation:1,dirty:true,value:{text:body}}));assert(s.getItem(k).length>262144);assert.equal(readEditorDraft(k,initial,valid,s).value.text,body);
+});

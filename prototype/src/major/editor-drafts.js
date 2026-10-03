@@ -3,7 +3,7 @@ export const editorDraftKey=(topic,instance,kind)=>'signal-hunter:editor-draft:v
 const notify=(key,value)=>{for(const f of listeners.get(key)||[])f(value);};
 export function subscribeEditorDraft(key,fn){const set=listeners.get(key)||new Set();set.add(fn);listeners.set(key,set);return()=>{set.delete(fn);if(!set.size)listeners.delete(key);};}
 export function readEditorDraft(key,initial,valid,storage){
- let draft=memory.get(key);if(!memory.has(key))try{const raw=storage?.getItem(key);if(raw&&raw.length<=262144){const d=JSON.parse(raw);if(Number.isSafeInteger(d.base)&&d.base>0&&Number.isSafeInteger(d.generation)&&d.generation>0&&d.dirty===true&&valid(d.value))draft=d;}}catch{}
+ let draft=memory.get(key);if(!memory.has(key))try{const raw=storage?.getItem(key);if(raw&&raw.length<=1048576){const d=JSON.parse(raw);if(Number.isSafeInteger(d.base)&&d.base>0&&Number.isSafeInteger(d.generation)&&d.generation>0&&d.dirty===true&&valid(d.value))draft=d;}}catch{}
  const result=draft?.dirty?draft:{base:initial.base,value:initial.value,generation:draft?.generation||0,dirty:false,volatile:false};memory.set(key,result);return result;
 }
 export function persistEditorDraft(key,current,value,storage,base=current.base){
