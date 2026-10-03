@@ -127,7 +127,9 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       if(now()-Math.max(quoteAttempts.get(symbol)||0,Date.parse(store.checks()[symbol]?.attemptedAt)||0)<quoteCooldown)return {skipped:'cooldown'};
       quoteAttempts.set(symbol,now());const attemptedAt=clock();
       const job=(async()=>{try{
-        const previous=store.quote(symbol),quote=await fetchMinutes(symbol,scopedFetcher(context));const noNewBar=!!previous&&previous.provider===quote.provider&&previous.providerTime===quote.providerTime;active('minutes',context);store.saveQuote(quote,clock());store.status(symbol,{state:'ok',attemptedAt,receivedAt:clock(),noNewBar});return {ok:true};
+        const quote=await fetchMinutes(symbol,scopedFetcher(context));active('minutes',context);const receivedAt=clock(),saved=store.saveQuote(quote,receivedAt);
+        if(!saved.activated){const message={'minute-regression':'分钟行情时间倒退','minute-future':'分钟行情含未来时间','minute-time-incomparable':'分钟行情来源时间无法比较'}[saved.reason]||'分钟行情未启用';const error=new Error(`${message}；已留档并保留原缓存`);error.kind=saved.reason;throw error;}
+        store.status(symbol,{state:'ok',attemptedAt,receivedAt,noNewBar:saved.noNewBar??false,snapshotHash:saved.snapshotHash});return {ok:true};
       }catch(error){active('minutes',context);store.status(symbol,{state:'error',attemptedAt,error:errorText(error),failure:marketFailure(error)});return {error:errorText(error)};}finally{quoteJobs.delete(symbol);}})();quoteJobs.set(symbol,job);return job;
     },
     tick(){if(restorePending())return Promise.resolve([{skipped:'restore-review-required'}]);research.process();service.processEvents();service.syncWatches();paper.expire();return scheduler.runAll();},
