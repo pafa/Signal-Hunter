@@ -158,7 +158,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    if(data.dossier){data={...data,dossier:{preparedAt:clock(),preparedBy:'研究者 · 实测人工研判',basedOnResearchVersion:1,sections:validateDossierSections(data.dossier.sections,data.evidence,{allowIncomplete:true}),reviewStatus:'draft'}};}
    return commit({...data,type:'event',status:'active',createdAt:clock()},'真实数据测试批次导入：研究者复核，首次获取在今日；未生成或批准交易');
   },
-  snapshot(){const topics=list(),news=store.news();const rows=new Map(db.prepare('SELECT * FROM triage WHERE rules_version=?').all(triageKey).map(r=>[`${r.news_id}:${r.news_revision}`,r]));
+  snapshot({topics=list(),news=store.news()}={}){const rows=new Map(db.prepare(`SELECT t.* FROM json_each(?) n JOIN triage t ON t.news_id=json_extract(n.value,'$.id') AND t.news_revision=json_extract(n.value,'$.revision') AND t.rules_version=?`).all(JSON.stringify(news.map(n=>({id:n.id,revision:n.revision}))),triageKey).map(r=>[`${r.news_id}:${r.news_revision}`,r]));
    const inbox=news.map(n=>{const r=rows.get(`${n.id}:${n.revision}`);return {...n,triage:r?JSON.parse(r.payload):{bucket:'pending',category:'等待初筛',companies:[],tradeSignal:false},processedAt:r?.processed_at||null};});
    return {topics,inbox,rulesVersion:RULES_VERSION,screeningSamples:screenings.stats(),counts:{pending:inbox.filter(n=>n.triage.bucket==='pending').length,review:inbox.filter(n=>n.triage.bucket==='review').length,clue:inbox.filter(n=>n.triage.bucket==='clue').length,quiet:inbox.filter(n=>n.triage.bucket==='quiet').length},execution:'rules-only',positions:[],applications:[]};
   },
