@@ -44,7 +44,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const marketSimulation=marketSimulations.aggressive;
   const modelResearch=openModelResearchRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(modelRunner?{runner:modelRunner}:{}),now});
   const materialEvents=openMaterialEventRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(materialEventRunner?{runner:materialEventRunner}:{}),now});
-  const researchPipeline=openResearchPipeline(store,research,modelResearch,{enabled:!offline&&!!modelConfig,config:modelConfig||{},now,materialEvents,semantic:semanticEvents,recall:newsId=>{continuity.process(research.list());return continuity.recall(newsId);}});
+  const researchPipeline=openResearchPipeline(store,research,modelResearch,{enabled:!offline&&!!modelConfig,config:modelConfig||{},now,materialEvents,batches:semanticBatches,clusters:eventClusters,semantic:semanticEvents,recall:newsId=>{continuity.process(research.list());return continuity.recall(newsId);}});
   const companyEntities=openCompanyEntityRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(companyEntityRunner?{runner:companyEntityRunner}:{}),now});
   const intake=openNewsIntake(store,{clock});
   const continuity=openContinuity(store,{clock});

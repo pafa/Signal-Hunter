@@ -2,10 +2,11 @@ import {digest,CODEX_PROMPT_VERSION,CODEX_DRAFT_SCHEMA} from './codex-research.m
 import {RULES_VERSION} from './triage.mjs';
 import {READER_VERSION} from './source-reader.mjs';
 import {openPipelineRelations} from './pipeline-relations.mjs';
+import {openPipelineClusters} from './pipeline-clusters.mjs';
 import {openPipelineEvents} from './pipeline-events.mjs';
 
 // This queue proposes research only. It never adopts a model draft or touches orders.
-export function openResearchPipeline(store,research,models,{enabled=false,config={},now=Date.now,semantic=null,recall=null,materialEvents=null}={}){
+export function openResearchPipeline(store,research,models,{enabled=false,config={},now=Date.now,semantic=null,recall=null,materialEvents=null,batches=null,clusters=null}={}){
  const db=store.db,at=()=>new Date(now()).toISOString();
  db.exec(`CREATE TABLE IF NOT EXISTS research_pipeline_settings(slot INTEGER PRIMARY KEY CHECK(slot=1),version INTEGER NOT NULL,payload TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS research_pipeline_items(id TEXT PRIMARY KEY,news_id TEXT NOT NULL,revision INTEGER NOT NULL,rules_hash TEXT NOT NULL,status TEXT NOT NULL,topic_id TEXT,run_id TEXT,payload TEXT NOT NULL,UNIQUE(news_id,revision,rules_hash));
@@ -27,9 +28,10 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
  const setState=(row,status,extra={})=>{db.prepare('UPDATE research_pipeline_items SET status=?,payload=? WHERE id=?').run(status,JSON.stringify({...JSON.parse(row.payload),...extra}),row.id);audit(row.id,status,extra);};
  const relations=semantic&&recall?openPipelineRelations(store,research,semantic,{config,now,guard,transaction,audit,used,settings,recall}):null;
  const events=materialEvents?openPipelineEvents(store,research,models,materialEvents,{config,now,guard,transaction,audit,used,settings,relations}):null;
+ const clusterJobs=batches&&clusters&&semantic?openPipelineClusters(store,research,semantic,batches,clusters,{now,guard,transaction,audit,used,settings}):null;
  const api={
   snapshot(){const lane=db.prepare("SELECT token,lease_until,paused FROM operation_tasks WHERE name='discovery'").get(),counts={};
-   const rows=db.prepare(`SELECT CASE WHEN r.status='running' AND r.expires_at<? THEN 'interrupted' WHEN r.status IS NOT NULL THEN r.status WHEN i.status='preparing' AND (? OR json_extract(i.payload,'$.token') IS NOT ?) THEN 'interrupted' ELSE i.status END status,count(*) n FROM research_pipeline_items i LEFT JOIN model_research_runs r ON r.id=i.run_id GROUP BY 1`).all(now(),Number(!lane||!!lane.paused||lane.lease_until<=now()),lane?.token||null);for(const r of rows)counts[r.status]=r.n;return {enabled:enabled&&models.status().enabled,settings:settings(),callsInLast24Hours:used(),counts,relations:relations?.snapshot()||null,events:events?.snapshot()||null,items:db.prepare('SELECT * FROM research_pipeline_items ORDER BY rowid DESC LIMIT 30').all().map(view)};},
+   const rows=db.prepare(`SELECT CASE WHEN r.status='running' AND r.expires_at<? THEN 'interrupted' WHEN r.status IS NOT NULL THEN r.status WHEN i.status='preparing' AND (? OR json_extract(i.payload,'$.token') IS NOT ?) THEN 'interrupted' ELSE i.status END status,count(*) n FROM research_pipeline_items i LEFT JOIN model_research_runs r ON r.id=i.run_id GROUP BY 1`).all(now(),Number(!lane||!!lane.paused||lane.lease_until<=now()),lane?.token||null);for(const r of rows)counts[r.status]=r.n;return {enabled:enabled&&models.status().enabled,settings:settings(),callsInLast24Hours:used(),counts,relations:relations?.snapshot()||null,events:events?.snapshot()||null,clusters:clusterJobs?.snapshot()||null,items:db.prepare('SELECT * FROM research_pipeline_items ORDER BY rowid DESC LIMIT 30').all().map(view)};},
   configure(input){if(!input||!['dailyCalls,includeClues,version','dailyCalls,extractEvents,includeClues,version'].includes(Object.keys(input).sort().join(','))||!Number.isSafeInteger(input.dailyCalls)||input.dailyCalls<1||input.dailyCalls>100||typeof input.includeClues!=='boolean'||Object.hasOwn(input,'extractEvents')&&typeof input.extractEvents!=='boolean')throw Error('自动研究配置无效');return transaction(()=>{if(input.version!==settings().version)throw Error('自动研究配置已变化，请刷新');db.prepare('UPDATE research_pipeline_settings SET version=version+1,payload=? WHERE slot=1').run(JSON.stringify({dailyCalls:input.dailyCalls,includeClues:input.includeClues,extractEvents:input.extractEvents??settings().extractEvents}));audit(null,'configure',input);return api.snapshot();});},
   retry(id){return transaction(()=>{if(!enabled)throw Error('当前未启用自动研究');const row=read(id),s=view(row).status;if(!['failed','cancelled','interrupted'].includes(s))throw Error('只有失败、取消或中断条目可以重试');current(row);if(JSON.parse(row.payload).executionHash!==executionHash())throw Error('模型或提示词已变化，旧条目需重新核对');db.prepare('UPDATE research_pipeline_items SET run_id=NULL WHERE id=?').run(id);setState(row,row.topic_id?'ready':'queued',{reason:null});return view(read(id));});},
   retryEvent(id){guard();if(!enabled||!events)throw Error('当前未启用自动研究');return events.retry(id);},
@@ -46,6 +48,7 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
    api.scan(context);
    const eventWork=events?.step(context);if(eventWork)return eventWork;
    const comparison=relations?.step(context);if(comparison)return comparison;
+   const clusterWork=clusterJobs?.step(context);if(clusterWork)return clusterWork;
    const row=db.prepare("SELECT * FROM research_pipeline_items WHERE status IN ('queued','ready') ORDER BY rowid LIMIT 1").get();if(!row)return {skipped:'no-queued-items'};
    if(used()>=settings().dailyCalls)return {skipped:'call-limit'};
    if(db.prepare('SELECT 1 FROM model_job_lease WHERE expires_at>=?').get(now()))return {skipped:'model-busy'};

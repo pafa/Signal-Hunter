@@ -30,7 +30,7 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
    const recalled=topic.eventExtraction?recallOccurrence(topic,research.list()):recall(item.news_id),source={id:topic.id,version:topic.version,title:topic.title,kind:topic.eventExtraction?'event':'material'},left=inputRef(topic),seen=new Set();
    const candidates=recalled.items.filter(c=>c.right.id!==topic.id&&c.right.status!=='archived').slice(0,3);
    const plans=candidates.map(c=>{
-    const target=research.get(c.right.id),right=inputRef(target),p={newsId:item.news_id,newsRevision:item.revision,source,target:{id:target.id,version:target.version,title:target.title,kind:target.eventExtraction?'event':'material'},candidateId:c.id,recallReasons:c.reasons,recallRulesHash:recalled.rulesHash,createdAt:at()};
+    const target=research.get(c.right.id),right=inputRef(target),p={newsId:item.news_id,newsRevision:item.revision,source,target:{id:target.id,version:target.version,title:target.title,kind:target.eventExtraction?'event':'material'},candidateId:c.id,recallReasons:c.reasons,recallRulesHash:recalled.rulesHash,...(topic.eventExtraction?{clusterExpansion:'reviewed-increment-1'}:{}),createdAt:at()};
     let status='queued';
     if(!left||!right){status='skipped';p.reason='两侧尚未都有保存的正文材料；未退回标题比较';}
     else if(refKey(left)===refKey(right)||seen.has(refKey(right))){status='skipped';p.reason='同一材料或重复材料对，不增加独立证据或模型调用';}
