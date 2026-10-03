@@ -8,13 +8,15 @@ import {resolve,dirname} from 'node:path';
 import {openStore} from './store.mjs';
 import {createService} from './service.mjs';
 import {planExit} from './risk-rules.mjs';
+import {workbenchResponse} from './workbench-response.mjs';
 
 export function createHandler(store,service,{apiPort=4179,frontendPort=4178,staticHandler=null}={}){
  for(const port of [apiPort,frontendPort])if(!Number.isInteger(port)||port<1024||port>65535)throw new Error('本地端口无效');
  const hosts=new Set([`127.0.0.1:${apiPort}`,`127.0.0.1:${frontendPort}`,`localhost:${frontendPort}`]);
  const origins=new Set([...hosts].map(host=>`http://${host}`));
  return async(req,res)=>{
-  const reply=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(code<400?safeDiagnosticPayload(body):body));};
+  const sendJson=(code,body,headers={})=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(body);};
+  const reply=(code,body)=>sendJson(code,JSON.stringify(code<400?safeDiagnosticPayload(body):body));
   if(!hosts.has(req.headers.host)||req.headers.origin&&!origins.has(req.headers.origin)){reply(403,{error:'仅允许本机工作台访问'});return;}
   try{
     const url=new URL(req.url,'http://127.0.0.1:4179');
@@ -58,7 +60,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/paper/history'){reply(200,service.paper.history());return;}
     if(req.method==='GET'&&url.pathname==='/api/bars'){const symbol=url.searchParams.get('symbol');if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅查看关注标的');const quote=store.quote(symbol);const rows=quote?store.db.prepare('SELECT provider_time AS time,close FROM quote_bars WHERE symbol=? AND provider=? AND timezone=? ORDER BY provider_time DESC LIMIT 6000').all(symbol,quote.provider||'legacy',quote.providerTimezone||'unverified'):[];reply(200,rows.reverse());return;}
     if(req.method==='GET'&&url.pathname==='/api/research-pipeline'){reply(200,service.researchPipeline.snapshot());return;}
-    if(req.method==='GET'&&url.pathname==='/api/data'){reply(200,service.snapshot());return;}
+    if(req.method==='GET'&&url.pathname==='/api/data'){const {body,headers}=workbenchResponse(service.snapshot(),req.headers['x-signal-topics-hash']);sendJson(200,body,headers);return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/screening$/.test(url.pathname)){reply(200,service.research.screenings.packet(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.research.newsItem(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/news/search'){reply(200,service.research.newsPage(Object.fromEntries(url.searchParams)));return;}
