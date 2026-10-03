@@ -65,7 +65,7 @@ export default function IntegratedWorkbench(){
  {dialog?.type==='evaluation'&&data&&<EvaluationReview data={data} onClose={close}/>}
  {dialog?.type==='market-simulation'&&data&&<MarketSimulation data={data} onClose={close}/>}
  {dialog?.type==='observations'&&<ObservationInbox data={data} initialTopicId={topic?.id} busy={busy} mutate={mutate} onClose={close} onTopic={id=>{const t=topics.find(t=>t.id===id);if(t){choose(t);close();}}}/>}
- {dialog?.type==='operations'&&data&&<Operations data={data} onClose={close} busy={busy} onPipeline={(action,payload)=>action==='configure'?mutate('/api/research-pipeline','PATCH',payload):mutate(`/api/research-pipeline/${payload.id}/retry`,'POST',{})} onControl={(name,payload)=>mutate(`/api/operations/${name}`,'POST',payload)}/>}
+ {dialog?.type==='operations'&&data&&<Operations data={data} onClose={close} busy={busy} onPipeline={(action,payload)=>action==='configure'?mutate('/api/research-pipeline','PATCH',payload):mutate(`/api/research-pipeline/${action==='retry-relation'?'relations/':''}${payload.id}/retry`,'POST',{})} onControl={(name,payload)=>mutate(`/api/operations/${name}`,'POST',payload)}/>}
  {dialog?.type==='data'&&<DataDesk onClose={()=>{close();void load();}}/>}{dialog?.type==='rules'&&<Rulebook onClose={close}/>}
  {dialog?.type==='new'&&<NewTopic onClose={close} busy={busy} onCreate={async p=>{const r=await mutate('/api/research','POST',p);if(r){setSelected(r.createdTopicId);close();}}}/>}
  {dialog?.type==='evidence'&&topic&&<AddEvidence topic={topic} onClose={close} busy={busy} mutate={mutate}/>}{dialog?.type==='company'&&topic&&<CompanyForm topic={topic} onClose={close} busy={busy} mutate={mutate} watch={watch} deferred={data?.autoWatch?.deferred||[]} initialSymbol={dialog.symbol||''}/>}
