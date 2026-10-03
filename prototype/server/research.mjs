@@ -9,7 +9,8 @@ import {instrument,hash} from './providers.mjs';
 import {classifyHeadline,evidenceCoverage,RULES_VERSION} from './triage.mjs';
 import {researchSeeds} from './research-seeds.mjs';
 import {validateResearchBrief} from './research-brief.mjs';
-import {openMaterials} from './research-materials.mjs';
+import {openMaterials,immutableMaterialSnapshot} from './research-materials.mjs';
+import {checkMaterialitySources} from './materiality-source-check.mjs';
 import {readPublicArticle,publicSourceUrl} from './source-reader.mjs';
 import {RELATION_KINDS,relatedCandidates} from '../shared/research-links.mjs';
 import {semanticResearchCandidates,freezeSemanticBasis,semanticBasisStatus} from './semantic-research.mjs';
@@ -242,6 +243,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    if(index>=0&&!data.replace)throw new Error('公司已关联；请选择修订关系，避免静默覆盖');
    if(index<0&&data.replace)throw new Error('待修订的公司关系不存在');
    if(index<0&&topic.companies.length>=20)throw new Error('一个主题最多关联 20 个标的');
+   if(data.materiality!==undefined)company.materiality=checkMaterialitySources(company.materiality,ref=>immutableMaterialSnapshot(db,ref));
    if(entityResolution)company.entityResolution=structuredClone(entityResolution);
    else if(index>=0&&topic.companies[index].entityResolution)company.entityResolution=structuredClone(topic.companies[index].entityResolution);
    if(index>=0)topic.companies[index]=company;else topic.companies.push(company);

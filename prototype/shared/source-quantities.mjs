@@ -6,6 +6,16 @@ const numeric='[+−-]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?|\\.\\d+)';
 const money=new RegExp(`(?<prefix>${currency})?[ \\t]*(?<number>${numeric})[ \\t]*(?<scale>${magnitude})?[ \\t]*(?<suffix>${currency}|元|%|％|percent|per cent)?`,'gi');
 const powers={trillion:12,billion:9,million:6,thousand:3,'万亿':12,'千亿':11,'百亿':10,'十亿':9,'亿':8,'千万':7,'百万':6,'十万':5,'万':4,'千':3,'百':2};
 const currencies={'US$':'USD',USD:'USD','美元':'USD','HK$':'HKD',HKD:'HKD','港元':'HKD','港币':'HKD',CNY:'CNY',RMB:'CNY','人民币':'CNY'};
+const unitPattern=new RegExp(`^(?:(?<leading>${currency})[ \\t]*(?<after>${magnitude})?|(?<before>${magnitude})?[ \\t]*(?<trailing>${currency})|(?<percent>%|％|percent|per cent))$`,'i');
+// Explicit input units only; no FX, inferred currency or semantic metric conversion.
+export function quantityInUnit(value,unit){
+ if(typeof value!=='number'||!Number.isFinite(value)||typeof unit!=='string'||unit.length>80)return null;
+ const literal=String(value),match=unitPattern.exec(unit.trim());
+ if(!match||!new RegExp(`^${numeric}$`).test(literal))return null;
+ const {leading,after,before,trailing,percent}=match.groups;
+ const q=sourceQuantities(percent?`${literal} ${percent}`:`${leading||trailing} ${literal} ${after||before||''}`)[0];
+ return q?.normalization==='literal-only'?{unit:q.unit,normalizedValue:q.normalizedValue}:null;
+}
 function decimal(literal,power){
  let text=literal.replaceAll(',','').replace('−','-'),negative=text.startsWith('-');text=text.replace(/^[+-]/,'');const [whole,fraction='']=text.split('.');
  let digits=(whole+fraction).replace(/^0+(?=\d)/,''),places=fraction.length-power;
