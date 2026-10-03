@@ -24,3 +24,20 @@ test('source revision and rules samples keep separate drafts, with an explicit o
  const old=sample(crypto.randomUUID()),next=sample(crypto.randomUUID(),2),newRules={...sample(crypto.randomUUID(),2),rulesHash:'new-rules'},n=news(1);let samples=[old],rules='rules';setFetch(()=>({samples,currentRulesHash:rules}));const view=revision=>React.createElement(Review,{news:{...n,revision},busy:false,mutate(){throw Error('no save');}});
  await render(view(1));await edit('复核依据与限制','Original v1 note');samples=[next,old];await render(view(2));assert.equal(area('复核依据与限制').value,'');await edit('复核依据与限制','Source v2 note');await edit('初筛留样版本',old.id);assert.equal(area('复核依据与限制').value,'Original v1 note');assert(document.body.textContent.includes('本份留样标题：Synthetic title 1'));await render(null);samples=[newRules,next,old];rules='new-rules';await render(view(2));assert.equal(area('复核依据与限制').value,'');await edit('初筛留样版本',next.id);assert.equal(area('复核依据与限制').value,'Source v2 note');await edit('初筛留样版本',old.id);assert.equal(area('复核依据与限制').value,'Original v1 note');
 }));
+test('history pagination restores page selections and drafts while new samples stay outside the pinned range',()=>ui(async({Review,render,button,area,edit,setFetch})=>{
+ const rows=Array.from({length:25},(_,i)=>sample('history-'+crypto.randomUUID(),25-i)),n=news(25),seen=[];let newer=false;
+ setFetch(path=>{seen.push(path);const u=new URL(path,'http://localhost'),before=u.searchParams.get('before'),start=before?rows.findIndex(s=>s.id===before)+1:0;return {samples:rows.slice(start,start+12),currentRulesHash:'rules',total:newer&&!u.searchParams.has('ceiling')?26:25,ceiling:25,nextCursor:rows[start+12]?rows[start+11].id:null};});
+ await render(React.createElement(Review,{news:n,busy:false,mutate(){throw Error('no save');}}));await edit('复核依据与限制','Latest draft');
+ await act(async()=>button('下一页留样').click());assert.equal(area('复核依据与限制').value,'');await edit('初筛留样版本',rows[14].id);await edit('复核依据与限制','Older selected draft');
+ newer=true;await act(async()=>button('下一页留样').click());assert(button('下一页留样').disabled);assert(document.body.textContent.includes('第 3 页'));
+ await act(async()=>button('上一页留样').click());assert.equal(area('初筛留样版本').value,rows[14].id);assert.equal(area('复核依据与限制').value,'Older selected draft');
+ await act(async()=>button('刷新初筛复核').click());assert.match(seen.at(-1),/ceiling=25/);assert(document.body.textContent.includes('共 25 份'));
+ await act(async()=>button('回到最新留样').click());assert(!seen.at(-1).includes('?'));assert.equal(area('复核依据与限制').value,'Latest draft');assert(document.body.textContent.includes('共 26 份'));
+}));
+test('late history pages cannot replace a newly selected news revision',()=>ui(async({Review,render,button,area,setFetch})=>{
+ const n=news(2),old=sample(crypto.randomUUID(),2),fresh=sample(crypto.randomUUID(),3);let resolve;
+ setFetch(path=>path.includes('?')?new Promise(r=>{resolve=r;}):{samples:[n.revision===2?old:fresh],currentRulesHash:'rules',total:13,ceiling:13,nextCursor:old.id});
+ const view=()=>React.createElement(Review,{news:{...n},busy:false,mutate(){throw Error('no save');}});
+ await render(view());await act(()=>button('下一页留样').click());n.revision=3;await render(view());assert.equal(area('初筛留样版本').value,fresh.id);
+ await act(async()=>resolve({samples:[old],currentRulesHash:'rules',total:13,ceiling:13,nextCursor:null}));assert.equal(area('初筛留样版本').value,fresh.id);assert(document.body.textContent.includes('Synthetic title 3'));
+}));

@@ -9,6 +9,7 @@ import {openStore} from './store.mjs';
 import {createService} from './service.mjs';
 import {planExit} from './risk-rules.mjs';
 import {workbenchResponse} from './workbench-response.mjs';
+import {screeningSamplePage} from './screening-history.mjs';
 
 export function createHandler(store,service,{apiPort=4179,frontendPort=4178,staticHandler=null}={}){
  for(const port of [apiPort,frontendPort])if(!Number.isInteger(port)||port<1024||port>65535)throw new Error('本地端口无效');
@@ -61,7 +62,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/bars'){const symbol=url.searchParams.get('symbol');if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅查看关注标的');const quote=store.quote(symbol);const rows=quote?store.db.prepare('SELECT provider_time AS time,close FROM quote_bars WHERE symbol=? AND provider=? AND timezone=? ORDER BY provider_time DESC LIMIT 6000').all(symbol,quote.provider||'legacy',quote.providerTimezone||'unverified'):[];reply(200,rows.reverse());return;}
     if(req.method==='GET'&&url.pathname==='/api/research-pipeline'){reply(200,service.researchPipeline.snapshot());return;}
     if(req.method==='GET'&&url.pathname==='/api/data'){const {body,headers}=workbenchResponse(service.snapshot(),req.headers['x-signal-topics-hash']);sendJson(200,body,headers);return;}
-    if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/screening$/.test(url.pathname)){reply(200,service.research.screenings.packet(url.pathname.split('/')[3]));return;}
+    if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/screening$/.test(url.pathname)){reply(200,screeningSamplePage(store.db,url.pathname.split('/')[3],service.research.screenings.rulesHash,Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.research.newsItem(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/news/search'){reply(200,service.research.newsPage(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/material-events(?:\/[-a-z0-9]{36})?$/.test(url.pathname)){const p=url.pathname.split('/');reply(200,p[5]?service.materialEvents.get(p[3],p[5]):service.materialEvents.list(p[3]));return;}
