@@ -40,7 +40,7 @@ export default function CompanyEntities({topic,materials,busy,mutate}){
   {selected&&!detail&&<p>正在读取身份识别记录…</p>}
   {detail&&<>
    <p role="status">{states[detail.status]} · {detail.packet.input.material.title} · 材料 v{detail.packet.input.material.revision}</p>
-   {detail.packet.input.directorySnapshot&&<p className="m-note">官方目录生成日期 {detail.packet.input.directorySnapshot.sourceDates.map(s=>s.date).join(" / ")}；名称召回 {detail.packet.input.directorySnapshot.selected} 条 / 全库 {detail.packet.input.directorySnapshot.totalEligible} 条，超限省略 {detail.packet.input.directorySnapshot.omitted} 条。{detail.packet.input.directorySnapshot.limitation}</p>}
+   {detail.packet.input.directorySnapshot&&<p className="m-note">官方目录生成日期 {detail.packet.input.directorySnapshot.sourceDates.map(s=>s.date||'未知').join(" / ")}；名称召回 {detail.packet.input.directorySnapshot.selected} 条 / 全库 {detail.packet.input.directorySnapshot.totalEligible} 条，超限省略 {detail.packet.input.directorySnapshot.omitted} 条。{detail.packet.input.directorySnapshot.limitation}</p>}
    {detail.stale&&<p className="m-warning">材料、事项或目录已变化，旧候选保留；请使用当前材料重新识别。</p>}
    {detail.status==='running'&&<Button disabled={disabled} onClick={cancel}>取消身份识别调用</Button>}
    {detail.failure&&<p className="m-warning">{detail.failure.message}</p>}

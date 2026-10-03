@@ -1,0 +1,121 @@
+{
+  "schema": "cross-market-directory-verification-1",
+  "checkedAt": "2026-10-03T06:33:33.554Z",
+  "markets": [
+    {
+      "market": "CN",
+      "attemptStatus": "complete",
+      "snapshotId": "defe83601cbd83ee1b6b74cbdae2991185e3ec74a81a5765df3fa733931962ea",
+      "counts": {
+        "rows": 5224,
+        "eligible": 5224,
+        "excluded": 0
+      },
+      "futureDated": false,
+      "activeSnapshotId": "defe83601cbd83ee1b6b74cbdae2991185e3ec74a81a5765df3fa733931962ea",
+      "sources": [
+        {
+          "id": "sse-1-p1",
+          "url": "https://query.sse.com.cn/sseQuery/commonQuery.do?sqlId=COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L&COMPANY_STATUS=2%2C4%2C5%2C7%2C8&type=inParams&isPagination=true&pageHelp.cacheSize=1&pageHelp.beginPage=1&pageHelp.pageSize=2000&pageHelp.pageNo=1&STOCK_TYPE=1",
+          "requestedAt": "2026-10-03T06:33:16.722Z",
+          "receivedAt": "2026-10-03T06:33:19.589Z",
+          "sourceDate": null,
+          "rawHash": "9746899a854ee07ef839e1ff2b6fa30c7341eb83f7c60149e66948dd3c1b695a",
+          "bytes": 1946658
+        },
+        {
+          "id": "sse-8-p1",
+          "url": "https://query.sse.com.cn/sseQuery/commonQuery.do?sqlId=COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L&COMPANY_STATUS=2%2C4%2C5%2C7%2C8&type=inParams&isPagination=true&pageHelp.cacheSize=1&pageHelp.beginPage=1&pageHelp.pageSize=2000&pageHelp.pageNo=1&STOCK_TYPE=8",
+          "requestedAt": "2026-10-03T06:33:19.609Z",
+          "receivedAt": "2026-10-03T06:33:19.974Z",
+          "sourceDate": null,
+          "rawHash": "48949ae21bbf3959043ffc90c9e2c55aef47507fb44834dd299f678ea859c782",
+          "bytes": 715285
+        },
+        {
+          "id": "szse-meta",
+          "url": "https://www.szse.cn/api/report/ShowReport/data?SHOWTYPE=JSON&CATALOGID=1110&TABKEY=tab1&PAGENO=1",
+          "requestedAt": "2026-10-03T06:33:19.979Z",
+          "receivedAt": "2026-10-03T06:33:20.197Z",
+          "sourceDate": "2026-09-30",
+          "rawHash": "5385340d5d464a8f890d3d3f7f7b86697a9509841e1a05888aeb272a948ac59a",
+          "bytes": 21476
+        },
+        {
+          "id": "szse",
+          "url": "https://www.szse.cn/api/report/ShowReport?SHOWTYPE=xlsx&CATALOGID=1110&TABKEY=tab1",
+          "requestedAt": "2026-10-03T06:33:20.198Z",
+          "receivedAt": "2026-10-03T06:33:20.824Z",
+          "sourceDate": "2026-09-30",
+          "rawHash": "dfd54b9405662ed4050284778438a53efc72822765d2375fffdc52d760aa3aa4",
+          "bytes": 545039
+        }
+      ]
+    },
+    {
+      "market": "HK",
+      "attemptStatus": "complete",
+      "snapshotId": "6a429f0681de8a936c1596b4f034a71118ecc2d1528f67dfc6b39842de09639c",
+      "counts": {
+        "rows": 17066,
+        "eligible": 2735,
+        "excluded": 14331
+      },
+      "futureDated": true,
+      "activeSnapshotId": null,
+      "sources": [
+        {
+          "id": "hk-en",
+          "url": "https://www.hkex.com.hk/eng/services/trading/securities/securitieslists/ListOfSecurities.xlsx",
+          "requestedAt": "2026-10-03T06:33:21.512Z",
+          "receivedAt": "2026-10-03T06:33:25.129Z",
+          "sourceDate": "2026-10-05",
+          "rawHash": "cb133f2ae97f69146f96343e7f35e1dac7e8ea3d0538236b9da40e92c3cc8430",
+          "bytes": 1341031
+        },
+        {
+          "id": "hk-cn",
+          "url": "https://www.hkex.com.hk/chi/services/trading/securities/securitieslists/ListOfSecurities_c.xlsx",
+          "requestedAt": "2026-10-03T06:33:25.130Z",
+          "receivedAt": "2026-10-03T06:33:29.488Z",
+          "sourceDate": "2026-10-05",
+          "rawHash": "b803d8c38b5102bd0a898df96415ec8c2fbde19ca503f20e5f4718cd1167f06f",
+          "bytes": 1397961
+        }
+      ]
+    }
+  ],
+  "changedTables": [
+    "security_directory_attempts",
+    "security_directory_snapshots"
+  ],
+  "unchangedTables": 65,
+  "restartUnchangedTables": 67,
+  "oldDirectorySnapshotsPreserved": 1,
+  "parserReplay": [
+    {
+      "market": "CN",
+      "rows": 5224,
+      "eligible": 5224,
+      "snapshotId": "defe83601cbd83ee1b6b74cbdae2991185e3ec74a81a5765df3fa733931962ea",
+      "futureDated": false
+    },
+    {
+      "market": "HK",
+      "rows": 17066,
+      "eligible": 2735,
+      "snapshotId": "6a429f0681de8a936c1596b4f034a71118ecc2d1528f67dfc6b39842de09639c",
+      "futureDated": true
+    }
+  ],
+  "tests": 618,
+  "realModelCalls": 0,
+  "personalDatabaseChanged": false,
+  "browserReviewPending": true,
+  "limitations": [
+    "SSE and SZSE A-share coverage excludes Beijing exchange and complete delisting history",
+    "HK future-dated snapshot is retained but excluded from current official recall",
+    "Listing dates and directory identity are source claims, not proof of historical legal identity or tradability",
+    "No independent entity quality evaluation"
+  ]
+}
