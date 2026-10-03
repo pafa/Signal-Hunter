@@ -35,6 +35,7 @@ export function quoteIssues(symbol,q,config,at,{execution=false,allowLimitUp=fal
  if(Date.parse(q.asOf)>Date.parse(q.receivedAt)||Date.parse(q.receivedAt)>now||now-Date.parse(q.asOf)>config.quoteMaxAgeSeconds*1000||now>Date.parse(q.validUntil))bad('行情过期或含未来数据');
  try{if(decimal(q.bid)<=0n||decimal(q.ask)<decimal(q.bid)||decimal(q.mark)<=0n)bad('报价无效');}catch{bad('报价精度无效');}
  const f=q.fx;
+ if(f?.executable===false||f?.kind==='reference-fx')bad('参考汇率不能作为成交或账本FX');
  if(!f?.id||!f.source||!instant(f.asOf)||!instant(f.receivedAt)||!instant(f.validUntil)||Date.parse(f.asOf)>Date.parse(f.receivedAt)||Date.parse(f.receivedAt)>now||Date.parse(f.validUntil)<now)bad('FX缺失、过期或含未来数据');
  try{if(decimal(f?.usdPerUnit)<=0n||spec.currency==='USD'&&decimal(f.usdPerUnit)!==1000000n)bad('FX币种口径无效');}catch{bad('FX精度无效');}
  if(execution){
