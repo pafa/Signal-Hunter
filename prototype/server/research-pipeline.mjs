@@ -22,7 +22,7 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
  const used=()=>db.prepare('SELECT count(*) n FROM research_pipeline_attempts WHERE at>=?').get(new Date(now()-86400000).toISOString()).n;
  const view=row=>{const p=JSON.parse(row.payload),run=row.run_id?models.get(row.topic_id,row.run_id):null;let status=run?.status||row.status;
   if(status==='preparing'){const lane=db.prepare("SELECT token,lease_until,paused FROM operation_tasks WHERE name='discovery'").get();if(!lane||lane.paused||lane.token!==p.token||lane.lease_until<=now())status='interrupted';}
-  return {id:row.id,newsId:row.news_id,revision:row.revision,title:p.title,status,topicId:row.topic_id,runId:row.run_id,reason:p.reason||run?.failure?.message||null,createdAt:p.createdAt,relationCoverage:p.relationCoverage||null,attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
+  return {id:row.id,newsId:row.news_id,revision:row.revision,title:p.title,status,topicId:row.topic_id,runId:row.run_id,reason:p.reason||run?.failure?.message||null,createdAt:p.createdAt,relationCoverage:p.relationCoverage||null,selectionReason:p.selectionReason||null,attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
  };
  const setState=(row,status,extra={})=>{db.prepare('UPDATE research_pipeline_items SET status=?,payload=? WHERE id=?').run(status,JSON.stringify({...JSON.parse(row.payload),...extra}),row.id);audit(row.id,status,extra);};
  const relations=semantic&&recall?openPipelineRelations(store,research,semantic,{config,now,guard,transaction,audit,used,settings,recall}):null;
@@ -37,7 +37,7 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
   scan(context){context.assertActive();guard();if(!enabled)return 0;
    const s=settings(),key=`${RULES_VERSION}@${research.screenings.rulesHash}`;
    return transaction(()=>{context.assertActive();const pending=db.prepare(`SELECT n.id,n.revision,t.payload triage FROM news n JOIN triage t ON t.news_id=n.id AND t.news_revision=n.revision AND t.rules_version=? WHERE NOT EXISTS(SELECT 1 FROM research_pipeline_items p WHERE p.news_id=n.id AND p.revision=n.revision AND p.rules_hash=?) ORDER BY n.rowid LIMIT 200`).all(key,research.screenings.rulesHash);
-    for(const n of pending){const news=store.newsById(n.id),triage=JSON.parse(n.triage),selected=triage.bucket==='review'||s.includeClues&&triage.bucket==='clue',id=digest({news:n.id,revision:n.revision,rules:research.screenings.rulesHash});const payload={title:news.title,createdAt:at(),screening:triage,configuration:s,executionHash:executionHash(),reason:selected?null:'当前筛选配置未选择；保留记录供漏筛复核'};db.prepare('INSERT INTO research_pipeline_items VALUES(?,?,?,?,?,NULL,NULL,?)').run(id,n.id,n.revision,research.screenings.rulesHash,selected?'queued':'skipped',JSON.stringify(payload));audit(id,'discovered',{bucket:triage.bucket,selected});}
+    for(const n of pending){const news=store.newsById(n.id),triage=JSON.parse(n.triage),tracked=n.revision>1&&!!db.prepare("SELECT 1 FROM research_topics WHERE json_extract(payload,'$.sourceNewsId')=? AND json_extract(payload,'$.sourceNewsRevision')<? AND json_extract(payload,'$.status')='active' LIMIT 1").get(n.id,n.revision),selected=tracked||triage.bucket==='review'||s.includeClues&&triage.bucket==='clue',id=digest({news:n.id,revision:n.revision,rules:research.screenings.rulesHash});const payload={title:news.title,createdAt:at(),screening:triage,configuration:s,selectionReason:tracked?'source-revision':'screening',executionHash:executionHash(),reason:selected?null:'当前筛选配置未选择；保留记录供漏筛复核'};db.prepare('INSERT INTO research_pipeline_items VALUES(?,?,?,?,?,NULL,NULL,?)').run(id,n.id,n.revision,research.screenings.rulesHash,selected?'queued':'skipped',JSON.stringify(payload));audit(id,'discovered',{bucket:triage.bucket,selected});}
     return pending.length;
    });
   },
@@ -53,11 +53,11 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
    try{
     valid();
     if(row.status==='queued'){
-     // Preserve existing research instead of silently appending a revised headline.
-     const existing=research.list().find(t=>t.sourceNewsId===row.news_id);
-     if(existing){transaction(()=>{valid();setState(row,'needs-review',{reason:'已有来源研究，新增量需核对后关联，原研究未改写'});});return {skipped:'existing-research'};}
+     const history=research.list().filter(t=>t.sourceNewsId===row.news_id).sort((a,b)=>b.sourceNewsRevision-a.sourceNewsRevision||b.version-a.version||a.id.localeCompare(b.id));
+     const existing=history.find(t=>t.sourceNewsRevision===row.revision),previous=history.find(t=>t.sourceNewsRevision<row.revision);
+     if(existing){transaction(()=>{valid();setState(row,'needs-review',{reason:'此新闻版本已有研究，保留现有内容，请核对后继续'});});return {skipped:'existing-research'};}
      transaction(()=>{valid();if(read(row.id).status!=='queued')throw Error('队列条目已变化');setState(row,'preparing',{token:context.token});});
-     const topic=research.createFromNews({newsId:row.news_id,newsRevision:row.revision});
+     const topic=research.createFromNews({newsId:row.news_id,newsRevision:row.revision},{requireNew:true,revisionOf:previous?{topicId:previous.id,topicVersion:previous.version}:null,beforeWrite:id=>{valid();db.prepare('UPDATE research_pipeline_items SET topic_id=? WHERE id=?').run(id,row.id);}});
      transaction(()=>{valid();db.prepare('UPDATE research_pipeline_items SET topic_id=? WHERE id=?').run(topic.id,row.id);});
      row.topic_id=topic.id;
     }

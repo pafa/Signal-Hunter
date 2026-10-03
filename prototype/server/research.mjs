@@ -132,13 +132,24 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    const items=rows.slice(0,size).map(r=>({...store.newsById(r.id),triage:r.triage?JSON.parse(r.triage):{bucket:'pending',category:'等待初筛',companies:[]},processedAt:r.processed_at||null}));
    return {items,total,screeningSamples:screenings.stats(),ceiling:upper,nextCursor:rows.length>size?rows[size-1].cursor:null,rulesVersion:RULES_VERSION,order:'首次入库倒序；筛选使用当前修订，新入库记录在重新检索时纳入'};
   },
-  createFromNews(data){
+  createFromNews(data,{revisionOf=undefined,beforeWrite=()=>{},requireNew=false}={}){
    const n=store.newsById(data.newsId);
    if(!n||n.revision!==data.newsRevision)throw new Error('新闻版本已变化或不存在，请重新打开后创建');
-   const id='news-candidate-'+hash(n.id).slice(0,24),existing=db.prepare('SELECT 1 FROM research_topics WHERE id=?').get(id);
-   if(existing)return get(id);
+   if(revisionOf===undefined){
+    const prior=db.prepare("SELECT payload FROM research_topics WHERE json_extract(payload,'$.sourceNewsId')=? ORDER BY json_extract(payload,'$.sourceNewsRevision') DESC,id").all(n.id).map(r=>JSON.parse(r.payload)),same=prior.find(t=>t.sourceNewsRevision===n.revision);
+    if(same){if(requireNew)throw Error('此新闻版本已有研究');return get(same.id);}
+    const earlier=prior.find(t=>t.sourceNewsRevision<n.revision);revisionOf=earlier?{topicId:earlier.id,topicVersion:earlier.version}:null;
+   }
+   const previous=revisionOf?get(revisionOf.topicId):null;
+   if(previous&&(previous.version!==revisionOf.topicVersion||previous.sourceNewsId!==n.id||!Number.isSafeInteger(previous.sourceNewsRevision)||previous.sourceNewsRevision>=n.revision))throw Error('上一来源研究版本不匹配');
+   const sourceRevisionOf=previous?{topicId:previous.id,topicVersion:previous.version,newsRevision:previous.sourceNewsRevision}:null;
+   const id='news-candidate-'+hash(previous?`${n.id}:revision:${n.revision}`:n.id).slice(0,24),existing=db.prepare('SELECT 1 FROM research_topics WHERE id=?').get(id);
+   if(existing){if(requireNew)throw Error('此新闻版本已有研究');return get(id);}
    const at=clock(),triage=classifyHeadline(n);
-   return commit({id,title:n.title.slice(0,140),summary:'标题候选，未阅读全文。需核验事件阶段、业务量级、公司关系和反证。',type:'event',label:triage.category,categoryId:triage.matchedRules[0]||'general',origin:'news-candidate',status:'active',createdAt:at,firstSeen:at,eventPublishedAt:n.publishedAt,sourceNewsId:n.id,sourceNewsRevision:n.revision,headlineStage:triage.stage,messageStatus:triage.messageStatus,chain:defaultChain(),evidence:[{...newsEvidence(n,at),stance:'unverified',family:'other',step:'fact',interpretation:'从新闻建立候选，未证实且未形成交易判断'}],companies:triage.companies.map(c=>({...c,note:'仅标题提及的实体候选；业务关系与影响方向待核验',url:n.url})),hypothesis:{logic:'核验来源后评估增量和公司影响；标题本身不构成买点。',trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'阅读来源，核对事件阶段和主体；补充相对业务规模、历史与反向线索。'},'新闻候选草稿：仅观察，已知实体候选进入关注；没有生成交易');
+   return commit({id,title:n.title.slice(0,140),summary:'标题候选，未阅读全文。需核验事件阶段、业务量级、公司关系和反证。',type:'event',label:triage.category,categoryId:triage.matchedRules[0]||'general',origin:'news-candidate',status:'active',createdAt:at,firstSeen:at,eventPublishedAt:n.publishedAt,sourceNewsId:n.id,sourceNewsRevision:n.revision,...(sourceRevisionOf?{sourceRevisionOf}:{}),headlineStage:triage.stage,messageStatus:triage.messageStatus,chain:defaultChain(),evidence:[{...newsEvidence(n,at),stance:'unverified',family:'other',step:'fact',interpretation:'从新闻建立候选，未证实且未形成交易判断'}],companies:triage.companies.map(c=>({...c,note:'仅标题提及的实体候选；业务关系与影响方向待核验',url:n.url})),hypothesis:{logic:'核验来源后评估增量和公司影响；标题本身不构成买点。',trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'阅读来源，核对事件阶段和主体；补充相对业务规模、历史与反向线索。'},sourceRevisionOf?'来源修订建立独立观察候选：原研究及历史保留':'新闻候选草稿：仅观察，已知实体候选进入关注；没有生成交易',undefined,()=>{
+    if(store.newsById(n.id)?.revision!==n.revision||previous&&get(previous.id).version!==previous.version)throw Error('新闻或上一研究已变化');
+    beforeWrite(id);
+   });
   },
   importBrief(data){
    const topic=validateResearchBrief(data,clock()),old=db.prepare('SELECT payload FROM research_topics WHERE id=?').get(topic.id);

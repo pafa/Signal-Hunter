@@ -8,13 +8,13 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
  CREATE INDEX IF NOT EXISTS pipeline_relation_item ON research_pipeline_relations(item_id);`);
  const fingerprint=packet=>digest({version:'pipeline-relations-1',packet,prompt:comparisonPrompt(packet),schema:MATERIAL_SEMANTIC_SCHEMA,model:config.model,binary:config.binary,effort:config.effort||'high',timeoutMs:config.timeoutMs??180000});
  const read=id=>{const row=db.prepare('SELECT * FROM research_pipeline_relations WHERE id=?').get(id);if(!row)throw Error('自动比较条目不存在');return row;};
- const materialRef=e=>({kind:'material',id:e.materialId,revision:e.materialRevision});
- const materialOf=t=>[...t.evidence].reverse().find(e=>e.materialId);
+ const inputRef=t=>{if(t.eventExtraction)return {kind:'event',id:t.id,revision:1};const e=[...t.evidence].reverse().find(e=>e.materialId);return e?{kind:'material',id:e.materialId,revision:e.materialRevision}:null;};
+ const refKey=r=>`${r.kind}:${r.id}`;
  function valid(row){
   const p=JSON.parse(row.payload),news=store.newsById(p.newsId);
   if(db.prepare('SELECT state FROM event_link_decisions WHERE candidate_id=? ORDER BY version DESC LIMIT 1').get(p.candidateId)?.state==='dismissed')throw Error('该关联线索已排除');
   if(!news||news.revision!==p.newsRevision)throw Error('来源新闻已有新修订');
-  for(const saved of [p.source,p.target]){const t=research.get(saved.id);if(t.status==='archived'||t.version!==saved.version)throw Error('研究已有新版本，请核对比较依据');}
+  for(const [side,saved] of [['left',p.source],['right',p.target]]){const t=research.get(saved.id);if(t.status==='archived'||t.version!==saved.version)throw Error('研究已有新版本，请核对比较依据');if(t.eventExtraction&&(p.refs[side].kind!=='event'||p.refs[side].id!==t.id))throw Error('事项研究必须按已选择的事项范围比较');}
   if(fingerprint(comparisonPacket(store,p.refs))!==p.executionHash)throw Error('材料、模型或提示词已变化');
   return p;
  }
@@ -26,14 +26,14 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
  };
  return {
   plan(item,topic){
-   const recalled=recall(item.news_id),source={id:topic.id,version:topic.version,title:topic.title},left=materialOf(topic),seen=new Set();
+   const recalled=recall(item.news_id),source={id:topic.id,version:topic.version,title:topic.title,kind:topic.eventExtraction?'event':'material'},left=inputRef(topic),seen=new Set();
    const candidates=recalled.items.filter(c=>c.right.id!==topic.id&&c.right.status!=='archived').slice(0,3);
    const plans=candidates.map(c=>{
-    const target=research.get(c.right.id),right=materialOf(target),p={newsId:item.news_id,newsRevision:item.revision,source,target:{id:target.id,version:target.version,title:target.title},candidateId:c.id,recallReasons:c.reasons,recallRulesHash:recalled.rulesHash,createdAt:at()};
+    const target=research.get(c.right.id),right=inputRef(target),p={newsId:item.news_id,newsRevision:item.revision,source,target:{id:target.id,version:target.version,title:target.title,kind:target.eventExtraction?'event':'material'},candidateId:c.id,recallReasons:c.reasons,recallRulesHash:recalled.rulesHash,createdAt:at()};
     let status='queued';
     if(!left||!right){status='skipped';p.reason='两侧尚未都有保存的正文材料；未退回标题比较';}
-    else if(left.materialId===right.materialId||seen.has(right.materialId)){status='skipped';p.reason='同一材料或重复材料对，不增加独立证据或模型调用';}
-    else{seen.add(right.materialId);p.refs={left:materialRef(left),right:materialRef(right)};
+    else if(refKey(left)===refKey(right)||seen.has(refKey(right))){status='skipped';p.reason='同一材料或重复材料对，不增加独立证据或模型调用';}
+    else{seen.add(refKey(right));p.refs={left,right};
      try{p.packet=comparisonPacket(store,p.refs);p.executionHash=fingerprint(p.packet);}
      catch{status='invalidated';p.reason='保存材料已有新修订或不满足比较要求，原研究保留';delete p.refs;}
     }
