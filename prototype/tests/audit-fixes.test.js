@@ -86,7 +86,7 @@ test('F07 changing question kind or deadline cannot inherit an earlier forecast;
  }finally{s.close();}
 });
 test('F08 invalid or out-of-order evaluation timestamps cannot be admitted',()=>{
- const b={protocolVersion:EVALUATION_VERSION,forwardStart:'2026-09-26T00:00:00+08:00',frozenAt:at,excludedTopicIds:[],excludedClusterIds:[],rulesHash:'fixed'},record={topicId:'new',clusterId:'new',clusterReviewedAt:'2026-09-26T01:05Z',origin:'forward-capture',firstSeen:'2026-09-26T01:00Z',availableAt:'2026-09-26T01:00Z',decisionAt:'2026-09-26T01:10Z',inputHash:'snapshot',rulesHash:'fixed'};
+ const b={protocolVersion:EVALUATION_VERSION,forwardStart:'2026-09-26T00:00:00+08:00',frozenAt:at,excludedTopicIds:[],excludedClusterIds:[],excludedEvidenceKeys:[],rulesHash:'fixed'},record={topicId:'new',clusterId:'new',clusterReviewedAt:'2026-09-26T01:05Z',clusterMembers:[{kind:'news',id:'fresh-news',revision:1}],origin:'forward-capture',firstSeen:'2026-09-26T01:00Z',availableAt:'2026-09-26T01:00Z',decisionAt:'2026-09-26T01:10Z',inputHash:'snapshot',rulesHash:'fixed'};
  assert.equal(forwardEligibility(record,b).eligible,true);
  for(const frozenAt of [null,'not-a-date','2026-02-31T00:00Z','2026-09-27T00:00Z'])assert.equal(forwardEligibility(record,{...b,frozenAt}).eligible,false);
  assert.equal(forwardEligibility({...record,availableAt:'2026-09-25T00:00Z'},b).eligible,false);

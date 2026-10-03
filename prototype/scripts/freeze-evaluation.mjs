@@ -3,10 +3,11 @@ import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 import {buildEvaluationBaseline,digest} from '../server/evaluation-baseline.mjs';
+import {EVALUATION_VERSION} from '../shared/evaluation.mjs';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const version=JSON.parse(readFileSync(resolve(root,'prototype/package.json'),'utf8')).version;
 if(!/^\d+\.\d+\.\d+$/.test(version))throw new Error('需要明确版本后才能冻结');
-const destination=resolve(root,`data/runtime/evaluation/baseline-${new Date().toISOString().slice(0,10).replaceAll('-','')}-v${version}.json`);
+const destination=resolve(root,`data/runtime/evaluation/baseline-${new Date().toISOString().slice(0,10).replaceAll('-','')}-v${version}-forward-${EVALUATION_VERSION.split('/')[1]}.json`);
 if(existsSync(destination)){console.log('Baseline already frozen; no overwrite: '+destination);process.exit(0);}
 const db=new DatabaseSync(resolve(root,'data/runtime/workbench.sqlite'),{readOnly:true});
 try{

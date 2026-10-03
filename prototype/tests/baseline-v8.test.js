@@ -58,8 +58,8 @@ test('A/H/ADR are separate securities with explicit existing issuer groups; name
  assert.equal(securityIdentity('9988.hk').symbol,'09988.HK');assert.equal(issuer('09988.HK'),issuer('BABA.US'));assert.notEqual(securityIdentity('09988.HK').securityKey,securityIdentity('BABA.US').securityKey);assert.equal(securityIdentity('BABA.US').listing,'ADR');assert.equal(securityIdentity('NEW.US').relationStatus,'跨市场关系未映射');assert.notEqual(issuer('600001.SH'),issuer('600001.SZ'));assert.equal(securityIdentity('AAPL.US').venue,'US-UNRESOLVED');
 });
 test('forward eligibility rejects known clusters, historical data, absent availability and later revisions',()=>{
- const b={protocolVersion:EVALUATION_VERSION,forwardStart:'2026-09-26T00:00:00+08:00',frozenAt:'2026-09-25T01:00Z',excludedTopicIds:['known'],excludedClusterIds:['known-cluster'],rulesHash:'fixed'};
- const r={topicId:'new',clusterId:'new-cluster',clusterReviewedAt:'2026-09-26T01:05Z',origin:'forward-capture',firstSeen:'2026-09-26T01:00Z',availableAt:'2026-09-26T01:00Z',decisionAt:'2026-09-26T01:10Z',inputHash:'immutable',rulesHash:'fixed'};
+ const b={protocolVersion:EVALUATION_VERSION,forwardStart:'2026-09-26T00:00:00+08:00',frozenAt:'2026-09-25T01:00Z',excludedTopicIds:['known'],excludedClusterIds:['known-cluster'],excludedEvidenceKeys:[],rulesHash:'fixed'};
+ const r={topicId:'new',clusterId:'new-cluster',clusterReviewedAt:'2026-09-26T01:05Z',clusterMembers:[{kind:'news',id:'fresh-news',revision:1}],origin:'forward-capture',firstSeen:'2026-09-26T01:00Z',availableAt:'2026-09-26T01:00Z',decisionAt:'2026-09-26T01:10Z',inputHash:'immutable',rulesHash:'fixed'};
  assert.equal(forwardEligibility(r,b).eligible,true);
  for(const patch of [{topicId:'known'},{clusterId:'known-cluster'},{origin:'retrospective-case'},{firstSeen:'2026-09-25T01:00Z'},{availableAt:null},{availableAt:'2026-09-27T00:00Z'},{clusterReviewedAt:'2026-09-27T00:00Z'},{rulesHash:'tuned'},{inputHash:''}])assert.equal(forwardEligibility({...r,...patch},b).eligible,false,JSON.stringify(patch));
 });
