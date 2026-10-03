@@ -61,7 +61,8 @@ test('replacing the backup root or adding a snapshot invalidates the plan',()=>f
 test('new backups are standalone and leave the live WAL database usable',()=>fixture(async f=>{
  const s=openStore(f.database);try{const b=await createBackup(f.database,f.root);assert.deepEqual((await readdir(b.directory)).sort(),['manifest.json','workbench.sqlite']);
  assert.equal(s.db.prepare('PRAGMA journal_mode').get().journal_mode,'wal');assert.equal(s.db.prepare('SELECT COUNT(*) n FROM research_topics').get().n,1);
- const preview=await plan(f);assert.equal(preview.retained.length,1);assert.deepEqual((await readdir(b.directory)).sort(),['manifest.json','workbench.sqlite']);}finally{s.close();}
+ const created=Date.parse(b.createdAt);const future=await plan(f,{now:created-1});assert.equal(future.retained.length,0);assert.equal(future.protectedSnapshots.length,1);
+ const preview=await plan(f,{now:created+1});assert.equal(preview.retained.length,1);assert.deepEqual((await readdir(b.directory)).sort(),['manifest.json','workbench.sqlite']);}finally{s.close();}
 }));
 test('failure before deleting restores staged snapshots; partial deletion preserves the lock and remaining files',()=>fixture(async f=>{
  const {execFile}=await import('node:child_process'),{promisify}=await import('node:util');const run=promisify(execFile);
