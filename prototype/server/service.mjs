@@ -22,8 +22,9 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const offline=mode==='demo';
   const denyNetwork=()=>{throw new Error('离线演示不访问外部数据；请另行启动空白研究模式');};
   const clock=()=>new Date(now()).toISOString();
-  const research=openResearch(store,{clock,seed:mode!=='research',...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:{})});
-  const paper=openPaper(store,research,{clock,seed:mode!=='research'});
+  const restorePending=()=>store.db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1';
+  const research=openResearch(store,{clock,seed:mode!=='research'&&!restorePending(),...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:{})});
+  const paper=openPaper(store,research,{clock,seed:mode!=='research'&&!restorePending()});
   const evaluations=openEvaluationReview(store,{clock});
   const marketSimulations=Object.fromEntries(Object.entries(strategyProfiles).map(([accountId,profile])=>[accountId,openMarketSimulation(store,research,{accountId,profile,enabled:!offline,clock,...(marketInputs?{getInputs:()=>marketInputs(accountId)}:{})})]));
   const marketSimulation=marketSimulations.aggressive;
@@ -34,11 +35,11 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const observations=openObservationInbox(store,{clock,getTopic:id=>research.get(id),offline});
   let newsJob=null;const quoteJobs=new Map();let lastNewsAttempt=0;const quoteAttempts=new Map();
   const dailyJobs=new Map(),dailyAttempts=new Map();
-  const active=(name,context)=>{context?.assertActive?.();if(scheduler.snapshot()[name]?.paused)throw new Error('任务已暂停，请先在运行控制中恢复');};
+  const active=(name,context)=>{if(restorePending())throw new Error('恢复副本需先完成核对确认');context?.assertActive?.();if(scheduler.snapshot()[name]?.paused)throw new Error('任务已暂停，请先在运行控制中恢复');};
   const startedAt=clock();
   const errorText=error=>error.name==='TimeoutError'?'上游请求超时':error.message==='fetch failed'?'上游连接失败':String(error.message).slice(0,160);
-  let autoWatch=syncResearchWatches(store,research.list());
-  if(offline)initializeDemoData(store);
+  let autoWatch=restorePending()?{added:[],deferred:[],restoreReviewRequired:true}:syncResearchWatches(store,research.list());
+  if(offline&&!restorePending())initializeDemoData(store);
   const service={
     mode,instance,
     research,paper,observations,modelResearch,semanticEvents,evaluations,marketSimulation,marketSimulations,
@@ -58,7 +59,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
     },
     runOperation(name,input=null){if(offline&&!['backup','observations'].includes(name))denyNetwork();active(name);return scheduler.run(name,{force:true,input});},
     close(){return Promise.all([scheduler.stop(),modelResearch.close(),semanticEvents.close()]);},
-    syncWatches(){autoWatch=syncResearchWatches(store,research.list());return autoWatch;},
+    syncWatches(){if(!restorePending())autoWatch=syncResearchWatches(store,research.list());return autoWatch;},
     snapshot(){const topics=research.list(),book=paper.snapshot();const queue=continuity.queue({positions:book.positions,watchlist:store.watchlist()}),priorities=new Map(queue.map((n,i)=>[n.id,{priority:n.priority,rank:i}])),researchView=research.snapshot();researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));return {observationInbox:observations.snapshot(),eventContinuity:{...continuity.summary(),health:store.checks().events||{state:'pending'}},runtime:{mode,offline,instance},paper:book,workflow:topics.map(t=>assessTopic(t,{book})),operations:scheduler.snapshot(),operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,clock(),{offline}),serviceHealth:service.health(),newsIntake:intake.snapshot(),autoWatch,settings:store.getSettings(),news:store.news(),watchlist:store.watchlist().map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks:store.checks(),serverTime:clock(),newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:researchView};},
     async refreshDaily(symbol,force=false,context){
       if(offline)denyNetwork();active('daily',context);
@@ -98,7 +99,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
         const previous=store.quote(symbol),quote=await fetchMinutes(symbol,scopedFetcher(context));const noNewBar=!!previous&&previous.provider===quote.provider&&previous.providerTime===quote.providerTime;active('minutes',context);store.saveQuote(quote,clock());store.status(symbol,{state:'ok',attemptedAt,receivedAt:clock(),noNewBar});return {ok:true};
       }catch(error){active('minutes',context);store.status(symbol,{state:'error',attemptedAt,error:errorText(error),failure:marketFailure(error)});return {error:errorText(error)};}finally{quoteJobs.delete(symbol);}})();quoteJobs.set(symbol,job);return job;
     },
-    tick(){research.process();service.processEvents();service.syncWatches();paper.expire();return scheduler.runAll();},
+    tick(){if(restorePending())return Promise.resolve([{skipped:'restore-review-required'}]);research.process();service.processEvents();service.syncWatches();paper.expire();return scheduler.runAll();},
   };
   const providerFetch=createProviderGate(store,{fetcher,now});
   const scopedFetcher=context=>(url,options={})=>providerFetch(url,{...options,signal:context?.signal?AbortSignal.any([context.signal,...(options.signal?[options.signal]:[])]):options.signal},context);

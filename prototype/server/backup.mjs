@@ -1,7 +1,8 @@
 import {DatabaseSync,backup} from 'node:sqlite';
-import {mkdirSync,mkdtempSync,readFileSync,writeFileSync,copyFileSync,constants,existsSync,chmodSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,writeFileSync,copyFileSync,constants,existsSync,chmodSync,lstatSync,linkSync,rmSync} from 'node:fs';
 import {resolve,dirname,join} from 'node:path';
 import {createHash} from 'node:crypto';
+import {inventoryDatabase,compareInventories} from './database-inventory.mjs';
 const digest=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 function inspect(path){
  const db=new DatabaseSync(path,{readOnly:true});
@@ -32,16 +33,29 @@ export function restoreBackup(directory,targetPath){
  if(digest(source)!==manifest.sha256)throw new Error('备份指纹不匹配');
  const actual=inspect(source);
  if(actual.mode!==manifest.mode||JSON.stringify(actual.counts)!==JSON.stringify(manifest.counts))throw new Error('备份内容与清单不一致');
- if([target,target+'-wal',target+'-shm'].some(existsSync))throw new Error('恢复目标必须是全新路径，绝不覆盖已有库');
- mkdirSync(dirname(target),{recursive:true,mode:0o700});
- copyFileSync(source,target,constants.COPYFILE_EXCL);chmodSync(target,0o600);
- // A restored worker must never immediately resume acquisition or future execution.
- const db=new DatabaseSync(target);
+ const occupied=path=>{try{lstatSync(path);return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}};
+ const assertFresh=()=>{if([target,target+'-wal',target+'-shm',target+'-journal'].some(occupied))throw new Error('恢复目标必须是全新路径，绝不覆盖已有库');};
+ assertFresh();mkdirSync(dirname(target),{recursive:true,mode:0o700});
+ const staging=mkdtempSync(join(dirname(target),'.restore-'));chmodSync(staging,0o700);
+ const staged=join(staging,'workbench.sqlite');
  try{
-  if(actual.counts.operation_tasks!==undefined){
-   db.exec("UPDATE operation_tasks SET paused=1,token=NULL,lease_until=NULL,state='waiting'; UPDATE operation_runs SET outcome='interrupted' WHERE outcome='running'");
-  }
-  db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('restore_review_required','1')").run();
- }finally{db.close();}
- return {target,mode:actual.mode,reviewRequired:true};
+  copyFileSync(source,staged,constants.COPYFILE_EXCL);chmodSync(staged,0o600);
+  if(digest(staged)!==manifest.sha256)throw new Error('复制期间备份指纹改变');
+  const expected=inventoryDatabase(staged,{restoreProjection:true});
+  const db=new DatabaseSync(staged);
+  try{
+   db.exec('BEGIN IMMEDIATE');
+   if(actual.counts.operation_tasks!==undefined)db.exec("UPDATE operation_tasks SET paused=1,token=NULL,lease_until=NULL,state='waiting'");
+   if(actual.counts.operation_runs!==undefined)db.exec("UPDATE operation_runs SET outcome='interrupted' WHERE outcome='running'");
+   db.prepare("INSERT INTO settings(key,value) VALUES('restore_review_required','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run();
+   db.exec('COMMIT');
+  }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}finally{db.close();}
+  const verification=compareInventories(expected,inventoryDatabase(staged));
+  if(!verification.passed)throw new Error('恢复核验失败：除任务暂停与核对标记外，数据必须保持一致');
+  assertFresh();
+  // Publish only the verified, closed database. linkSync fails if another writer
+  // claimed the target meanwhile; no existing destination can be overwritten.
+  linkSync(staged,target);
+  return {target,mode:actual.mode,reviewRequired:true,verified:true};
+ }finally{rmSync(staging,{recursive:true,force:true});}
 }

@@ -24,6 +24,7 @@ export function createPersistentScheduler(db, tasks, {now=Date.now, intervals={}
  function claim(name,force,input) {
   if(stopped)return null;
   return transaction(()=>{
+   if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')return null;
    const old=row(name),at=now();
    if(!old||old.paused||old.token&&old.lease_until>at||!force&&(old.state==='blocked'||old.next_run>at))return null;
    if(old.token&&input===null)input=JSON.parse(db.prepare('SELECT input FROM operation_runs WHERE token=?').get(old.token)?.input||'null');
