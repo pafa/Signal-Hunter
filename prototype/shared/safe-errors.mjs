@@ -1,3 +1,4 @@
+import {materialityErrors} from './company-materiality.mjs';
 import {newsIntakeErrors} from './news-sources.mjs';
 import {evaluationErrors} from './evaluation-review.mjs';
 import {marketErrors} from './market-simulation.mjs';
@@ -12,7 +13,7 @@ export function safeErrorText(value){
  if(Object.hasOwn(labels,value.kind))return labels[value.kind];
  const text=typeof value==='string'?value:typeof value.message==='string'?value.message:'';
  // Only exact, owned labels survive a second presentation pass.
- if(Object.values(labels).includes(text)||modelLabels.has(text)||newsIntakeErrors.includes(text)||observationLabels.has(text)||semanticErrors.includes(text)||marketErrors.includes(text)||evaluationErrors.includes(text))return text;
+ if(Object.values(labels).includes(text)||modelLabels.has(text)||newsIntakeErrors.includes(text)||materialityErrors.includes(text)||observationLabels.has(text)||semanticErrors.includes(text)||marketErrors.includes(text)||evaluationErrors.includes(text))return text;
  if(value?.name==='TimeoutError'||/timeout|timed out|超时/i.test(text))return labels.timeout;
  if(/fetch failed|ECONN|ENOTFOUND|连接失败|网络/i.test(text))return labels.network;
  if(/HTTP|status code/i.test(text))return labels.http;

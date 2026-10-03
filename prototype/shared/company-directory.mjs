@@ -1,3 +1,4 @@
+import {normalizeMateriality} from './company-materiality.mjs';
 import {securityIdentity} from './securities.mjs';
 
 // A bounded research directory. It is not a live listing master or a supply-chain graph.
@@ -64,6 +65,6 @@ export function normalizeCompanyRelation(data,topic,at){
  if(kind==='listing'&&!topic.companies.some(c=>c.symbol!==identity.symbol&&companyIdentity(c.symbol).issuerKey===identity.issuerKey))throw new Error('同一发行人关系需有已映射的另一证券；跨行业联动请选择行业传导');
  if(data.identityReviewed!==undefined&&typeof data.identityReviewed!=='boolean')throw new Error('主体核对状态无效');
  if(identity.identityStatus==='unresolved'&&data.identityReviewed&&(!url||typeof data.name!=='string'||!data.name.trim()||data.name.trim().length>120))throw new Error('陌生上市主体需填写公司名和核对来源');
- return {...identity,name:identity.identityStatus==='unresolved'&&data.identityReviewed?data.name.trim():identity.name,kind,relationStatus,direction,note,url,evidenceIds,identityReviewed:!!data.identityReviewed,role:COMPANY_RELATIONS[kind],method:'human-relation',reviewedAt:at,analysis:normalizeCompanyAnalysis(data.analysis)};
+ return {...identity,name:identity.identityStatus==='unresolved'&&data.identityReviewed?data.name.trim():identity.name,kind,relationStatus,direction,note,url,evidenceIds,identityReviewed:!!data.identityReviewed,role:COMPANY_RELATIONS[kind],method:'human-relation',reviewedAt:at,analysis:normalizeCompanyAnalysis(data.analysis),materiality:data.materiality===undefined?(topic.companies.find(c=>c.symbol===identity.symbol)?.materiality||null):normalizeMateriality(data.materiality,topic,at)};
 }
 export function canAutoWatch(company){return company.identityStatus!=='unresolved'||company.identityReviewed===true;}

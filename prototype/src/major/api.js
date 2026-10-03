@@ -1,4 +1,5 @@
 let instanceId=null,datasetChanged=false;
+export const currentInstanceId=()=>instanceId||'legacy';
 const changedMessage='数据集已切换或尚未核对，请刷新页面后再继续';
 export async function request(path,method='GET',data){
  if(datasetChanged)throw new Error(changedMessage);
