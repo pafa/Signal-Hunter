@@ -21,8 +21,16 @@ export function parseDaily(payload,symbol,receivedAt=new Date().toISOString()){
  const duplicateDates=[...counts].filter(([,n])=>n>1).map(([date])=>date).sort();
  const unique=[...new Map(points.map(p=>[p.date,p])).values()].sort((a,b)=>a.date.localeCompare(b.date));
  if(!unique.some(p=>p.close!==null))throw new Error('没有已结束的有效日线');
- const actions=Object.entries(r.events||{}).flatMap(([kind,group])=>Object.values(group||{}).filter(a=>Number.isFinite(a.date)).map(a=>({kind,date:marketDate(a.date*1000,timezone),amount:a.amount??null,ratio:a.splitRatio??null})));
- return {symbol:spec.symbol,name:meta.longName||meta.shortName||spec.code,market:spec.market,currency:spec.currency,marketTimezone:timezone,provider:'yahoo-public-chart',interval:'1d',requestedRange:'6mo',receivedAt,cutoffDate:today,calendarVersion:CALENDAR_VERSION,completionPolicy:'交易日历，收盘后30分钟缓冲；非最终价保证',points:unique,actions,duplicateDates,missing:unique.filter(p=>p.close===null).length,incomplete,priceBasis:'供应商 close；非含息回报，复权语义未独立核验',volumeBasis:'供应商报告成交量；单位与完整性未独立核验',deliveryDelay:'unverified',lastDate:unique.filter(p=>p.close!==null).at(-1).date};
+ const object=v=>v&&typeof v==='object'&&!Array.isArray(v),events=r.events===undefined?{}:r.events,actions=[];
+ if(!object(events))throw new Error('公司行动元数据格式无效');
+ for(const [kind,group] of Object.entries(events)){
+  if(!object(group))throw new Error('公司行动分组格式无效');
+  for(const action of Object.values(group)){
+   if(!object(action)||!Number.isInteger(action.date)||action.date<=0||action.date>4102444800)throw new Error('公司行动日期缺失或无效');
+   actions.push({kind,date:marketDate(action.date*1000,timezone),amount:action.amount??null,ratio:action.splitRatio??null});
+  }
+ }
+ return {symbol:spec.symbol,name:meta.longName||meta.shortName||spec.code,market:spec.market,currency:spec.currency,marketTimezone:timezone,provider:'yahoo-public-chart',interval:'1d',requestedRange:'6mo',receivedAt,cutoffDate:today,calendarVersion:CALENDAR_VERSION,completionPolicy:'交易日历，收盘后30分钟缓冲；非最终价保证',points:unique,actions,actionsParsed:true,duplicateDates,missing:unique.filter(p=>p.close===null).length,incomplete,priceBasis:'供应商 close；非含息回报，复权语义未独立核验',volumeBasis:'供应商报告成交量；单位与完整性未独立核验',deliveryDelay:'unverified',lastDate:unique.filter(p=>p.close!==null).at(-1).date};
 }
 export async function fetchDaily(symbol,fetcher=fetch){
  const spec=instrument(symbol),url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooSymbol(spec))+'?interval=1d&range=6mo&events=div%2Csplits';
