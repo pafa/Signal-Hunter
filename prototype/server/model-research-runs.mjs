@@ -28,7 +28,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
   status(){return {enabled:enabled&&!closed,provider:'local-codex-cli',model:config.model||null,effort:config.effort||'high'};},
   list(topicId){research.get(topicId);return db.prepare('SELECT payload,expires_at FROM model_research_runs WHERE topic_id=? ORDER BY rowid DESC LIMIT 50').all(topicId).map(row=>summary(expiredView(JSON.parse(row.payload),row.expires_at)));},
   get(topicId,id){const run=read(id);if(run.topicId!==topicId)throw new Error('模型研判不属于此研究');return run;},
-  start(topicId,{version}={}){
+  start(topicId,{version}={},beforeCommit=()=>{}){
    if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw new Error('恢复副本需先完成核对确认');
    if(!enabled||closed)throw new Error('当前未启用本机 Codex 研判');
    if(!config.binary||!config.model)throw new Error('请先配置本机 Codex 路径与模型');
@@ -39,7 +39,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
    db.exec('BEGIN IMMEDIATE');try{
     recover();if(db.prepare("SELECT 1 FROM model_research_runs WHERE status='running'").get())throw new Error('已有模型研判正在运行，请等待或取消后再试');
     claimModelLease(db,run.id,now(),timeoutMs+30000);
-    db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));db.exec('COMMIT');
+    db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));beforeCommit(run);db.exec('COMMIT');
    }catch(error){db.exec('ROLLBACK');throw error;}
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(result=>{

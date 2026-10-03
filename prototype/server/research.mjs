@@ -56,14 +56,14 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
  };
  const list=()=>db.prepare('SELECT payload FROM research_topics').all().map(r=>{const topic=withAvailability(JSON.parse(r.payload));const prior=db.prepare('SELECT payload FROM research_versions WHERE topic_id=? AND version<? ORDER BY version DESC LIMIT 1').get(topic.id,topic.version);return {...topic,coverage:evidenceCoverage(topic),changeSummary:researchDelta(topic,prior?JSON.parse(prior.payload):null)};}).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||(a.type==='cluster'?0:1)-(b.type==='cluster'?0:1)||a.id.localeCompare(b.id));
- const linkMaterial=(id,data,input,method)=>{
+ const linkMaterial=(id,data,input,method,beforeWrite=()=>{})=>{
   const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，材料未关联；请刷新后重试');
   if(!enums.stance.includes(data.stance)||!enums.family.includes(data.family)||!topic.chain.some(s=>s.id===data.step))throw new Error('材料作用、类别或因果环节无效');
   const interpretation=assertText(data.interpretation,'材料与本事件的关系',1200),prepared=materials.prepare(id,input,method),m=prepared.material;
   if(topic.evidence.some(e=>e.materialId===m.id))return topic;
   if(topic.evidence.length>=150)throw new Error('一个主题最多保存 150 条证据');
   topic.evidence.push({id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,datePrecision:m.datePrecision,firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:clock(),originKey:m.url?new URL(m.url).hostname:m.sourceName,verification:'unverified',contentScope:m.scope,stance:data.stance,family:data.family,step:data.step,interpretation});
-  return commit(topic,'补充研究材料：阅读范围与不可变正文快照已保存；内容尚待核验',data.version,()=>{prepared.persist();materials.attempt(id,{state:'saved',url:m.url,materialId:m.id,method});});
+  return commit(topic,'补充研究材料：阅读范围与不可变正文快照已保存；内容尚待核验',data.version,()=>{beforeWrite();prepared.persist();materials.attempt(id,{state:'saved',url:m.url,materialId:m.id,method});});
  };
  return {
   process,get,list,screenings,
@@ -106,14 +106,14 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    });
   },
   saveMaterial(id,data){return linkMaterial(id,data,{...data,scope:data.scope==='extracted-text'?null:data.scope},'manual');},
-  async readMaterial(id,data){
+  async readMaterial(id,data,beforeWrite=()=>{}){
    const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再读取');
    if(!enums.stance.includes(data.stance)||!enums.family.includes(data.family)||!topic.chain.some(s=>s.id===data.step))throw new Error('材料作用、类别或因果环节无效');
    assertText(data.interpretation,'材料与本事件的关系',1200);const url=publicSourceUrl(assertText(data.url,'来源链接',2000)).href;
    if(sourceJobs.has(id))throw new Error('本事件的来源正在读取，请等待结果');
    if(sourceJobs.size>=2)throw new Error('已有两份来源正在读取，请稍后重试');
    sourceJobs.add(id);
-   try{return linkMaterial(id,data,await sourceReader(url),'public-web');}
+   try{return linkMaterial(id,data,await sourceReader(url),'public-web',beforeWrite);}
    catch(error){materials.attempt(id,{state:'failed',url,method:'public-web',error:String(error.message).slice(0,300)});throw error;}
    finally{sourceJobs.delete(id);}
   },
