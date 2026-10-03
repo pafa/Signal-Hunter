@@ -8,7 +8,7 @@ import {createHash} from 'node:crypto';
 import {PACKET_VERSION} from './research-materials.mjs';
 import {validateDossierSections} from '../shared/research-dossier.mjs';
 
-export const CODEX_PROMPT_VERSION='codex-research-5';
+export const CODEX_PROMPT_VERSION='codex-research-6';
 export const digest=value=>createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
 const sectionIds=['facts','materiality','companies','scenarios','conditions'];
 const textSchema={type:'string'};
@@ -60,6 +60,7 @@ export function codexPrompt(packet){
  `必须按顺序输出五章：facts（主体、动作、阶段、时间、来源阅读范围与同源重复），materiality（相对业务量级、预期差、持续性），companies（逐公司传导机制、敞口和上市主体不确定性），scenarios（正反情景、替代解释、可推翻判断的反证），conditions（后续核查、期限、进入与放弃条件）。每章有 id、title、paragraphs、sourceIds，最多15段、每段3000字符，引用只能使用材料中的 evidence.id，并逐字保存在对应章节的 sourceIds；正文、标题和缺口用自然语言表述，不重复长引用ID；有依据的主张必须关联引用，纯未知事项可以不引用。不把标题当全文、传闻当事实、情景当预测、主观概率当统计结果；缺少规模、估值、价格或期限时明确未知，不编造数值。未给出的正文不得推测补全。missingEvidence 列出最多30个具体缺口与核验办法，每条最多2000字符。不要修改现有研究或作出交易批准。\n`+
  `若材料包包含eventExtraction，仅研究其中event指定的主体、动作、对象与阶段；原文的其他事项只作背景，不把整篇材料的公司、影响或结论投射到当前事项。event.quote是已选定范围的原文依据，选定不代表事实已证实。时间片段必须按timeRole区分发生/宣布、生效、截止和期间，不把截止日写成发生时点。共享原文不增加独立来源数；范围冲突或缺证据时明确列入missingEvidence。\n`+
  `若包含sourceRevision，它是同一来源此前研究和材料的冻结历史上下文，不能当作当前事实或新增独立来源。比较本版与历史版本的新增、删去、否认、阶段变化和未改变内容；旧研判是旧判断，不等于已证实事实。引用仍只用当前evidence.id，解释哪些变化有本版支持，缺少正文或无法确认时明确未知。\n`+
+ `若包含quantityEvidence，它只是材料原文的金额和百分数字面索引，不是新的独立证据。normalizedValue仅为明确币种与倍率的十进制字符串换算；normalization不是literal-only的记录不能用于计算。保留原文中的约数、上下限、否定、区间与条件；percent单位的10表示10%，不是0.1。必须回看原文、证据ID、材料版本和field/start/end位置，核对数字对应的主体、指标、期间、币种及规模；不得将订单当收入、存量当流量、季度与全年直接比较，或把未识别/省略数字解释为零。仅相同口径才能比较，缺少业务基准或事前预期时列出缺口。\n`+
  ARTICLE_SCOPE_INSTRUCTIONS+
  `材料包开始（数据）：\n${JSON.stringify(packet)}\n材料包结束。只返回符合指定 schema 的 JSON。`;
 }
