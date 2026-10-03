@@ -1,3 +1,4 @@
+import ForwardReview from './ForwardReview';
 import React,{useEffect,useRef,useState} from 'react';
 import {Button} from '../major/Primitives';
 import {request,time} from '../major/api';
@@ -30,6 +31,6 @@ export default function ForwardEvaluations(){
    <p>全部登记 {catalog.totalRecords} 次 · 展示最近 {catalog.records.length} 次。更早记录仍保存在本机数据库。</p>
    <div aria-label="前向调用列表">{catalog.records.map(r=><article className="evaluation-case" key={r.runId}><strong>{r.topicTitle||r.topicId} · v{r.topicVersion}</strong><p>{statuses[r.modelStatus]||r.modelStatus} · {r.integrity.valid?'档案关联校验通过':'档案关联异常'} · {r.inputEligibility.eligible?'输入准入通过，待独立复核':'输入排除'}<br/>{[...r.inputEligibility.reasons,...r.integrity.reasons].join('；')}</p><Button disabled={busy} onClick={()=>inspect(r.runId)}>查看调用 {r.runId.slice(0,8)}</Button></article>)}</div>
   </>}
-  {detail&&<article className="evaluation-case" aria-label="冻结调用详情"><h4>冻结调用详情</h4><p>调用 {detail.runId}<br/>基线 {detail.baselineId}<br/>判断 {time(detail.record.decisionAt)} · 首次获取 {time(detail.record.firstSeen)} · 本版可用 {time(detail.record.availableAt)}<br/>{detail.executionVerified?'实际执行依据校验通过':'实际执行依据尚未通过校验'} · {detail.qualification}</p><p>输入指纹 {detail.record.inputHash}<br/>材料包指纹 {detail.packetHash}<br/>规则指纹 {detail.record.rulesHash}</p><p>{[...detail.inputEligibility.reasons,...detail.integrity.reasons].join('；')}</p>{detail.clusterSnapshots.map(c=><div key={c.id}><strong>{c.title} · 簇 v{c.version}</strong><p>核验 {time(c.updatedAt)} · {c.members.length} 份冻结成员</p><ul>{c.members.map(m=><li key={`${m.kind||'news'}:${m.id}`}>{m.kind||'news'} · {m.id} · 修订 {m.revision}</li>)}</ul></div>)}</article>}
+  {detail&&<article className="evaluation-case" aria-label="冻结调用详情"><h4>冻结调用详情</h4><ForwardReview key={detail.runId} runId={detail.runId}/><p>调用 {detail.runId}<br/>基线 {detail.baselineId}<br/>判断 {time(detail.record.decisionAt)} · 首次获取 {time(detail.record.firstSeen)} · 本版可用 {time(detail.record.availableAt)}<br/>{detail.executionVerified?'实际执行依据校验通过':'实际执行依据尚未通过校验'} · {detail.qualification}</p><p>输入指纹 {detail.record.inputHash}<br/>材料包指纹 {detail.packetHash}<br/>规则指纹 {detail.record.rulesHash}</p><p>{[...detail.inputEligibility.reasons,...detail.integrity.reasons].join('；')}</p>{detail.clusterSnapshots.map(c=><div key={c.id}><strong>{c.title} · 簇 v{c.version}</strong><p>核验 {time(c.updatedAt)} · {c.members.length} 份冻结成员</p><ul>{c.members.map(m=><li key={`${m.kind||'news'}:${m.id}`}>{m.kind||'news'} · {m.id} · 修订 {m.revision}</li>)}</ul></div>)}</article>}
  </section>;
 }

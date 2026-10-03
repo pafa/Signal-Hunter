@@ -21,6 +21,8 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(!url.pathname.startsWith('/api/')&&staticHandler){staticHandler(req,res);return;}
     if(service.instance?.id&&(req.headers['x-signal-instance']||['POST','PATCH','DELETE'].includes(req.method))&&req.headers['x-signal-instance']!==service.instance.id){reply(409,{error:'数据集已切换或尚未核对，请刷新页面后再继续'});return;}
     if(req.method==='GET'&&url.pathname==='/api/forward-evaluations'){reply(200,{...service.forwardEvaluations.list(),records:service.forwardEvaluations.records()});return;}
+    const forwardReviewMatch=/^\/api\/forward-evaluations\/records\/([-a-f0-9]{36})\/(review|review-inputs|label|outcome)$/.exec(url.pathname);
+    if(req.method==='GET'&&forwardReviewMatch&&['review','review-inputs'].includes(forwardReviewMatch[2])){reply(200,service.forwardReviews[forwardReviewMatch[2]==='review'?'detail':'inputs'](forwardReviewMatch[1]));return;}
     const forwardMatch=/^\/api\/forward-evaluations\/(baselines|records)\/([-a-f0-9]{36})$/.exec(url.pathname);
     if(req.method==='GET'&&forwardMatch){reply(200,service.forwardEvaluations[forwardMatch[1]==='baselines'?'baseline':'get'](forwardMatch[2]));return;}
     if(req.method==='GET'&&url.pathname==='/api/evaluations'){reply(200,service.evaluations.list());return;}
@@ -81,6 +83,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='POST'&&/^\/api\/research-pipeline\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retry(url.pathname.split('/')[3]);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/reference-fx/refresh'){reply(200,await service.referenceFx.refresh(data));return;}
     if(req.method==='POST'&&url.pathname==='/api/security-directory/refresh'){reply(202,service.securityDirectory.refresh(data));return;}
+    if(req.method==='POST'&&forwardReviewMatch&&['label','outcome'].includes(forwardReviewMatch[2])){reply(200,service.forwardReviews.write(forwardReviewMatch[1],forwardReviewMatch[2],data));return;}
     if(req.method==='POST'&&url.pathname==='/api/forward-evaluations/pause'){reply(200,service.forwardEvaluations.pause(data));return;}
     if(req.method==='POST'&&url.pathname==='/api/forward-evaluations'){reply(201,service.forwardEvaluations.freeze(data));return;}
     if(req.method==='POST'&&url.pathname.startsWith('/api/evaluations')){

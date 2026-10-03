@@ -1,3 +1,4 @@
+import {claimsOf} from '../shared/claims.mjs';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {buildEvaluationBaseline,collectEvaluationSources} from './evaluation-baseline.mjs';
@@ -98,7 +99,8 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
      reasons.push('同事件簇或来源已有前向调用记录');break;
     }
    }
-   const value=guarded({runId:run.id,baselineId,topicId:run.topicId,topicVersion:run.packet.input.topicVersion,topicTitle:run.packet.input.title,packetHash:digest(run.packet),evidenceKeys:[...keys].sort(),record,execution,sourceHash,clusterSnapshots,inputEligibility:{eligible:reasons.length===0,reasons:[...new Set(reasons)]},forwardEligible:false,qualification:'输入准入仅供核对；尚无独立标签、结局或模型有效性验收'});
+   const claimTimeline=db.prepare('SELECT version,recorded_at,payload FROM research_versions WHERE topic_id=? AND version<=? ORDER BY version').all(run.topicId,run.packet.input.topicVersion).map(row=>({version:row.version,recordedAt:row.recorded_at,claims:claimsOf(JSON.parse(row.payload))}));
+   const value=guarded({claimTimeline,runId:run.id,baselineId,topicId:run.topicId,topicVersion:run.packet.input.topicVersion,topicTitle:run.packet.input.title,packetHash:digest(run.packet),evidenceKeys:[...keys].sort(),record,execution,sourceHash,clusterSnapshots,inputEligibility:{eligible:reasons.length===0,reasons:[...new Set(reasons)]},forwardEligible:false,qualification:'输入准入仅供核对；尚无独立标签、结局或模型有效性验收'});
    db.prepare('INSERT INTO forward_captures VALUES(?,?,?,?)').run(run.id,baselineId,run.topicId,JSON.stringify(value));
   },
   get(runId){

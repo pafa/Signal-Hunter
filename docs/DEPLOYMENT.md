@@ -510,3 +510,8 @@ GET `/api/research-pipeline` 查看队列；PATCH 同路径提交 `version,daily
 同源且通过实例校验的本机API：`GET /api/forward-evaluations`返回最近50个基线、100次调用及总数；`GET /api/forward-evaluations/baselines/:id`读取完整冻结基线，`GET /api/forward-evaluations/records/:runId`读取调用依据与校验状态。`POST /api/forward-evaluations`仅接受`requestId,title`；`POST /api/forward-evaluations/pause`仅接受当前`baselineId`，过时基线不能暂停新基线。完整基线含本地研究/来源快照，只在本机保存和核对，不加入公开源码或截图。
 
 新增`forward_baselines`与`forward_captures`表随既有SQLite备份保存；恢复核对前不接受新的业务写入。源码运行中发生变化时先重启对应候选，再冻结基线；模型配置或代码偏离原基线的调用会留下排除原因，不静默更新原基线。此功能不代替Mac常驻启用、个人实例升级或长期运行验收。
+
+
+前向调用详情可展开“登记复核标签与主张结局”。只有原调用中的主张可以登记结局，新增预测应在研究中另建并进入后续调用。结局材料先保存到原研究，再刷新复核档案选择版本和逐字引文；材料原文及修订留在本机。结局时点未知可留空，未解决和部分兑现不作二元评分。
+
+`GET /api/forward-evaluations/records/:runId/review`返回冻结主张、复核版本和历史；同路径`review-inputs`返回原研究当前关联的可选材料及不可核实项。`POST .../:runId/label`和`POST .../:runId/outcome`仅接受`requestId,version,value`，服务端追加新复核行，不修改研究、模型run或市场账本。新`forward_reviews`表随SQLite备份，恢复核对前禁止写入。页面未知保存结果可原请求重试，版本冲突保留草稿并要求显式载入新版；不自动提交，也不自动认定独立验证通过。
