@@ -5,7 +5,10 @@ import {mkdtempSync,rmSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
+import {createHash,randomUUID} from 'node:crypto';
 import {openStore} from '../server/store.mjs';
+import {openResearch} from '../server/research.mjs';
+import {openMarketSimulation} from '../server/market-simulation.mjs';
 import {createService} from '../server/service.mjs';
 import {assertDatabaseMode} from '../server/runtime.mjs';
 import {inventoryDatabase,compareInventories} from '../server/database-inventory.mjs';
@@ -41,6 +44,9 @@ function writer(path,topicId,kind,phase){
  if(${JSON.stringify(phase)}==='after')stop();
  throw Error('Crash gate was not reached');
  `;
+ return spawnWriter(source);
+}
+function spawnWriter(source){
  const child=spawn(process.execPath,['--input-type=module','-e',source],{stdio:['ignore','pipe','pipe']});
  let output='',errors='';child.stderr.on('data',b=>errors+=b);
  const closed=new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
@@ -51,6 +57,117 @@ function writer(path,topicId,kind,phase){
   child.stdout.on('data',b=>{output+=b;if(output.includes('CRASH_GATE\n'))finish(resolve)();});
  });
  return {child,ready,closed};
+}
+
+const fillStart='2026-10-02T14:00:00.000Z';
+const fillConfig={issuerCapPct:25,themeCapPct:40,cashFloorPct:20,feeBps:10,slippageBps:0,maxHoldDays:5,maxOrderMinutes:60,quoteMaxAgeSeconds:120,allowOvernight:true};
+function fillQuote(at,capacity=40){
+ return {id:'synthetic-fill:'+at,symbol:'AAPL.US',currency:'USD',kind:'market-simulation-input',verified:true,source:'synthetic-crash-only',rulesVersion:'fixture-only',issuerId:'synthetic-issuer',asOf:at,receivedAt:at,validUntil:'2026-10-02T20:00:00Z',bid:'100',ask:'100',mark:'100',fx:{id:'synthetic-fx',source:'synthetic-crash-only',usdPerUnit:'1',asOf:at,receivedAt:at,validUntil:'2026-10-02T20:00:00Z'},tradable:true,halted:false,priceLimitState:'normal',sessionOpen:'2026-10-02T13:00:00Z',sessionClose:'2026-10-02T20:00:00Z',sellableAt:at,settlesAt:'2026-10-03T14:00:00Z',buyLot:1,sellLot:1,minBuyQty:1,tickSize:'0.01',availableBuy:capacity,availableSell:capacity};
+}
+// These two accounts deliberately have no strategy profile: this exercises the
+// common fill/ledger/liquidity transaction, not either strategy's entry quality.
+function fillFixture(path,at=fillStart,quote=fillQuote(at)){
+ const store=openStore(path),research=openResearch(store,{seed:false,clock:()=>at});
+ const accounts=Object.fromEntries(['aggressive','steady'].map(accountId=>[accountId,openMarketSimulation(store,research,{accountId,clock:()=>at,getInputs:()=>({quotes:{'AAPL.US':quote}})})]));
+ return {store,research,accounts,set(next,q=fillQuote(next)){at=next;quote=q;},close(){store.close();}};
+}
+function proposeFill(sim,topic,side){
+ const command=extra=>({requestId:randomUUID(),version:sim.snapshot().version,...extra});
+ sim.propose(command({order:{topicId:topic.id,topicVersion:topic.version,symbol:'AAPL.US',side,qty:100,limitPrice:'100',budgetUSD:11000,expiresAt:'2026-10-02T14:30:00Z',holdUntil:'2026-10-03T14:00:00Z',thesis:'Synthetic crash case',trigger:'Fixture approval',invalidation:'Fixture only'}}));
+ const order=sim.snapshot().orders.at(-1),review=sim.review(order.id);
+ assert.equal(review.eligible,true,review.reasons.join(';'));
+ sim.decide(order.id,command({action:'approve',note:'Synthetic crash approval',confirmSimulation:true,fingerprint:review.fingerprint}));
+}
+function fillWriter(path,at,quote,phase){
+ return spawnWriter(`
+ import {writeSync} from 'node:fs';
+ import {openStore} from ${imports('store')};
+ import {openResearch} from ${imports('research')};
+ import {openMarketSimulation} from ${imports('market-simulation')};
+ const store=openStore(${JSON.stringify(path)}),clock=()=>${JSON.stringify(at)};
+ const research=openResearch(store,{seed:false,clock});
+ const sim=openMarketSimulation(store,research,{accountId:'aggressive',clock,getInputs:()=>({quotes:{'AAPL.US':${JSON.stringify(quote)}}})});
+ store.db.exec('PRAGMA wal_autocheckpoint=0');
+ const stop=()=>{writeSync(1,'CRASH_GATE\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0);};
+ if(${JSON.stringify(phase)}==='during'){
+  store.db.function('crash_gate',stop);
+  store.db.exec('CREATE TEMP TRIGGER stop_fill AFTER INSERT ON market_sim_liquidity BEGIN SELECT crash_gate(); END');
+ }
+ sim.process();
+ if(${JSON.stringify(phase)}==='after')stop();
+ throw Error('Fill crash gate was not reached');
+ `);
+}
+
+for(const side of ['buy','sell'])for(const phase of ['during','after']){
+ test(`${side} fill SIGKILL ${phase} commit preserves cash, FIFO, history and shared quote capacity`,async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'signal-fill-crash-')),path=join(dir,'fixture.sqlite');
+  let f,reader,process;
+  try{
+   f=fillFixture(path);
+   let topic=f.research.create({title:'Synthetic shared-liquidity crash',summary:'No real data or strategy validation'});
+   topic=f.research.addCompany(topic.id,{version:topic.version,symbol:'AAPL.US',note:'Synthetic fixture'});
+   for(const sim of Object.values(f.accounts)){
+    sim.initialize({requestId:randomUUID(),version:0,initialUSD:100000,config:fillConfig,confirmSimulation:true});
+    proposeFill(sim,topic,'buy');
+   }
+   if(side==='sell'){
+    const boughtAt='2026-10-02T14:00:01.000Z';f.set(boughtAt,fillQuote(boughtAt,200));
+    for(const sim of Object.values(f.accounts))assert.equal(sim.process().fills.length,1);
+    for(const sim of Object.values(f.accounts))proposeFill(sim,topic,'sell');
+   }
+   const executionAt='2026-10-02T14:00:02.000Z',quote=fillQuote(executionAt);
+   const before=inventoryDatabase(path),oldBook=f.accounts.aggressive.snapshot();
+   const oldEvents=f.store.db.prepare('SELECT * FROM market_sim_events_aggressive ORDER BY version').all();
+   f.close();f=null;
+   reader=new DatabaseSync(path,{readOnly:true});reader.prepare('SELECT COUNT(*) FROM market_sim_liquidity').get();
+   process=fillWriter(path,executionAt,quote,phase);await process.ready;
+   const visible=inventoryDatabase(path),changed=compareInventories(before,visible).tables.filter(t=>!t.identical).map(t=>t.name).sort();
+   assert.deepEqual(changed,phase==='during'?[]:['market_sim_book_aggressive','market_sim_events_aggressive','market_sim_liquidity']);
+   if(phase==='after')assert.ok(statSync(path+'-wal').size>32);
+   assert.equal(process.child.kill('SIGKILL'),true);assert.equal((await process.closed).signal,'SIGKILL');
+   f=fillFixture(path,executionAt,quote);reader.close();reader=null;
+   assert.equal(compareInventories(visible,inventoryDatabase(path)).passed,true,'reopen cannot change any table');
+   let book=f.accounts.aggressive.snapshot();
+   assert.equal(book.orders.at(-1).filledQty,phase==='after'?40:0);
+   assert.equal(book.fills.length,oldBook.fills.length+(phase==='after'?1:0));
+   // Replay exactly the same quote: an uncommitted fill may execute once; a
+   // committed fill keeps its original ID, amounts, allocations and event.
+   const committedFill=phase==='after'?book.fills.at(-1):null;
+   const committedEvent=phase==='after'?f.accounts.aggressive.event(book.version):null;
+   book=f.accounts.aggressive.process();
+   assert.equal(book.orders.at(-1).filledQty,40);assert.equal(book.orders.at(-1).status,'partial');
+   assert.equal(book.fills.length,oldBook.fills.length+1);
+   if(committedFill)assert.deepEqual(book.fills.at(-1),committedFill);
+   assert.equal(book.cashCents,oldBook.cashCents-(side==='buy'?400400:0));
+   assert.equal(book.feesCents,oldBook.feesCents+400);
+   assert.equal(book.lots.reduce((n,l)=>n+l.qty,0),side==='buy'?40:60);
+   assert.equal(book.lots.reduce((n,l)=>n+l.costCents,0),side==='buy'?400400:600600);
+   assert.equal(book.unsettledCashCents,side==='sell'?399600:0);
+   assert.equal(book.realizedCents,side==='sell'?-800:0);
+   if(side==='sell')assert.deepEqual(book.fills.at(-1).allocations,[{lotId:oldBook.lots[0].id,qty:40,costCents:400400}]);
+   const otherBefore=f.accounts.steady.snapshot(),other=f.accounts.steady.process();
+   assert.equal(other.orders.at(-1).filledQty,0,'second account cannot consume the committed quote again');
+   for(const key of ['cashCents','feesCents','fills','lots','unsettled'])assert.deepEqual(other[key],otherBefore[key]);
+   const liquidity=f.store.db.prepare('SELECT payload FROM market_sim_liquidity').all().map(r=>JSON.parse(r.payload));
+   assert.equal(liquidity.find(r=>r.fingerprint===createHash('sha256').update(JSON.stringify(quote)).digest('hex'))[side],40);
+   f.accounts.aggressive.process();const stable=inventoryDatabase(path);f.accounts.aggressive.process();f.accounts.steady.process();
+   assert.equal(compareInventories(stable,inventoryDatabase(path)).passed,true,'repeated checks append no duplicate fills or events');
+   const events=f.store.db.prepare('SELECT * FROM market_sim_events_aggressive ORDER BY version').all();
+   assert.deepEqual(events.slice(0,oldEvents.length),oldEvents);
+   if(committedEvent)assert.deepEqual(f.accounts.aggressive.event(committedEvent.version),committedEvent);
+   let previous=null;for(const row of events){const e=JSON.parse(row.payload);assert.equal(e.previousHash,previous);assert.equal(createHash('sha256').update(JSON.stringify(e)).digest('hex'),row.hash);previous=row.hash;}
+   if(side==='sell'){
+    f.set('2026-10-03T14:00:00.000Z');book=f.accounts.aggressive.process();
+    assert.equal(book.cashCents,oldBook.cashCents+399600);assert.equal(book.unsettledCashCents,0);
+    const settled=inventoryDatabase(path);f.accounts.aggressive.process();
+    assert.equal(compareInventories(settled,inventoryDatabase(path)).passed,true,'recovered proceeds settle only once');
+   }
+  }finally{
+   if(process){if(process.child.exitCode===null&&process.child.signalCode===null)process.child.kill('SIGKILL');await process.closed;}
+   if(f)f.close();if(reader)reader.close();rmSync(dir,{recursive:true,force:true});
+  }
+ });
 }
 
 for(const kind of ['news','research','paper','aggressive','steady'])for(const phase of ['during','after']){
