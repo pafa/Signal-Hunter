@@ -5,9 +5,9 @@ import {openResearch} from '../server/research.mjs';
 import {validateCodexDraft,digest} from '../server/codex-research.mjs';
 import {validateCandidate,openModelResearchRuns} from '../server/model-research-runs.mjs';
 const at='2026-10-04T00:00:00Z';
-function fixture(){
+function fixture(body='Synthetic company 2025 annual revenue USD 100 million. Proposed 2026 order USD 120 million, not revenue. Target margin 10%–20%.'){
  const store=openStore(':memory:'),r=openResearch(store,{seed:false,clock:()=>at});let t=r.create({title:'合成财务口径冲突',summary:'非真实公司'});
- t=r.saveMaterial(t.id,{version:t.version,title:'合成年度收入及订单',sourceName:'合成来源',scope:'excerpt',body:'Synthetic company 2025 annual revenue USD 100 million. Proposed 2026 order USD 120 million, not revenue. Target margin 10%–20%.',stance:'unverified',family:'other',step:'fact',interpretation:'订单不是营业收入'});
+ t=r.saveMaterial(t.id,{version:t.version,title:'合成年度收入及订单',sourceName:'合成来源',scope:'excerpt',body,stance:'unverified',family:'other',step:'fact',interpretation:'订单不是营业收入'});
  const e=t.evidence[0].id,datum=(value,kind='source')=>({value,kind,evidenceIds:kind==='source'?[e]:[]});
  t=r.addCompany(t.id,{version:t.version,symbol:'BA.US',note:'合成证券关系',materiality:[{id:'revenue',label:'营业收入',scope:'虚构公司',period:'2025全年',unit:'million USD',basis:'测试误填订单为收入',comparable:true,baseline:datum(100),observed:datum(120),expected:datum(110),affected:datum(20,'assumption')}]});
  return {store,r,t,packet:r.packet(t.id),e};
@@ -48,4 +48,15 @@ test('persistent model runs reject incomplete reviews, retain failure and allow 
 });
 test('older packets without review targets remain readable without inventing structured audit results',()=>{
  const f=fixture();try{const p=structuredClone(f.packet);delete p.input.materialityReview;const o=output(f);delete o.materialityReviews;assert.equal(validateCodexDraft(o,p).materialityReviews,undefined);const noRows=structuredClone(f.packet);noRows.input.companies=[];noRows.input.materialityReview.targets=[];o.materialityReviews=[];assert.deepEqual(validateCodexDraft(o,noRows).materialityReviews,[]);}finally{f.store.close();}
+});
+
+test('non-breaking monetary multipliers survive saved source checks and cannot be clipped by model quotations',()=>{
+ const f=fixture('Synthetic company 2025 annual revenue USD 100\u00a0million. Proposed 2026 order USD 120 million, not revenue.');
+ try{
+  const source=f.t.companies[0].materiality.rows[0].baseline.sourceCheck;
+  assert.equal(source.quantityVersion,'source-quantity-literals/2');assert.equal(source.status,'literal-match');assert.equal(source.references[0].matches[0].normalizedValue,'100000000');
+  const o=output(f);o.materialityReviews[0].citations[0].quote='2025 annual revenue USD 100\u00a0million';assert.equal(validateCodexDraft(o,f.packet).materialityReviews[0].verdict,'consistent');
+  const p=structuredClone(f.packet);p.input.companies[0].materiality.rows[0].unit='USD';p.input.companies[0].materiality.rows[0].baseline.value=100;for(const target of p.input.materialityReview.targets)target.unit='USD';
+  o.materialityReviews[0].citations[0].quote='annual revenue USD 100';assert.throws(()=>validateCodexDraft(o,p),e=>e.code==='output');
+ }finally{f.store.close();}
 });

@@ -1,12 +1,15 @@
 // Literal extraction only: no inference of financial metrics, periods or forecasts.
-export const QUANTITY_VERSION='source-quantity-literals/1';
+export const QUANTITY_VERSION='source-quantity-literals/2';
 const currency='US\\$|HK\\$|USD|HKD|CNY|RMB|人民币|美元|港元|港币|\\$|¥|￥';
 const magnitude='trillion|billion|million|thousand|万亿|千亿|百亿|十亿|亿|千万|百万|十万|万|千|百';
 const numeric='[+−-]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?|\\.\\d+)';
-const money=new RegExp(`(?<prefix>${currency})?[ \\t]*(?<number>${numeric})[ \\t]*(?<scale>${magnitude})?[ \\t]*(?<suffix>${currency}|元|%|％|percent|per cent)?`,'gi');
+// Keep source text and UTF-16 offsets intact; HTML often uses non-breaking spaces.
+const money=new RegExp(`(?<prefix>${currency})?[\\t\\p{Zs}]*(?<number>${numeric})[\\t\\p{Zs}]*(?<scale>${magnitude})?[\\t\\p{Zs}]*(?<suffix>${currency}|元|%|％|percent|per cent)?`,'giu');
+const separatedUnit=new RegExp(`^\\s+(?:${magnitude}|${currency}|元|%|％|percent|per cent)(?![A-Za-z])`,'iu');
+const rangeBefore=new RegExp(`\\d[\\t\\p{Zs}]*(?:${magnitude})?[\\t\\p{Zs}]*(?:${currency}|元|%|％|percent|per cent)?[\\t\\p{Zs}]*[–—~至到-][\\t\\p{Zs}]*$`,'iu');
 const powers={trillion:12,billion:9,million:6,thousand:3,'万亿':12,'千亿':11,'百亿':10,'十亿':9,'亿':8,'千万':7,'百万':6,'十万':5,'万':4,'千':3,'百':2};
 const currencies={'US$':'USD',USD:'USD','美元':'USD','HK$':'HKD',HKD:'HKD','港元':'HKD','港币':'HKD',CNY:'CNY',RMB:'CNY','人民币':'CNY'};
-const unitPattern=new RegExp(`^(?:(?<leading>${currency})[ \\t]*(?<after>${magnitude})?|(?<before>${magnitude})?[ \\t]*(?<trailing>${currency})|(?<percent>%|％|percent|per cent))$`,'i');
+const unitPattern=new RegExp(`^(?:(?<leading>${currency})[\\t\\p{Zs}]*(?<after>${magnitude})?|(?<before>${magnitude})?[\\t\\p{Zs}]*(?<trailing>${currency})|(?<percent>%|％|percent|per cent))$`,'iu');
 // Explicit input units only; no FX, inferred currency or semantic metric conversion.
 export function quantityInUnit(value,unit){
  if(typeof value!=='number'||!Number.isFinite(value)||typeof unit!=='string'||unit.length>80)return null;
@@ -30,15 +33,18 @@ export function sourceQuantities(text){
   if(!prefix&&!suffix)continue;
   // Refuse partial tokens such as 12,34 USD, 1e6 USD or embedded identifiers.
   if(/[A-Za-z0-9_]/.test(text[start-1]||'')||/[.,]/.test(text[start-1]||'')&&/\d/.test(text[start-2]||'')||/[A-Za-z0-9_]/.test(text[end]||'')||/[.,]/.test(text[end]||'')&&/\d/.test(text[end+1]||''))continue;
-  if(/^[ \t]+(?:bn|mn|mm|[kmb])(?:\b|$)/i.test(text.slice(end)))continue;
+  const numberStart=match.index+match[0].indexOf(number),numberEnd=numberStart+number.length;
+  // Unsupported space-grouped digits and units across line breaks must not become smaller amounts.
+  if(/\d[\t\p{Zs}]+$/u.test(text.slice(0,numberStart))||/^[\t\p{Zs}]+\d/u.test(text.slice(numberEnd))||!scale&&!suffix&&separatedUnit.test(text.slice(end)))continue;
+  if(/^\s+(?:bn|mn|mm|[kmb])(?:\b|$)/iu.test(text.slice(end)))continue;
   if(number.replace(/\D/g,'').length>24)continue;
   const pct=/^(?:%|％|percent|per cent)$/i.test(suffix||''),a=currencies[prefix?.toUpperCase()],b=suffix==='元'&&a==='CNY'?'CNY':currencies[suffix?.toUpperCase()];
   const currencyCode=pct?null:a||b||null;
   const conflict=Boolean(prefix&&suffix&&(pct||!a||!b||a!==b));
   const before=text.slice(Math.max(0,start-40),start),after=text.slice(end,end+40);
-  const range=/[0-9](?:%|％)?[ \t]*[–—~至到-][ \t]*$/.test(before)||/^[ \t]*[–—~至到-][ \t]*(?:USD|HKD|CNY|RMB|US\$|HK\$|\$|人民币|美元|港元|港币)?[ \t]*[+−-]?(?:\d|\.\d)/i.test(after)||/^[−-]/.test(raw)&&/[0-9](?:%|％)[ \t]*$/.test(before);
-  const parenthesized=/[（(][ \t]*$/.test(text.slice(Math.max(0,start-4),start))&&/^[ \t]*[）)]/.test(text.slice(end,end+4));
-  const prefixSign=/[−-][ \t]*$/.test(text.slice(Math.max(0,start-4),start));
+  const range=rangeBefore.test(before)||/^[\t\p{Zs}]*[–—~至到-][\t\p{Zs}]*(?:USD|HKD|CNY|RMB|US\$|HK\$|\$|人民币|美元|港元|港币)?[\t\p{Zs}]*[+−-]?(?:\d|\.\d)/iu.test(after)||/^[−-]/.test(raw)&&/[0-9][\t\p{Zs}]*(?:%|％)[\t\p{Zs}]*$/u.test(before);
+  const parenthesized=/[（(][\t\p{Zs}]*$/u.test(text.slice(Math.max(0,start-4),start))&&/^[\t\p{Zs}]*[）)]/u.test(text.slice(end,end+4));
+  const prefixSign=/[−-][\t\p{Zs}]*$/u.test(text.slice(Math.max(0,start-4),start));
   const normalization=prefixSign?'prefix-sign-unresolved':conflict?'conflicting-units':range?'range-context':parenthesized?'parenthesized-sign-unresolved':!pct&&!currencyCode?'ambiguous-currency':'literal-only';
   found.push({start,end,raw,number,scale:scale||null,unit:pct?'percent':currencyCode,normalization,normalizedValue:normalization==='literal-only'?decimal(number,powers[scale?.toLowerCase()]||0):null,context:text.slice(Math.max(0,start-60),Math.min(text.length,end+60))});
  }

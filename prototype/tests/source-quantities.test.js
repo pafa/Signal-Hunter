@@ -35,3 +35,26 @@ test('fractional literals and signed percentage ranges do not inflate or invent 
  for(const [text,value] of [['.50 percent','0.5'],['USD .25 million','250000'],['-.50%','-0.5']])assert.equal(sourceQuantities(text)[0].normalizedValue,value);
  for(const text of ['10%-20%','10%–20%','USD 10–USD 20','（USD 100）','( USD 100 )'])assert(sourceQuantities(text).every(q=>q.normalizedValue===null),text);
 });
+
+test('HTML non-breaking and other horizontal spaces retain monetary multipliers and exact source offsets',async()=>{
+ const {quantityInUnit}=await import('../shared/source-quantities.mjs');
+ for(const space of ['\u00a0','\u202f','\u2009','\u3000','\t']){
+  for(const [literal,value,unit] of [[`RMB${space}12.5${space}billion`,'12500000000','CNY'],[`3.2${space}亿${space}美元`,'320000000','USD'],[`12.5${space}percent`,'12.5','percent']]){
+   const text=`😀公告：${literal}，仅测试。`,qs=sourceQuantities(text);assert.equal(qs.length,1);assert.equal(qs[0].normalizedValue,value,literal);assert.equal(qs[0].unit,unit);assert.equal(qs[0].raw,literal);assert.equal(text.slice(qs[0].start,qs[0].end),literal);
+  }
+  assert.deepEqual(quantityInUnit(12.5,`billion${space}CNY`),{unit:'CNY',normalizedValue:'12500000000'});
+ }
+});
+test('Unicode spacing does not bypass ranges, signs, unsupported abbreviations or broken digit groups',()=>{
+ for(const space of ['\u00a0','\u202f','\u2009',' ']){
+  for(const text of [`USD10${space}billion${space}–${space}USD20${space}billion`,`10${space}%${space}–${space}20${space}%`,`(${space}USD100${space})`,`-${space}USD100`,`USD10${space}HKD`]){const qs=sourceQuantities(text);assert(qs.length,text);assert(qs.every(q=>q.normalizedValue===null),text);}
+  for(const text of [`USD10${space}bn`,`USD12${space}345`,`12${space}345${space}USD`])assert.deepEqual(sourceQuantities(text),[],text);
+ }
+ for(const text of ['USD 12\nmillion','USD\n12 million','12\nUSD','USD 12\r\nHKD'])assert.deepEqual(sourceQuantities(text),[],text);
+});
+test('HTML entity extraction and packet indexing agree without normalizing the stored article text',async()=>{
+ const {extractArticle}=await import('../server/source-reader.mjs');
+ const html='<html><head><title>Synthetic financial disclosure</title></head><body><article><h1>Synthetic financial disclosure</h1><p>'+('This fictional source is only a parser test. '.repeat(8))+'Annual costs RMB12.5&nbsp;billion; quarterly costs USD&#8239;25&#8239;million. End.</p></article></body></html>';
+ const article=extractArticle(html,'https://example.test/disclosure'),before=article.body,packet=packetQuantities([{id:'e',material:{id:'m',revision:1,...article}}]);
+ assert.equal(packet.version,'source-quantity-literals/2');assert.equal(packet.items.length,2);assert.deepEqual(packet.items.map(q=>q.normalizedValue),['12500000000','25000000']);assert.equal(article.body,before);assert(article.body.includes('\u00a0'));assert(article.body.includes('\u202f'));
+});
