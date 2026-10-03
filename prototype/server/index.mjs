@@ -49,7 +49,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/packet$/.test(url.pathname)){reply(200,service.research.packet(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/model-runs$/.test(url.pathname)){reply(200,{...service.modelResearch.status(),runs:service.modelResearch.list(url.pathname.split('/')[3])});return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/model-runs\/[^/]+$/.test(url.pathname)){reply(200,service.modelResearch.get(url.pathname.split('/')[3],url.pathname.split('/')[5]));return;}
-    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/related$/.test(url.pathname)){reply(200,service.research.related(url.pathname.split('/')[3]));return;}
+    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/related$/.test(url.pathname)){reply(200,service.research.related(url.pathname.split('/')[3],Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/history$/.test(url.pathname)){reply(200,service.research.history(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/revisions$/.test(url.pathname)){reply(200,store.revisions(url.pathname.split('/')[3]));return;}
     if(!['POST','PATCH','DELETE'].includes(req.method)){reply(404,{error:'接口不存在'});return;}
