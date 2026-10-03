@@ -3,7 +3,7 @@ import {comparisonSummary} from './semantic-materials.mjs';
 import {semanticErrors} from '../shared/semantic-labels.mjs';
 const positive=new Set(['repeat','followup','reversal','related','analogy']);
 const other=side=>side==='left'?'right':'left';
-const fail=()=>{throw new Error(semanticErrors[9]);};
+const fail=()=>{throw new Error(semanticErrors[10]);};
 const evidenceIds=(topic,record)=>(topic.evidence||[]).filter(e=>record.kind==='material'?e.materialId===record.id&&e.materialRevision===record.revision:e.newsId===record.id&&e.newsRevision===record.revision).map(e=>e.id).sort();
 const usable=run=>run.active&&run.status==='candidate'&&positive.has(run.candidate?.comparison.relation);
 function basis(run,source,target,sourceSide){

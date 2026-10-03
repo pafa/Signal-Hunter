@@ -83,3 +83,34 @@ test('pause/resume starts a new sampling window and historical conditions remain
   f.inbox.rules.update('temporal-integration',{version:2,topicVersion:1,action:'resume',note:'Resume'});assert.equal(f.sample(2,105).added,0);assert.equal(f.sample(3,105).added,0);assert.equal(f.sample(4,105).added,1);assert.equal(f.inbox.rules.history('temporal-integration').length,3);
  }finally{f.store.close();}
 });
+
+test('repeated cached checks cannot bridge an excessive gap between newly observed samples',()=>{
+ for(const mode of ['cross','held']){
+  const f=run(rule(condition({mode,...(mode==='held'?{holdSeconds:120}:{})}))),first=mode==='cross'?99:105;
+  f.step(0,first);f.step(0,first,{time:stamp(2)});
+  const next=f.step(2,105,{time:stamp(5),q:quote(stamp(2),105,{receivedAt:stamp(5)})});
+  assert.equal(next.state,mode==='cross'?'unknown':'false',mode+' must restart after five minutes without a new observed sample');
+  assert.equal(next.temporal[0].samples.length,1);assert.equal(next.temporal[0].samples[0].observedAt,stamp(5));
+ }
+});
+
+test('older sampling windows restart after upgrade without rewriting completed notifications or receipts',()=>{
+ const f=persistent();try{
+  f.create();f.sample(0,99);f.sample(1,101);
+  let item=f.inbox.snapshot().items[0];f.inbox.respond(item.id,{revision:1,action:'complete',note:'Historical decision'});
+  const frozen=JSON.parse(f.store.db.prepare('SELECT payload FROM observation_todos WHERE id=?').get(item.id).payload);
+  frozen.input.results[0].input.temporal.engine='sampled-price/1';
+  f.store.db.prepare('UPDATE observation_todos SET payload=? WHERE id=?').run(JSON.stringify(frozen),item.id);
+  f.inbox.rules.update('temporal-integration',{version:1,topicVersion:1,action:'rearm',note:'Unfinished window at upgrade'});
+  f.sample(2,99);
+  const old=JSON.parse(f.store.db.prepare('SELECT payload FROM observation_rule_checks WHERE rule_id=? AND version=2').get('temporal-integration').payload);
+  old.temporal[0].engine='sampled-price/1';old.results[0].input.temporal.engine='sampled-price/1';
+  f.store.db.prepare('UPDATE observation_rule_checks SET payload=? WHERE rule_id=? AND version=2').run(JSON.stringify(old),'temporal-integration');
+  const history=JSON.stringify(f.store.db.prepare('SELECT * FROM observation_todos').all()),receipts=JSON.stringify(f.inbox.receipts(item.id));
+  assert.equal(f.sample(3,101).added,0);assert.equal(f.inbox.rules.list()[0].check.state,'unknown');
+  assert.equal(f.inbox.rules.list()[0].check.temporal[0].engine,'sampled-price/2');
+  assert.equal(JSON.stringify(f.store.db.prepare('SELECT * FROM observation_todos').all()),history);
+  assert.equal(JSON.stringify(f.inbox.receipts(item.id)),receipts);
+  f.sample(4,99);assert.equal(f.sample(5,101).added,1);
+ }finally{f.store.close();}
+});
