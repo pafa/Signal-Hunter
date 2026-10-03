@@ -20,6 +20,7 @@
     "start:production": "node scripts/start.mjs --production",
     "backup": "node scripts/backup.mjs",
     "service:config": "node scripts/service-config.mjs",
+    "backup:prune": "node scripts/backup-prune.mjs",
     "storage:preview": "node scripts/storage-preview.mjs"
   },
   "dependencies": {
