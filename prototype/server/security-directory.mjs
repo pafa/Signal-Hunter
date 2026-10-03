@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {COMPANY_DIRECTORY} from '../shared/company-directory.mjs';
 import {securityIdentity} from '../shared/securities.mjs';
 import {digest} from './codex-research.mjs';
+import {directoryCodeRecall,DIRECTORY_RECALL} from './directory-code-recall.mjs';
 export const DIRECTORY_SOURCES=[{id:'nasdaq',url:'https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt',header:'Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares'},{id:'other',url:'https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt',header:'ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol'}];
 export const DIRECTORY_PARSER='nasdaq-symbol-directory-1';
 const venueNames={Q:'XNAS',A:'XASE',N:'XNYS',P:'ARCX',Z:'BATS',V:'IEXG'};
@@ -64,18 +65,18 @@ export function openSecurityDirectory(store,{enabled=true,fetcher=fetch,now=Date
    return {items:rows.slice(offset,offset+20).map(e=>identity(e,s)),total:rows.length,offset,snapshot:projected(s)};
   },
   selection(text){
-   const snapshots=['US','CN','HK'].map(m=>active(m)).filter(Boolean);if(!snapshots.length)return null;const corpus=' '+norm(text)+' ',matches=[];
+   const snapshots=['US','CN','HK'].map(m=>active(m)).filter(Boolean);if(!snapshots.length)return null;const codes=directoryCodeRecall(text),corpus=' '+norm(codes.names)+' ',matches=[];
    for(const s of snapshots){
    for(const e of s.entries.filter(e=>e.eligible&&(!e.listingDate||e.listingDate<=today()))){
     const known=COMPANY_DIRECTORY.find(c=>c.symbol===e.symbol),stem=e.name.split(' - ')[0].replace(/\b(?:common stock|common shares|ordinary shares|american depositary (?:shares|receipts)).*$/i,'').replace(/\b(?:incorporated|inc\.?|corporation|corp\.?|limited|ltd\.?|plc|class [a-z])\b[., ]*/gi,'').trim();
     const names=[stem,e.name,...(e.aliases||[]),...(known?[known.name,...known.aliases]:[])].map(norm).filter(n=>n.replaceAll(' ','').length>=(/\p{Script=Han}/u.test(n)?2:known?3:4));
-    const explicit=new RegExp(`(?:NASDAQ|NYSE|NYSEAMERICAN|NYSEARCA|HKEX|SSE|SZSE)\\s*:\\s*${e.sourceSymbol.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?![A-Z0-9.])`,'i').test(text)||String(text).includes(e.symbol);
-    const knownExact=(known?.aliases||[]).some(a=>/^[A-Z]{2,5}$/.test(a)&&new RegExp(`(?<![A-Za-z0-9])${a}(?![A-Za-z0-9])`).test(text));
+    const explicit=codes.matches(e);
+    const knownExact=(known?.aliases||[]).some(a=>/^[A-Z]{2,5}$/.test(a)&&new RegExp(`(?<![A-Za-z0-9])${a}(?![A-Za-z0-9])`).test(codes.names));
     if(explicit||knownExact||names.some(n=>/\p{Script=Han}/u.test(n)?corpus.includes(n):new RegExp(`(?<![a-z0-9])${n}(?![a-z0-9])`,'u').test(corpus)))matches.push(identity(e,s));
    }
    }
    // Input is bounded and the coverage note is part of the frozen model packet.
-   const selected=matches.slice(0,80),coveredMarkets=snapshots.map(s=>s.market||'US');return {entries:selected,coveredMarkets,basis:{snapshotId:digest(snapshots.map(s=>s.id)),snapshots:snapshots.map(s=>({id:s.id,market:s.market||'US',parser:s.parser})),parser:CROSS_PARSER,sourceDates:snapshots.flatMap(s=>s.sources.map(x=>({id:x.id,date:x.sourceDate}))),totalEligible:snapshots.reduce((n,s)=>n+s.counts.eligible,0),matched:matches.length,selected:selected.length,omitted:Math.max(0,matches.length-selected.length),method:'cross-market-name-or-explicit-symbol-recall-1',limitation:'有限名称召回，可能漏掉简称、译名或法律主体；未选入不代表不存在或未上市。未来日期的目录/上市日不参与当前召回。'}};
+   const selected=matches.slice(0,80),coveredMarkets=snapshots.map(s=>s.market||'US');return {entries:selected,coveredMarkets,basis:{snapshotId:digest(snapshots.map(s=>s.id)),snapshots:snapshots.map(s=>({id:s.id,market:s.market||'US',parser:s.parser})),parser:CROSS_PARSER,sourceDates:snapshots.flatMap(s=>s.sources.map(x=>({id:x.id,date:x.sourceDate}))),totalEligible:snapshots.reduce((n,s)=>n+s.counts.eligible,0),matched:matches.length,selected:selected.length,omitted:Math.max(0,matches.length-selected.length),method:DIRECTORY_RECALL,limitation:'有限名称召回；显式代码按完整标识及交易所匹配，名称仍可能歧义。未选入不代表不存在或未上市，未来日期的目录/上市日不参与当前召回。'}};
 
   },
   refresh(data){

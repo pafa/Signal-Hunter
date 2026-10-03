@@ -1,11 +1,48 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import http from 'node:http';
 import {openStore} from '../server/store.mjs';import {createService} from '../server/service.mjs';import {createHandler} from '../server/index.mjs';import {openSecurityDirectory,DIRECTORY_SOURCES,parseDirectoryFile} from '../server/security-directory.mjs';import {companyEntitiesPacket} from '../server/company-entities.mjs';import {digest} from '../server/codex-research.mjs';
+import {directoryCodeRecall} from '../server/directory-code-recall.mjs';
 const at=Date.parse('2026-10-03T01:00:00Z');
 const nasdaq=['ACME|Acme Laboratories Inc. - Common Stock|Q|N|N|100|N|N','NVDA|NVIDIA Corporation - Common Stock|Q|N|N|100|N|N','TEST|Synthetic Test Common Stock|Q|Y|N|100|N|N','FUND|Synthetic Common Stock Fund|Q|N|N|100|Y|N','PREF|Synthetic Preferred Stock|Q|N|N|100|N|N'];
 const other=['OTHER|Other Holdings plc Ordinary Shares|N|OTHER|N|100|N|OTHER'];
 const file=(s,rows,date='1002202618:01')=>[s.header,...rows,'File Creation Time: '+date+'|'.repeat(s.id==='other'?6:7)].join('\r\n')+'\r\n';
 function fixture(options={}){const store=openStore(options.path||':memory:');let date='1002202618:01',broken=false,calls=0;const fetcher=async url=>{calls++;if(broken)throw Error('private diagnostic');const s=DIRECTORY_SOURCES.find(s=>s.url===url);assert.ok(s);return new Response(file(s,s.id==='nasdaq'?nasdaq:other,date));};const service=createService(store,{mode:options.mode||'research',now:()=>at,fetcher,...options});return {store,service,d:service.securityDirectory,get calls(){return calls;},date:d=>date=d,break:()=>broken=true,async close(){await service.close();store.close();}};}
 async function refresh(f,id='directory-request-00001'){f.d.refresh({requestId:id});return f.d.wait();}
+test('qualified token parsing preserves share-class punctuation and rejects conflicting market suffixes',()=>{
+ const entry={symbol:'BRK.B.US',venue:'XNYS'};
+ for(const text of ['NYSE:BRK.B','NYSE:BRK.B.US','BRK.B.US','(BRK.B.US).'])assert(directoryCodeRecall(text).matches(entry),text);
+ for(const text of ['NASDAQ:BRK.B','NYSE:BRK','XBRK.B.US','BRK.B.US.A','BRK.B.US-extra','_BRK.B.US'])assert.equal(directoryCodeRecall(text).matches(entry),false,text);
+ assert(directoryCodeRecall('NASDAQ:ACME-A').matches({symbol:'ACME-A.US',venue:'XNAS'}));
+ assert.equal(directoryCodeRecall('SSE:600001.SZ').matches({symbol:'600001.SZ',venue:'XSHE'}),false);
+ assert.equal(directoryCodeRecall('BSE:600001').matches({symbol:'600001.SH',venue:'XSHG'}),false);
+ const mixed=directoryCodeRecall('（NYSE:OTHER），以及NASDAQ:NVDA；NVIDIA Corporation。');
+ assert(mixed.matches({symbol:'OTHER.US',venue:'XNYS'}));assert(mixed.matches({symbol:'NVDA.US',venue:'XNAS'}));assert(!mixed.names.includes('NVDA'));assert(mixed.names.includes('NVIDIA Corporation'));
+});
+test('US qualified symbols respect venue and token boundaries without leaking through company aliases',async()=>{
+ const f=fixture();try{await refresh(f);
+  for(const text of ['NYSE:ACME','HKEX:OTHER','NYSE:NVDA','NVDA.USX','prefixACME.US','NVDA.US.example','NVDA.US-extra','NASDAQ:NVDA-','NASDAQ:_NVDA','-NVDA.US','junk_NVDA.US'])assert.deepEqual(f.d.selection(text).entries,[],text);
+  for(const [text,symbol] of [['NASDAQ:ACME.','ACME.US'],['NYSE:OTHER','OTHER.US'],['(nvda.us)','NVDA.US'],['ＮＡＳＤＡＱ：ＮＶＤＡ','NVDA.US']])assert.deepEqual(f.d.selection(text).entries.map(e=>e.symbol),[symbol],text);
+  assert.deepEqual(f.d.selection('NYSE:NVDA; NVIDIA Corporation discusses research.').entries.map(e=>e.symbol),['NVDA.US']);
+ }finally{await f.close();}
+});
+test('prior recall candidates become stale while frozen model inputs, directory snapshots and research history remain intact',async()=>{
+ const config={binary:'/test/codex',model:'synthetic',timeoutMs:1000};
+ const f=fixture({modelConfig:config,companyEntityRunner:async p=>{const resolution={mentions:[{name:'ACME',quote:'NYSE:ACME',quoteField:'body',entityType:'company',resolution:'candidate',symbols:['ACME.US'],reason:'Simulated old recall, not validated identity'}],scopeNote:'Synthetic regression',missingEvidence:[]},rawOutput=JSON.stringify(resolution);return {status:'candidate',reviewStatus:'unreviewed',resolution,rawOutput,trace:{model:config.model,inputHash:p.inputHash,outputHash:digest(rawOutput)}};}});
+ try{
+  await refresh(f);const research=f.service.research;let topic=research.create({title:'Synthetic qualified identity',summary:'No trading'});
+  topic=research.saveMaterial(topic.id,{version:topic.version,title:'Synthetic code reference',sourceName:'Synthetic',url:'https://example.test/identity',body:'NYSE:ACME',scope:'excerpt',stance:'unverified',family:'other',step:'fact',interpretation:'Regression only'});
+  const material=research.materialList(topic.id).materials[0],select=research.directorySelection,base=f.d.selection('NYSE:ACME'),identity=f.d.search({q:'ACME'}).items[0];
+  // Reconstruct the previous selection contract, including its method identity,
+  // rather than rewriting the old run to make it pass the new recall rule.
+  research.directorySelection=()=>({...base,entries:[identity],basis:{...base.basis,selected:1,matched:1,method:'cross-market-name-or-explicit-symbol-recall-1'}});
+  const run=f.service.companyEntities.start(topic.id,{version:topic.version,materialId:material.id,revision:material.revision,requestId:'recall-old-candidate-0001'});await f.service.companyEntities.wait(run.id);
+  const old=f.service.companyEntities.get(topic.id,run.id),history=research.history(topic.id),directory=f.d.current();assert.equal(old.status,'candidate');assert.equal(old.stale,false);
+  research.directorySelection=select;
+  const current=f.service.companyEntities.get(topic.id,run.id);assert.equal(current.stale,true);assert.deepEqual(current.packet,old.packet);assert.deepEqual(current.candidate,old.candidate);
+  assert.throws(()=>f.service.companyEntities.decide(topic.id,run.id,{mentionIndex:0,version:0,action:'link',symbol:'ACME.US',note:'Must reject stale recall',topicVersion:topic.version}),/已变化/);
+  assert.deepEqual(research.history(topic.id),history);assert.deepEqual(f.d.current(),directory);assert.equal(research.get(topic.id).companies.length,0);
+  const next=companyEntitiesPacket(f.store,research,topic.id,{version:topic.version,materialId:material.id,revision:material.revision});assert.equal(next.input.directorySnapshot.method,'cross-market-name-or-explicit-symbol-recall-2');assert(!next.input.directory.some(c=>c.symbol==='ACME.US'));assert.notEqual(next.inputHash,old.packet.inputHash);
+ }finally{await f.close();}
+});
 test('official formats parse all rows, filter unsupported types and preserve raw fields and generation date',()=>{const p=parseDirectoryFile(DIRECTORY_SOURCES[0],file(DIRECTORY_SOURCES[0],nasdaq));assert.equal(p.sourceDate,'2026-10-02');assert.equal(p.entries.length,5);assert.equal(p.entries.filter(e=>e.eligible).length,2);assert.equal(p.entries[0].rawFields['Financial Status'],'N');assert.equal(parseDirectoryFile(DIRECTORY_SOURCES[1],file(DIRECTORY_SOURCES[1],other)).entries[0].venue,'XNYS');for(const raw of [file(DIRECTORY_SOURCES[0],[nasdaq[0],nasdaq[0]]),file(DIRECTORY_SOURCES[0],nasdaq).replace('File Creation Time:','broken'),file(DIRECTORY_SOURCES[0],nasdaq,'0230202618:01'),file(DIRECTORY_SOURCES[0],nasdaq).replace('|N|N|100','|N|N|0'),file(DIRECTORY_SOURCES[0],nasdaq).replace('Symbol|','Wrong|')])assert.throws(()=>parseDirectoryFile(DIRECTORY_SOURCES[0],raw));});
 test('refresh is explicit, idempotent and versioned; old snapshots are queryable and failed updates preserve them',async()=>{const f=fixture();try{assert.equal(f.calls,0);assert.equal(f.d.search().total,0);const first=await refresh(f);assert.equal(first.current.counts.rows,6);assert.equal(first.current.counts.eligible,3);assert.equal(f.calls,2);await refresh(f);assert.equal(f.calls,2);await refresh(f,'directory-request-00002');assert.equal(f.d.status().history.length,1);const id=first.current.id;f.date('1003202601:00');await refresh(f,'directory-request-00003');assert.equal(f.d.status().history.length,2);assert.notEqual(f.d.status().current.id,id);assert.equal(f.d.search({q:'acme',snapshotId:id}).items[0].directorySnapshotId,id);f.break();const failed=await refresh(f,'directory-request-00004');assert.equal(failed.attempts[0].status,'failed');assert.equal(failed.history.length,2);assert.ok(!JSON.stringify(failed).includes('private diagnostic'));}finally{await f.close();}});
 test('date regression and a partial upstream failure never replace current directory',async()=>{const f=fixture();try{await refresh(f);const id=f.d.status().current.id;f.date('1001202618:01');await refresh(f,'directory-regression-0001');assert.equal(f.d.status().current.id,id);assert.equal(f.d.status().attempts[0].status,'failed');assert.throws(()=>f.d.search({offset:-1}));assert.throws(()=>f.d.search({extra:true}));assert.throws(()=>f.d.search({snapshotId:'missing'}));}finally{await f.close();}});

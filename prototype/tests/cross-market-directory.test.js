@@ -18,6 +18,13 @@ function fixture(){let hkDate='02/10/2026',cnDate='2026-10-02',calls=0,broken=''
  const service=createService(store,{mode:'research',now:()=>Date.parse(date),fetcher});return {store,service,d:service.securityDirectory,fetcher,get calls(){return calls;},setHK:v=>hkDate=v,setCN:v=>cnDate=v,break:v=>broken=v,async close(){await service.close();store.close();}};
 }
 const refresh=async(f,market,id)=>{f.d.refresh({market,requestId:id});await f.d.wait();return f.d.status({market});};
+test('qualified codes cannot recall a different exchange or an embedded code substring',async()=>{
+ const f=fixture();try{
+  await refresh(f,'CN','recall-exchange-cn-0001');await refresh(f,'HK','recall-exchange-hk-0001');
+  for(const text of ['SZSE:600001','SSE:002594','NASDAQ:01211','HKEX:002594','1600001.SH','600001.SHARES','x01211.HK','01211.HK-extra'])assert.deepEqual(f.d.selection(text).entries,[],text);
+  for(const [text,symbol] of [['SSE:600001','600001.SH'],['SZSE:002594','002594.SZ'],['HKEX:01211','01211.HK'],['（600001.SH）','600001.SH'],['hkex：1211','01211.HK']])assert.deepEqual(f.d.selection(text).entries.map(e=>e.symbol),[symbol],text);
+ }finally{await f.close();}
+});
 test('workbook reads fixed cells and rich shared strings, rejecting formulas, external sheets, duplicate entries and entities',async()=>{
  assert.deepEqual((await directorySheet(workbook([{A:'合成 & text',B:'00001'}]))).rows,[{number:1,cells:{A:'合成 & text',B:'00001'}}]);
  const files=workbookFiles([{A:'unused'}]);files[2][1]='<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>';files.push(['xl/sharedStrings.xml','<sst><si><r><t>甲</t></r><r><t>乙</t></r></si></sst>']);assert.equal((await directorySheet(zip(files))).rows[0].cells.A,'甲乙');
