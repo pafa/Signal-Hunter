@@ -61,6 +61,28 @@ test('failed decision insertion rolls back without losing the candidate or prior
   assert.throws(()=>f.runs.decide(s.id,{version:0,action:'accept',note:'核对'}),/storage failure/);assert.equal(f.runs.get(s.id).status,'candidate');assert.equal(f.runs.get(s.id).decisionVersion,0);
  }finally{await f.close();}
 });
+test('rejecting another candidate cannot silently revoke the accepted pair decision',async()=>{
+ const f=fixture();try{
+  const old=f.runs.start(input);await f.runs.wait(old.id);
+  const current=f.runs.start({left:input.right,right:input.left});await f.runs.wait(current.id);
+  f.runs.decide(current.id,{version:0,action:'accept',note:'Accept the reviewed current candidate'});
+  const before=f.runs.get(current.id);
+  assert.throws(()=>f.runs.decide(old.id,{version:1,action:'reject',note:'Reject only the old candidate'}),/已采纳另一份候选/);
+  let status,response;
+  await createHandler(f.store,f.service)({method:'POST',url:`/api/semantic-events/${old.id}/decision`,headers:{host:'127.0.0.1:4179','content-type':'application/json'},async *[Symbol.asyncIterator](){yield JSON.stringify({version:1,action:'reject',note:'Reject only the old candidate through HTTP'});}},{writeHead:value=>status=value,end:body=>response=JSON.parse(body)});
+  assert.equal(status,400);
+  assert.equal(response.error,'此新闻对已采纳另一份候选；请先打开该候选撤销采纳');
+  assert.doesNotMatch(safeErrorText(response.error+' private upstream details'),/private upstream/);
+  assert.deepEqual(f.runs.get(current.id),before);
+  assert.equal(f.runs.get(current.id).active,true);
+  assert.equal(f.runs.get(old.id).history.length,1);
+  // Explicitly withdraw the accepted result before rejecting a different candidate.
+  f.runs.decide(current.id,{version:1,action:'withdraw',note:'Withdraw the current accepted relationship'});
+  const rejected=f.runs.decide(old.id,{version:2,action:'reject',note:'Reject the old candidate now'});
+  assert.equal(rejected.history.length,3);assert.equal(rejected.decision.action,'reject');
+  assert.equal(f.runs.get(current.id).active,false);
+ }finally{await f.close();}
+});
 test('semantic and dossier jobs share a database lease; cancellation releases it in both directions',async()=>{
  const blocked=(packet,{signal})=>new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>reject(new CodexResearchError('cancelled')),{once:true});});
  const store=openStore(':memory:');store.ingest(news,at);const service=createService(store,{mode:'research',modelConfig:config,semanticRunner:blocked,modelRunner:blocked});
