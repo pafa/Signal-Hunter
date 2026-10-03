@@ -57,10 +57,10 @@ export function openStore(path) {
     removeWatch(symbol){db.prepare('DELETE FROM watches WHERE symbol=?').run(symbol);},
     quote(symbol){const row=db.prepare('SELECT * FROM quotes WHERE symbol=?').get(symbol);return row?{...JSON.parse(row.payload),receivedAt:row.received_at}:null;},
     daily(symbol){const row=db.prepare('SELECT payload FROM daily_quotes WHERE symbol=?').get(symbol);return row?JSON.parse(row.payload):null;},
-    saveDaily(quote){
+    saveDaily(quote,{activate=true}={}){
       if(quote.interval!=='1d'||!quote.points?.length)throw new Error('日线缓存格式无效');
       const payload=JSON.stringify(quote);db.exec('BEGIN IMMEDIATE');try{
-        db.prepare('INSERT OR REPLACE INTO daily_quotes VALUES(?,?,?)').run(quote.symbol,payload,quote.receivedAt);
+        if(activate)db.prepare('INSERT OR REPLACE INTO daily_quotes VALUES(?,?,?)').run(quote.symbol,payload,quote.receivedAt);
         db.prepare('INSERT OR IGNORE INTO daily_snapshots VALUES(?,?,?,?)').run(quote.symbol,hash(payload),payload,quote.receivedAt);db.exec('COMMIT');
       }catch(error){db.exec('ROLLBACK');throw error;}
     },
