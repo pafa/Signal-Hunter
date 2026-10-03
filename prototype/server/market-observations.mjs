@@ -1,3 +1,4 @@
+import {crossThemeCandidates} from './cross-theme-observations.mjs';
 import {hash} from './providers.mjs';
 import {strategyRisk} from './strategy-risk.mjs';
 import {decimal} from './market-sim-risk.mjs';
@@ -56,7 +57,7 @@ export function marketReviewCandidates(snapshot,topics){
  return candidates;
 }
 
-export function openMarketObservations(db,{getSnapshots}){
+export function openMarketObservations(db,{getSnapshots,clustersForTopic}){
  db.exec('CREATE TABLE IF NOT EXISTS market_observation_states(id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS market_observation_peaks(id TEXT PRIMARY KEY,payload TEXT NOT NULL)');
  const rows=()=>db.prepare('SELECT id,payload FROM market_observation_states').all();
  const save=(id,state)=>db.prepare('INSERT INTO market_observation_states VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(id,JSON.stringify(state));
@@ -83,8 +84,10 @@ export function openMarketObservations(db,{getSnapshots}){
  return {
   // Caller owns the same transaction as observation_todos; failures roll back episode consumption.
   evaluate(topics,at){
-   const snapshots=getSnapshots(at),accounts=new Set(snapshots.map(s=>s.accountId)),prior=new Map(rows().map(r=>[r.id,JSON.parse(r.payload)])),seen=new Set(),hits=[];
-   for(const snapshot of snapshots)for(const c of marketReviewCandidates(observePeaks(snapshot),topics)){
+   const snapshots=getSnapshots(at),accounts=new Set([...snapshots.map(s=>s.accountId),'cross-theme']),prior=new Map(rows().map(r=>[r.id,JSON.parse(r.payload)])),seen=new Set(),hits=[];
+   const candidates=snapshots.flatMap(snapshot=>marketReviewCandidates(observePeaks(snapshot),topics));
+   candidates.push(...crossThemeCandidates(snapshots,topics,clustersForTopic));
+   for(const c of candidates){
     seen.add(c.key);const old=prior.get(c.key),state={...old,accountId:c.accountId,status:c.state,reason:c.reason,checkedAt:at,episode:old?.episode||0};
     if(c.state==='hit'&&(!old?.active||old.fingerprint!==c.fingerprint)){
      state.episode++;state.active=true;state.fingerprint=c.fingerprint;
@@ -93,7 +96,8 @@ export function openMarketObservations(db,{getSnapshots}){
     save(c.key,state);
    }
    // Closing a lot removes its condition. Unknown quotes retain the active episode instead.
-   for(const [id,old] of prior)if(accounts.has(old.accountId)&&!seen.has(id)&&old.status!=='retired')save(id,{...old,active:false,status:'retired',checkedAt:at});
+   const overlapUnknown=candidates.some(c=>c.accountId==='cross-theme'&&!c.hit&&c.state==='unknown');
+   for(const [id,old] of prior)if(accounts.has(old.accountId)&&!seen.has(id)&&old.status!=='retired')save(id,old.accountId==='cross-theme'&&overlapUnknown?{...old,status:'unknown',reason:'跨主题输入不完整，保留此前触发轮次',checkedAt:at}:{...old,active:false,status:'retired',checkedAt:at});
    return hits;
   },
   checks(){return rows().map(r=>({id:r.id,...JSON.parse(r.payload)})).filter(r=>r.status!=='retired');}

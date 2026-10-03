@@ -42,3 +42,13 @@ test('approval fingerprints bind observed peaks even when quotes and ledger vers
  assert.throws(()=>sim.decide(order.id,{version:sim.snapshot().version,requestId:crypto.randomUUID(),action:'approve',note:'Stale synthetic review',confirmSimulation:true,fingerprint:before.fingerprint}));assert.equal(sim.snapshot().orders.at(-1).status,'pending');
  }finally{await f.close();}
 });
+test('service connects cross-theme issuer review to actual paper fills and renders frozen overlap safely',async()=>{
+ const f=marketReviewFixture(),vite=await createServer({configFile:false,root:fileURLToPath(new URL('../',import.meta.url)),server:{middlewareMode:true,watch:null},appType:'custom'});
+ try{let topic=f.service.research.create({title:'<script>虚构第二主题</script>',summary:'Synthetic overlap'});topic=f.service.research.addCompany(topic.id,{version:topic.version,symbol:'AAPL.US',note:'Synthetic'});
+ const sim=f.service.marketSimulations.steady,command=extra=>({requestId:crypto.randomUUID(),version:sim.snapshot().version,...extra});
+ sim.propose(command({order:{topicId:topic.id,topicVersion:topic.version,symbol:'AAPL.US',side:'buy',qty:1,limitPrice:'101',budgetUSD:110,expiresAt:'2026-10-02T14:10:00Z',holdUntil:'2026-10-03T14:00:00Z',thesis:'Synthetic',trigger:'Synthetic',invalidation:'Synthetic'}}));const order=sim.snapshot().orders.at(-1);sim.decide(order.id,command({action:'approve',note:'Synthetic only',confirmSimulation:true,fingerprint:sim.review(order.id).fingerprint}));
+ const before=accountRows(f);await f.service.runOperation('observations');const item=f.service.observations.snapshot().items.find(i=>i.kind==='cross-theme-review');assert(item);assert.equal(item.input.metrics.buyOrderCount,1);assert.equal(item.input.metrics.lotCount,1);assert.deepEqual(accountRows(f),before);
+ const {default:Details}=await vite.ssrLoadModule('/src/integrated/CrossThemeObservation.jsx');const html=renderToStaticMarkup(React.createElement(Details,{input:item.input}));assert.match(html,/已批买单剩余数量/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>/);assert.match(html,/不调整仓位或执行交易/);
+ f.set({at:'2026-10-02T14:00:04Z'});sim.process();await f.service.runOperation('observations');const newer=f.service.observations.snapshot().items.filter(i=>i.kind==='cross-theme-review');assert.equal(newer.length,2);assert(newer.some(i=>i.input.metrics.lotCount===2&&i.input.metrics.buyOrderCount===0));assert.equal(item.input.metrics.buyOrderCount,1);
+ }finally{await vite.close();await f.close();}
+});

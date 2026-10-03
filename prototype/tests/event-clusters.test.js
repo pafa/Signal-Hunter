@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {crossThemeCandidates} from '../server/cross-theme-observations.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -84,4 +85,13 @@ test('registry paginates all clusters including identities older than recent com
 });
 test('HTTP can preview, confirm, read history and archive while rejecting arbitrary client memberships',async()=>{
  const f=fixture(),handler=createHandler(f.store,f.service),call=async(method,url,data)=>{let status,result;await handler({method,url,headers:{host:'127.0.0.1:4179','content-type':'application/json'},async *[Symbol.asyncIterator](){yield JSON.stringify(data||{});}},{writeHead:s=>status=s,end:b=>result=JSON.parse(b)});return {status,result};};try{const b=await f.batch(),p=await call('GET',`/api/semantic-batches/${b.id}/clusters`);assert.equal(p.result.groups[0].canSave,true);const input=f.command(b.id),saved=await call('POST','/api/event-clusters',input);assert.equal(saved.status,201);const id=saved.result.id;assert.equal((await call('GET',`/api/event-clusters/${id}`)).result.history.length,1);assert.equal((await call('POST','/api/event-clusters',{...input,members:[]})).status,400);assert.equal((await call('POST',`/api/event-clusters/${id}/archive`,{version:1,note:'归档',requestId:randomUUID()})).status,200);assert.equal((await call('GET','/api/event-clusters?status=archived')).result.total,1);}finally{await f.close();}
+});
+
+test('cross-theme observations use current registry bindings and retain unknown status after source revisions',async()=>{
+ const f=fixture();try{
+  const topics=f.refs.slice(0,2).map(r=>f.service.research.createFromNews({newsId:r.id,newsRevision:1}));const batch=await f.batch(f.refs.slice(0,2));const saved=f.c.save(f.command(batch.id));
+  const snapshots=[{accountId:'steady',at,quotes:{},book:{version:1,config:{},orders:[],lots:topics.map((t,i)=>({id:String(i),topicId:t.id,symbol:'AAPL.US',qty:1,issuerId:'synthetic'}))}}];
+  const read=()=>crossThemeCandidates(snapshots,topics,t=>f.c.forResearch(t)).find(c=>c.hit?.input.groupKind==='event-cluster');const first=read();assert.equal(first.state,'hit');assert.equal(first.hit.input.groupId,saved.id);assert.equal(first.hit.input.bases.length,2);assert(first.hit.input.bases.every(([,b])=>b.bindingCurrent&&b.matchedMembers.length===1));
+  const frozen=structuredClone(first);f.store.ingest([{...f.news[0],title:'修订的合成材料'}],'2026-10-03T01:00:00Z');assert.equal(read().state,'unknown');assert.deepEqual(first,frozen);
+ }finally{await f.close();}
 });

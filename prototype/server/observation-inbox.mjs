@@ -19,11 +19,11 @@ export function observationHits(topics,book,today){
  }
  return hits;
 }
-export function openObservationInbox(store,{clock=()=>new Date().toISOString(),getTopic,offline=false,getMarketSnapshots=()=>[]}={}){
+export function openObservationInbox(store,{clock=()=>new Date().toISOString(),getTopic,offline=false,getMarketSnapshots=()=>[],clustersForTopic}={}){
  const db=store.db;
  db.exec(`CREATE TABLE IF NOT EXISTS observation_todos(id TEXT PRIMARY KEY,payload TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS observation_receipts(id INTEGER PRIMARY KEY,todo_id TEXT NOT NULL,revision INTEGER NOT NULL,action TEXT NOT NULL,note TEXT NOT NULL,at TEXT NOT NULL);`);
- const market=openMarketObservations(db,{getSnapshots:getMarketSnapshots});
+ const market=openMarketObservations(db,{getSnapshots:getMarketSnapshots,clustersForTopic});
  const rules=openObservationRules(store,{clock,getTopic,offline});
  const transaction=fn=>{db.exec('BEGIN IMMEDIATE');try{const r=fn();db.exec('COMMIT');return r;}catch(e){db.exec('ROLLBACK');throw e;}};
  return {
