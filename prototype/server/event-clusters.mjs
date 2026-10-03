@@ -50,6 +50,28 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
    const result=fn();db.prepare('INSERT INTO event_cluster_commands VALUES(?,?,?)').run(input.requestId,hash,JSON.stringify(result));db.exec('COMMIT');return result;
   }catch(error){db.exec('ROLLBACK');throw error;}
  };
+ const groupPairs=group=>group.pairs.map(p=>({left:comparisonSummary(group.members[group.indices.indexOf(p.left)]),right:comparisonSummary(group.members[group.indices.indexOf(p.right)]),basis:p.basis}));
+ const replacementPlan=(id,input)=>{
+  if(!keys(input,'batchId,groupId,version,replacements')||!text(input.batchId,80)||!text(input.groupId,80)||!Number.isSafeInteger(input.version)||input.version<1||!Array.isArray(input.replacements)||!input.replacements.length||input.replacements.length>10)fail(7);
+  const old=read(id),{snapshotHash,...oldValue}=old;
+  if(snapshotHash!==digest(oldValue))fail(8);
+  if(old.status!=='active'||old.version!==input.version)fail(5);
+  const preview=api.preview(input.batchId),group=preview.groups.find(g=>g.id===input.groupId);
+  if(!group||group.state!=='ready')fail(2);
+  if(group.overlaps.some(c=>c.id!==id))fail(3);
+  const retained=new Set(group.members.map(memberKey)),missing=old.members.filter(m=>!retained.has(memberKey(m)));
+  const seenBefore=new Set(),seenAfter=new Set(),mappings=[];
+  for(const link of input.replacements){
+   if(!keys(link,'beforeId,afterId')||!text(link.beforeId,80)||!text(link.afterId,80)||seenBefore.has(link.beforeId)||seenAfter.has(link.afterId))fail(7);
+   const before=missing.find(m=>m.kind==='event'&&m.id===link.beforeId),after=group.members.find(m=>m.kind==='event'&&m.id===link.afterId);
+   if(!before||!after||old.members.some(m=>memberKey(m)===memberKey(after))||before.documentId!==after.documentId||!Number.isSafeInteger(before.materialRevision)||!Number.isSafeInteger(after.materialRevision)||after.materialRevision<=before.materialRevision)fail(7);
+   seenBefore.add(link.beforeId);seenAfter.add(link.afterId);mappings.push({before:comparisonSummary(before),after:comparisonSummary(after)});
+  }
+  if(missing.length!==mappings.length)fail(7);
+  mappings.sort((a,b)=>a.before.id.localeCompare(b.before.id));
+  const value={clusterId:id,version:old.version,previousSnapshotHash:snapshotHash,batchId:input.batchId,groupId:group.id,groupHash:group.hash,planHash:preview.planHash,mappings,members:group.members,pairs:groupPairs(group)};
+  return {...value,previewHash:digest(value)};
+ };
  const api={
   preview(batchId){
    const batch=batches.get(batchId),members=batch.inputs.map(comparisonSummary);
@@ -81,7 +103,21 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
     const existing=group.overlaps[0];if((existing?.id||'')!==input.clusterId||(existing?.version||0)!==input.version)fail(5);
     const old=existing?read(existing.id):null;if(old?.status==='archived')fail(5);
     const at=new Date(now()).toISOString();
-    return persist({id:old?.id||randomUUID(),version:(old?.version||0)+1,status:'active',title:input.title.trim(),note:input.note.trim(),confirmedAt:old?.confirmedAt||at,updatedAt:at,algorithm,method:'human-confirmed-model-pair-cluster',batchId:input.batchId,planHash:preview.planHash,groupHash:group.hash,members:group.members,pairs:group.pairs.map(p=>({left:comparisonSummary(group.members[group.indices.indexOf(p.left)]),right:comparisonSummary(group.members[group.indices.indexOf(p.right)]),basis:p.basis})),previousVersion:old?.version||null});
+    return persist({id:old?.id||randomUUID(),version:(old?.version||0)+1,status:'active',title:input.title.trim(),note:input.note.trim(),confirmedAt:old?.confirmedAt||at,updatedAt:at,algorithm,method:'human-confirmed-model-pair-cluster',batchId:input.batchId,planHash:preview.planHash,groupHash:group.hash,members:group.members,pairs:groupPairs(group),previousVersion:old?.version||null});
+   });
+  },
+  replacementPreview(id,input){return replacementPlan(id,input);},
+  replace(id,input){
+   if(!keys(input,'batchId,groupId,version,replacements,previewHash,note,requestId')||!text(input.previewHash,80)||!text(input.note,1200)||!Array.isArray(input.replacements))fail(7);
+   // Normalize command fields so retries do not depend on JSON property or mapping order.
+   const normalized={batchId:input.batchId,groupId:input.groupId,version:input.version,replacements:input.replacements.map(m=>{
+    if(!keys(m,'beforeId,afterId')||!text(m.beforeId,80)||!text(m.afterId,80))fail(7);return {beforeId:m.beforeId,afterId:m.afterId};
+   }).sort((a,b)=>a.beforeId.localeCompare(b.beforeId)),previewHash:input.previewHash,note:input.note.trim(),requestId:input.requestId};
+   return command('replace',id,normalized,()=>{
+    const {batchId,groupId,version,replacements}=normalized,plan=replacementPlan(id,{batchId,groupId,version,replacements});
+    if(plan.previewHash!==normalized.previewHash)fail(1);
+    const old=read(id),at=new Date(now()).toISOString();
+    return persist({id,version:old.version+1,status:'active',title:old.title,note:normalized.note,confirmedAt:old.confirmedAt,updatedAt:at,algorithm,method:'human-reviewed-event-succession',batchId,planHash:plan.planHash,groupHash:plan.groupHash,members:plan.members,pairs:plan.pairs,previousVersion:old.version,replacement:{previousSnapshotHash:plan.previousSnapshotHash,previewHash:plan.previewHash,mappings:plan.mappings,method:'human-reviewed-same-document-new-revision'}});
    });
   },
   archive(id,input){
@@ -102,7 +138,10 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
    const keys=refs.flatMap(r=>{if(r.kind!=='material')return [memberKey(r)];const m=db.prepare('SELECT document_id FROM research_materials WHERE id=?').get(r.id);return m?[`material:${m.document_id}`]:[];});
    if(!keys.length)return [];
    const rows=db.prepare('SELECT DISTINCT c.payload FROM event_clusters c JOIN event_cluster_members m ON m.cluster_id=c.id WHERE m.member_key IN (SELECT value FROM json_each(?)) ORDER BY c.id').all(JSON.stringify(keys));
-   return rows.map(row=>{const c=JSON.parse(row.payload),matched=c.members.filter(m=>refs.some(r=>exact(m,r)));return {...summary(c),matchedMembers:matched.map(comparisonSummary),bindingCurrent:matched.length>0};});
+   const retired=topic.eventExtraction?db.prepare(`SELECT v.cluster_id,v.version FROM event_cluster_versions v JOIN event_clusters c ON c.id=v.cluster_id, json_each(v.payload,'$.replacement.mappings') m
+    WHERE c.status='active' AND json_extract(m.value,'$.before.kind')='event' AND json_extract(m.value,'$.before.id')=? ORDER BY v.version`).all(topic.id):[];
+   const ids=new Set(rows.map(row=>JSON.parse(row.payload).id));for(const r of retired)if(!ids.has(r.cluster_id)){rows.push({payload:JSON.stringify(read(r.cluster_id))});ids.add(r.cluster_id);}
+   return rows.map(row=>{const c=JSON.parse(row.payload),matched=c.members.filter(m=>refs.some(r=>exact(m,r))),historicalVersions=retired.filter(r=>r.cluster_id===c.id).map(r=>r.version-1);return {...summary(c),matchedMembers:matched.map(comparisonSummary),bindingCurrent:matched.length>0,...(historicalVersions.length?{historicalVersions}: {})};});
   }
  };
  return api;
