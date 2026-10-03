@@ -1,3 +1,4 @@
+import {openSecurityDirectory} from './security-directory.mjs';
 import {openCompanyEntityRuns} from './company-entity-runs.mjs';
 import {openMaterialEventRuns} from './material-event-runs.mjs';
 import {processMarketAccounts} from './market-execution.mjs';
@@ -32,7 +33,8 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const semanticEvents=openSemanticEvents(store,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(semanticRunner?{runner:semanticRunner}:{}),now});
   const semanticBatches=openSemanticBatches(store,semanticEvents,{enabled:!offline&&!!modelConfig,config:modelConfig||{},now});
   const eventClusters=openEventClusters(store,semanticBatches,semanticEvents,{now});
-  const research=openResearch(store,{clock,semanticEvents,eventClusters,seed:mode!=='research'&&!restorePending(),...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:{})});
+  const securityDirectory=openSecurityDirectory(store,{enabled:!offline,fetcher,now});
+  const research=openResearch(store,{clock,semanticEvents,eventClusters,securityDirectory,seed:mode!=='research'&&!restorePending(),...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:{})});
   const paper=openPaper(store,research,{clock,seed:mode!=='research'&&!restorePending()});
   const evaluations=openEvaluationReview(store,{clock});
   const marketSimulations=Object.fromEntries(Object.entries(strategyProfiles).map(([accountId,profile])=>[accountId,openMarketSimulation(store,research,{accountId,profile,enabled:!offline,clock,...(marketInputs?{getInputs:()=>marketInputs(accountId)}:{})})]));
@@ -52,7 +54,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   if(offline&&!restorePending())initializeDemoData(store);
   const service={
     mode,instance,
-    research,paper,observations,modelResearch,materialEvents,companyEntities,semanticEvents,semanticBatches,eventClusters,evaluations,marketSimulation,marketSimulations,
+    research,paper,observations,securityDirectory,modelResearch,materialEvents,companyEntities,semanticEvents,semanticBatches,eventClusters,evaluations,marketSimulation,marketSimulations,
     processEvents(){try{const changed=continuity.process(research.list());if(changed||store.checks().events?.state==='error')store.status('events',{state:'ok',receivedAt:clock()});return {ok:true,changed};}catch(error){store.status('events',{state:'error',attemptedAt:clock(),error:errorText(error)});return {error:errorText(error)};}},
     eventContinuity(params={}){return {...continuity.snapshot({...params,positions:paper.snapshot().positions,watchlist:store.watchlist()}),health:store.checks().events||{state:'pending'}};},
     eventDetail(id){return continuity.detail(id);},
@@ -80,7 +82,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       if(result?.skipped)throw new Error('本次补采未取得任务，请稍后重试');
       return result;
     },
-    close(){return Promise.all([scheduler.stop(),modelResearch.close(),materialEvents.close(),companyEntities.close(),semanticEvents.close()]);},
+    close(){return Promise.all([scheduler.stop(),securityDirectory.close(),modelResearch.close(),materialEvents.close(),companyEntities.close(),semanticEvents.close()]);},
     syncWatches(){if(!restorePending())autoWatch=syncResearchWatches(store,research.list());return autoWatch;},
     snapshot(){const topics=research.list(),book=paper.snapshot();const queue=continuity.queue({positions:book.positions,watchlist:store.watchlist()}),priorities=new Map(queue.map((n,i)=>[n.id,{priority:n.priority,rank:i}])),researchView=research.snapshot();researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));return {observationInbox:observations.snapshot(),eventContinuity:{...continuity.summary(),health:store.checks().events||{state:'pending'}},runtime:{mode,offline,instance},paper:book,workflow:topics.map(t=>assessTopic(t,{book})),operations:scheduler.snapshot(),operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,clock(),{offline}),serviceHealth:service.health(),newsIntake:intake.snapshot(),autoWatch,settings:store.getSettings(),news:store.news(),watchlist:store.watchlist().map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks:store.checks(),serverTime:clock(),newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:researchView};},
     async refreshDaily(symbol,force=false,context){
