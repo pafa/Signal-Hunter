@@ -1,11 +1,11 @@
-import React,{createContext,useContext,useEffect,useRef} from 'react';
+import React,{createContext,useContext,useEffect,useId,useRef} from 'react';
 export const ErrorContext=createContext('');
 export function Button({children,primary=false,...props}){return <button className={`m-button ${primary?'m-primary':''}`} {...props}>{children}</button>;}
 export function Panel({title,meta,tools,children,className=''}){return <section className={`m-panel ${className}`} aria-label={title}><header className="m-panel-head"><h2>{title}</h2>{meta&&<span>{meta}</span>}<div>{tools}</div></header>{children}</section>;}
 export function Modal({title,onClose,children}){
- const error=useContext(ErrorContext);
- const ref=useRef(null);useEffect(()=>{const el=ref.current,previous=document.activeElement;el.showModal();return()=>{el.close();previous?.focus?.();};},[]);
- return <dialog ref={ref} className="m-modal" aria-labelledby="m-modal-title" onCancel={e=>{e.preventDefault();onClose();}}><header><h2 id="m-modal-title">{title}</h2><Button onClick={onClose}>关闭</Button></header><div className="m-modal-body">{error&&<p className="m-warning" role="alert">{error}</p>}{children}</div></dialog>;
+ const error=useContext(ErrorContext),titleId=useId(),heading=useRef(null);
+ const ref=useRef(null);useEffect(()=>{const el=ref.current,previous=document.activeElement;el.showModal();heading.current?.focus({preventScroll:true});return()=>{el.close();if(previous?.isConnected)previous.focus?.();};},[]);
+ return <dialog ref={ref} className="m-modal" aria-labelledby={titleId} onCancel={e=>{e.preventDefault();onClose();}}><header><h2 ref={heading} id={titleId} tabIndex={-1}>{title}</h2><Button type="button" onClick={onClose}>关闭</Button></header><div className="m-modal-body">{error&&<p className="m-warning" role="alert">{error}</p>}{children}</div></dialog>;
 }
 export function Spark({quote,large=false}){
  if(!quote?.points?.length)return <span className="m-muted">尚无行情</span>;
