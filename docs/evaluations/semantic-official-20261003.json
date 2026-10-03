@@ -1,0 +1,380 @@
+{
+  "schema": "semantic-official-diagnostic-report-1",
+  "scope": "Selected historical official articles; retrospective smoke diagnostic, not model accuracy or forward evaluation",
+  "codeCommit": "6c2f7d5453b99891043e648d2e6d1471c23fda7e",
+  "codeHash": "164df7182a45acd3a5a2b63c1ac7c2609a4b741b66943b7525ab7e338b0dc78a",
+  "corpusHash": "3ca182a529d281b17bb97857a1ab789af33f523cba4f2637d379264b8a7ce71d",
+  "frozenAt": "2026-10-02T20:54:08.964Z",
+  "finishedAt": "2026-10-02T20:59:47.017Z",
+  "forwardEligible": false,
+  "referenceAuthor": "assistant-source-reading-before-model-output",
+  "selection": "All six unordered pairs across four Microsoft announcements, plus one NVIDIA Arm termination pair; no random population sampling",
+  "eventFamilies": 3,
+  "materialCount": 6,
+  "pairIndependence": false,
+  "model": "gpt-6-astra",
+  "effort": "high",
+  "promptVersion": "event-pair-material-1",
+  "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+  "scoring": {
+    "same": [
+      "repeat",
+      "followup",
+      "reversal"
+    ],
+    "different": [
+      "related",
+      "analogy",
+      "unrelated"
+    ],
+    "abstention": [
+      "uncertain"
+    ],
+    "failure": "Count all attempted cases; do not remove errors or abstentions; no automatic retries"
+  },
+  "limitations": [
+    "Historical selected English corporate announcements; not independent human truth",
+    "Only three event families; seven pairs are correlated",
+    "Acquisition-only; no rumor, missing-evidence, multi-event or A/H Chinese coverage",
+    "Extraction is current and may include boilerplate; no historical availability claim",
+    "Model may know these public historical events; no held-out or profitability claim"
+  ],
+  "sources": [
+    {
+      "id": "abk-proposal",
+      "date": "2022-01-18",
+      "url": "https://news.microsoft.com/source/2022/01/18/microsoft-to-acquire-activision-blizzard-to-bring-the-joy-and-community-of-gaming-to-everyone-across-every-device/",
+      "startedAt": "2026-10-02T20:52:20.257Z",
+      "receivedAt": "2026-10-02T20:52:22.094Z",
+      "articleHash": "076e5f16ba7ad68c1a424b0673fa164de144b4072a3e71d505abe5faac842003",
+      "publishedAtInPacket": "2022-01-18T08:00:00.000Z",
+      "bodyCharacters": 14006,
+      "bodyHash": "9d9573fe57293cb43bd15b39029c66036fa0f3102e4bedb9193cb9127ba84ae3",
+      "contentScope": "extracted-text"
+    },
+    {
+      "id": "abk-completion",
+      "date": "2023-10-13",
+      "url": "https://news.xbox.com/en-us/2023/10/13/xbox-activision-blizzard/",
+      "startedAt": "2026-10-02T20:52:20.260Z",
+      "receivedAt": "2026-10-02T20:52:22.192Z",
+      "articleHash": "714e812ec6bfa8114c8e3085d8b5e46183944ff2e8f672bc76797229fc5a1836",
+      "publishedAtInPacket": "2023-10-13T12:44:25.000Z",
+      "bodyCharacters": 3284,
+      "bodyHash": "0e2c40a6954b1989f6cbfac9ce1b22f1c46d7508776a643a711ac04da196c29f",
+      "contentScope": "extracted-text"
+    },
+    {
+      "id": "nuance-proposal",
+      "date": "2021-04-12",
+      "url": "https://news.microsoft.com/source/2021/04/12/microsoft-accelerates-industry-cloud-strategy-for-healthcare-with-the-acquisition-of-nuance/",
+      "startedAt": "2026-10-02T20:52:20.261Z",
+      "receivedAt": "2026-10-02T20:52:22.438Z",
+      "articleHash": "19d2e4f2d2a60e8e6d186301e22890ab2b8d9af89b9e1a44fd9d5879b219d6e5",
+      "publishedAtInPacket": "2021-04-12T07:00:00.000Z",
+      "bodyCharacters": 13320,
+      "bodyHash": "a19babd759b0be32cc0161493dcc9b6f5bee27634731495efff9779d1cb7f5c5",
+      "contentScope": "extracted-text"
+    },
+    {
+      "id": "nuance-completion",
+      "date": "2022-03-04",
+      "url": "https://news.microsoft.com/source/2022/03/04/microsoft-completes-acquisition-of-nuance-ushering-in-new-era-of-outcomes-based-ai/",
+      "startedAt": "2026-10-02T20:52:20.261Z",
+      "receivedAt": "2026-10-02T20:52:22.461Z",
+      "articleHash": "c57317a2836eb75d7514b8eddc0e00cb07d2ef03f118cefc101e0cbc79ac1307",
+      "publishedAtInPacket": "2022-03-04T08:00:00.000Z",
+      "bodyCharacters": 3915,
+      "bodyHash": "5d500e0664a7d6938ada0614452ec936e1997483c5ae87ccbef6707076c6359b",
+      "contentScope": "extracted-text"
+    },
+    {
+      "id": "arm-proposal",
+      "date": "2020-09-13",
+      "url": "https://nvidianews.nvidia.com/news/nvidia-to-acquire-arm-for-40-billion-creating-worlds-premier-computing-company-for-the-age-of-ai",
+      "startedAt": "2026-10-02T20:52:20.261Z",
+      "receivedAt": "2026-10-02T20:52:22.127Z",
+      "articleHash": "05076781b32a30729292c79fb6cbd546710bd4aaac0527e5e88ef5ae29ded5c2",
+      "publishedAtInPacket": null,
+      "bodyCharacters": 6994,
+      "bodyHash": "8d9bedb43b6c89a4af5404677002b1839a16083e16eca6d6ea28eacb06cbbb5b",
+      "contentScope": "extracted-text"
+    },
+    {
+      "id": "arm-termination",
+      "date": "2022-02-07",
+      "url": "https://nvidianews.nvidia.com/news/nvidia-and-softbank-group-announce-termination-of-nvidias-acquisition-of-arm-limited",
+      "startedAt": "2026-10-02T20:52:20.261Z",
+      "receivedAt": "2026-10-02T20:52:22.150Z",
+      "articleHash": "61ac99d8124d2d1e7ab21c734260c013717a96fe89970d623c7d38f4efc03ef4",
+      "publishedAtInPacket": null,
+      "bodyCharacters": 13602,
+      "bodyHash": "c67629c5cc12a1c572aa979e16d7f41d953d2a2cdf762c3973090fdff8acdb7d",
+      "contentScope": "extracted-text"
+    }
+  ],
+  "stats": {
+    "attempted": 7,
+    "candidates": 7,
+    "failed": 0,
+    "abstained": 0,
+    "identityMatches": 7,
+    "acceptedRelationMatches": 7,
+    "trueSame": 3,
+    "falseSame": 0,
+    "trueDifferent": 4,
+    "falseDifferent": 0,
+    "validatedQuotes": 14,
+    "toolCallsObserved": 0,
+    "runtimeWarnings": 7
+  },
+  "cases": [
+    {
+      "id": "case-1",
+      "left": "abk-completion",
+      "right": "abk-proposal",
+      "referenceIdentity": "same",
+      "referenceAcceptedRelations": [
+        "followup"
+      ],
+      "status": "candidate",
+      "predictedIdentity": "same",
+      "relation": "followup",
+      "runId": "6fc70e7e-d53f-4548-a4ce-81e834bc14e1",
+      "inputHash": "a8f983c4eba39ef17bfd79c2efd911c62ed2591c139ea518628085b486a219ae",
+      "promptHash": "a2fb53bc5dce538af8c7565ff6731edfa17e7e5e5a316eaea5667288df4a04c3",
+      "schemaHash": "b5f9b9e61a5b855589f74d53eb16dbd3ed6006dea5c2b0eeb74ddf88d981bb28",
+      "outputHash": "6ebba8b148cb5e49d68ddfc2e70e58b56ba07641a0126fb4062e6a201f3ff4f3",
+      "startedAt": "2026-10-02T20:54:09.210Z",
+      "finishedAt": "2026-10-02T20:54:55.925Z",
+      "toolCallsObserved": 0,
+      "runtimeWarningCount": 1,
+      "usage": {
+        "input_tokens": 14658,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 854,
+        "reasoning_output_tokens": 71
+      },
+      "failure": null
+    },
+    {
+      "id": "case-2",
+      "left": "nuance-completion",
+      "right": "nuance-proposal",
+      "referenceIdentity": "same",
+      "referenceAcceptedRelations": [
+        "followup"
+      ],
+      "status": "candidate",
+      "predictedIdentity": "same",
+      "relation": "followup",
+      "runId": "822ffb34-3d4d-4f55-9f28-c0287e4454b2",
+      "inputHash": "bdc5d5da8c5f0fe292014c927178efa6519a9002ad6ccfc75779eb547db4cbe0",
+      "promptHash": "2da97e3a86ee1b026c1a8d5acb76b68cdb2583160b6c5fd9e4d8ff8b27455d23",
+      "schemaHash": "b5f9b9e61a5b855589f74d53eb16dbd3ed6006dea5c2b0eeb74ddf88d981bb28",
+      "outputHash": "d3e0b0e18e135d895075dd37e1c04caa9558388dac263e058754d02db0ed9165",
+      "startedAt": "2026-10-02T20:54:55.930Z",
+      "finishedAt": "2026-10-02T20:55:49.569Z",
+      "toolCallsObserved": 0,
+      "runtimeWarningCount": 1,
+      "usage": {
+        "input_tokens": 14495,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1062,
+        "reasoning_output_tokens": 146
+      },
+      "failure": null
+    },
+    {
+      "id": "case-3",
+      "left": "arm-termination",
+      "right": "arm-proposal",
+      "referenceIdentity": "same",
+      "referenceAcceptedRelations": [
+        "reversal"
+      ],
+      "status": "candidate",
+      "predictedIdentity": "same",
+      "relation": "reversal",
+      "runId": "2136cc90-b2e4-4229-9755-8e456e25c7ba",
+      "inputHash": "e736747dd21b4c2faa082b266701d15b326de3ebfaa454e0eb2fa9ca7d52bb41",
+      "promptHash": "d2b8b4086771c6f1f40b0c13fe7ad981390bd7958381095808069198db2de6ad",
+      "schemaHash": "b5f9b9e61a5b855589f74d53eb16dbd3ed6006dea5c2b0eeb74ddf88d981bb28",
+      "outputHash": "63100e942c2b4409d9d18763948141c415c2a2ba2a910db5c011a8a64eaaeeb9",
+      "startedAt": "2026-10-02T20:55:49.575Z",
+      "finishedAt": "2026-10-02T20:56:38.771Z",
+      "toolCallsObserved": 0,
+      "runtimeWarningCount": 1,
+      "usage": {
+        "input_tokens": 15234,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 971,
+        "reasoning_output_tokens": 112
+      },
+      "failure": null
+    },
+    {
+      "id": "case-4",
+      "left": "abk-proposal",
+      "right": "nuance-proposal",
+      "referenceIdentity": "different",
+      "referenceAcceptedRelations": [
+        "related",
+        "analogy",
+        "unrelated"
+      ],
+      "status": "candidate",
+      "predictedIdentity": "different",
+      "relation": "analogy",
+      "runId": "cd464a9e-921e-4a17-9a29-92fd78672be8",
+      "inputHash": "02268a059162ec4f168c8d143dfd5a8f6a3f42647c6bc754f66f1c3d0b7eb856",
+      "promptHash": "e3d0e30fe7ecbdbf061cdab123a14e64e194395bd47bc5bb26c732547da52780",
+      "schemaHash": "b5f9b9e61a5b855589f74d53eb16dbd3ed6006dea5c2b0eeb74ddf88d981bb28",
+      "outputHash": "fd5cc34e12e83283027e02aa329cbfb2985eaa903520c8c9054893ef9b7a1bd1",
+      "startedAt": "2026-10-02T20:56:38.777Z",
+      "finishedAt": "2026-10-02T20:57:28.636Z",
+      "toolCallsObserved": 0,
+      "runtimeWarningCount": 1,
+      "usage": {
+        "input_tokens": 16584,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 955,
+        "reasoning_output_tokens": 57
+      },
+      "failure": null
+    },
+    {
+      "id": "case-5",
+      "left": "abk-proposal",
+      "right": "nuance-completion",
+      "referenceIdentity": "different",
+      "referenceAcceptedRelations": [
+        "related",
+        "analogy",
+        "unrelated"
+      ],
+      "status": "candidate",
+      "predictedIdentity": "different",
+      "relation": "analogy",
+      "runId": "4b0d5407-a216-458f-8506-b4a40a999aed",
+      "inputHash": "a5511ef2aff90b233b941d87f6fc35e20636805677ee65ea31c92d951c3c64a3",
+      "promptHash": "abd4429588094bd89117d13ceb7fdb033dfa4f43fbde1cbdd5a054b2af47d3a4",
+      "schemaHash": "b5f9b9e61a5b855589f74d53eb16dbd3ed6006dea5c2b0eeb74ddf88d981bb28",
+      "outputHash": "cd3fdb4acd31c408dbc04edea33a988ba341fef13c5169e0788c5e53f17af342",
+      "startedAt": "2026-10-02T20:57:28.642Z",
+      "finishedAt": "2026-10-02T20:58:15.075Z",
+      "toolCallsObserved": 0,
+      "runtimeWarningCount": 1,
+      "usage": {
+        "input_tokens": 14695,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 869,
+        "reasoning_output_tokens": 80
+      },
+      "failure": null
+    },
+    {
+      "id": "case-6",
+      "left": "abk-completion",
+      "right": "nuance-proposal",
+      "referenceIdentity": "different",
+      "referenceAcceptedRelations": [
+        "related",
+        "analogy",
+        "unrelated"
+      ],
+      "status": "candidate",
+      "predictedIdentity": "different",
+      "relation": "analogy",
+      "runId": "fbe2d572-5635-4605-9407-b344c92d1354",
+      "inputHash": "5f766b11a6f44d2265edbe4f9352dd7f8776f52a4ab61ea6d37c35372a8f96a8",
+      "promptHash": "078724f2d4b3c6c1c71f05e5ab1b69f26cf7f95b7257da142da072a0eee1a1ff",
+      "schemaHash": "b5f9b9e61a5b855589f74d53eb16dbd3ed6006dea5c2b0eeb74ddf88d981bb28",
+      "outputHash": "c06eba36f461a9fd543d59441bbfe459a6081b05d2250de5e57fc8def93c9755",
+      "startedAt": "2026-10-02T20:58:15.077Z",
+      "finishedAt": "2026-10-02T20:59:04.319Z",
+      "toolCallsObserved": 0,
+      "runtimeWarningCount": 1,
+      "usage": {
+        "input_tokens": 14464,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 866,
+        "reasoning_output_tokens": 141
+      },
+      "failure": null
+    },
+    {
+      "id": "case-7",
+      "left": "abk-completion",
+      "right": "nuance-completion",
+      "referenceIdentity": "different",
+      "referenceAcceptedRelations": [
+        "related",
+        "analogy",
+        "unrelated"
+      ],
+      "status": "candidate",
+      "predictedIdentity": "different",
+      "relation": "analogy",
+      "runId": "f60edc79-87c3-4b53-821b-45046329f4e7",
+      "inputHash": "c72cd50e7b18b3f7383f248c36b771b15673d0077ab750c99e48582ee904fb58",
+      "promptHash": "2059923a10bf70cf67c9b7beead227217bd6283a124eef24d29fdfb0d8243d12",
+      "schemaHash": "b5f9b9e61a5b855589f74d53eb16dbd3ed6006dea5c2b0eeb74ddf88d981bb28",
+      "outputHash": "e5214b3c7a780a750e22a4f861cbf6e71f599bc01d34cabec484b008dc0138f9",
+      "startedAt": "2026-10-02T20:59:04.323Z",
+      "finishedAt": "2026-10-02T20:59:47.016Z",
+      "toolCallsObserved": 0,
+      "runtimeWarningCount": 1,
+      "usage": {
+        "input_tokens": 12576,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 764,
+        "reasoning_output_tokens": 150
+      },
+      "failure": null
+    }
+  ],
+  "review": {
+    "reviewer": "assistant, not independent human review",
+    "allResultsReviewed": true,
+    "notes": [
+      "All seven comparisons were read by the same assistant that prepared reference labels. Actor, object and stage descriptions were checked against the provided extracted text; this is not independent review.",
+      "The Xbox welcome article was correctly qualified as an announcement of joining, without asserting independently verified legal closing.",
+      "Time treatment varies for the identical Xbox material: case-1 infers 2023-10-13 from today plus supplied publication metadata; case-6 and case-7 keep event date unknown. This variability was not scored by the frozen identity metric and remains unresolved.",
+      "Both NVIDIA articles have null parsed publishedAt. The Arm proposal side kept its own event time unknown, although the termination article retrospectively names the earlier agreement date.",
+      "The termination extraction includes repeated material; no post-selection cleaning or text shortening was applied.",
+      "Each successful model call recorded one runtime warning; no tool calls were observed. Three CSS parsing warnings were observed during source extraction, without preventing extraction.",
+      "No prompt changes, reference-label changes, automatic retries, model adoption, cluster confirmation or trading actions were performed."
+    ],
+    "unresolvedFindings": [
+      {
+        "id": "event-time-consistency",
+        "cases": [
+          "case-1",
+          "case-6",
+          "case-7"
+        ],
+        "material": "abk-completion",
+        "status": "open",
+        "nextStep": "Separate explicit event date, publication-relative inference and unknown; validate their provenance and repeated-use consistency in a new diagnostic."
+      },
+      {
+        "id": "source-date-extraction",
+        "materials": [
+          "arm-proposal",
+          "arm-termination"
+        ],
+        "status": "open",
+        "nextStep": "Review dated page metadata extraction without backfilling historical availability or overwriting frozen inputs."
+      }
+    ]
+  },
+  "privacy": "Article bodies and model output containing quotes retained locally; public report contains no article body or verbatim model output"
+}
