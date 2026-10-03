@@ -26,7 +26,8 @@
     "instance:create": "node scripts/create-instance.mjs",
     "start:instance": "node scripts/start.mjs --instance",
     "recovery:rehearse": "node scripts/recovery-rehearsal.mjs",
-    "news:verify": "node scripts/verify-news-sources.mjs"
+    "news:verify": "node scripts/verify-news-sources.mjs",
+    "backup:prune": "node scripts/backup-prune.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",

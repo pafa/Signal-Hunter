@@ -21,6 +21,9 @@ export async function createBackup(sourcePath,destinationRoot){
  const dir=mkdtempSync(join(resolve(destinationRoot),'snapshot-'));chmodSync(dir,0o700);
  const target=join(dir,'workbench.sqlite'),source=new DatabaseSync(sourcePath,{readOnly:true});
  try{await backup(source,target);}finally{source.close();}
+ // Finalize the newly created standalone snapshot before hashing it.
+ // Read-only inspection of a WAL-mode database otherwise creates sidecars.
+ const snapshot=new DatabaseSync(target);try{snapshot.exec('PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE');}finally{snapshot.close();}
  chmodSync(target,0o600);
  const manifest={format:1,createdAt:new Date().toISOString(),database:'workbench.sqlite',sha256:digest(target),...inspect(target)};
  writeFileSync(join(dir,'manifest.json'),JSON.stringify(manifest,null,2)+'\n',{mode:0o600});
