@@ -91,6 +91,8 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
       else {const run=service.materialEvents.decide(p[3],p[5],data);reply(200,{...updatedSnapshot(),materialEventRun:run});}return;
     }
     if(req.method==='POST'&&url.pathname==='/api/semantic-events'){reply(202,service.semanticEvents.start(data));return;}
+    if(req.method==='POST'&&/^\/api\/event-clusters\/[-a-z0-9]{36}\/replacement-preview$/.test(url.pathname)){reply(200,service.eventClusters.replacementPreview(url.pathname.split('/')[3],data));return;}
+    if(req.method==='POST'&&/^\/api\/event-clusters\/[-a-z0-9]{36}\/replace$/.test(url.pathname)){reply(200,service.eventClusters.replace(url.pathname.split('/')[3],data));return;}
     if(req.method==='POST'&&url.pathname==='/api/event-clusters'){reply(201,service.eventClusters.save(data));return;}
     if(req.method==='POST'&&/^\/api\/event-clusters\/[-a-z0-9]{36}\/archive$/.test(url.pathname)){reply(200,service.eventClusters.archive(url.pathname.split('/')[3],data));return;}
     if(req.method==='POST'&&url.pathname==='/api/semantic-batches/preview'){reply(200,service.semanticBatches.preview(data));return;}
