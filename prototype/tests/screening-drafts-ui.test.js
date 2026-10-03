@@ -29,7 +29,7 @@ test('history pagination restores page selections and drafts while new samples s
  setFetch(path=>{seen.push(path);const u=new URL(path,'http://localhost'),before=u.searchParams.get('before'),start=before?rows.findIndex(s=>s.id===before)+1:0;return {samples:rows.slice(start,start+12),currentRulesHash:'rules',total:newer&&!u.searchParams.has('ceiling')?26:25,ceiling:25,nextCursor:rows[start+12]?rows[start+11].id:null};});
  await render(React.createElement(Review,{news:n,busy:false,mutate(){throw Error('no save');}}));await edit('复核依据与限制','Latest draft');
  await act(async()=>button('下一页留样').click());assert.equal(area('复核依据与限制').value,'');await edit('初筛留样版本',rows[14].id);await edit('复核依据与限制','Older selected draft');
- newer=true;await act(async()=>button('下一页留样').click());assert(button('下一页留样').disabled);assert(document.body.textContent.includes('第 3 页'));
+ newer=true;await act(async()=>button('下一页留样').click());assert.equal(button('下一页留样').getAttribute('aria-disabled'),'true');assert(document.body.textContent.includes('第 3 页'));
  await act(async()=>button('上一页留样').click());assert.equal(area('初筛留样版本').value,rows[14].id);assert.equal(area('复核依据与限制').value,'Older selected draft');
  await act(async()=>button('刷新初筛复核').click());assert.match(seen.at(-1),/ceiling=25/);assert(document.body.textContent.includes('共 25 份'));
  await act(async()=>button('回到最新留样').click());assert(!seen.at(-1).includes('?'));assert.equal(area('复核依据与限制').value,'Latest draft');assert(document.body.textContent.includes('共 26 份'));
@@ -40,4 +40,13 @@ test('late history pages cannot replace a newly selected news revision',()=>ui(a
  const view=()=>React.createElement(Review,{news:{...n},busy:false,mutate(){throw Error('no save');}});
  await render(view());await act(()=>button('下一页留样').click());n.revision=3;await render(view());assert.equal(area('初筛留样版本').value,fresh.id);
  await act(async()=>resolve({samples:[old],currentRulesHash:'rules',total:13,ceiling:13,nextCursor:null}));assert.equal(area('初筛留样版本').value,fresh.id);assert(document.body.textContent.includes('Synthetic title 3'));
+}));
+test('slow history paging keeps keyboard focus and blocks duplicate navigation until data arrives',()=>ui(async({Review,render,button,setFetch})=>{
+ const n=news(2),latest=sample(crypto.randomUUID(),2),older=sample(crypto.randomUUID(),1);let resolve,calls=0;
+ setFetch(path=>{calls++;return path.includes('?')?new Promise(r=>{resolve=r;}):{samples:[latest],currentRulesHash:'rules',total:13,ceiling:13,nextCursor:latest.id};});
+ await render(React.createElement(Review,{news:n,busy:false,mutate(){throw Error('no save');}}));const next=button('下一页留样');next.focus();
+ await act(()=>next.click());assert.equal(document.activeElement,next,'loading must not remove the focused navigation control');assert(next.isConnected);assert.equal(next.getAttribute('aria-disabled'),'true');
+ await act(()=>next.click());assert.equal(calls,2,'pending page cannot be submitted again');
+ await act(async()=>resolve({samples:[older],currentRulesHash:'rules',total:13,ceiling:13,nextCursor:null}));assert.equal(button('下一页留样'),next);assert(document.body.textContent.includes('第 2 页'));assert(document.querySelector('[role="status"]').textContent.includes('13'));assert.equal(next.getAttribute('aria-disabled'),'true');assert.equal(next.disabled,false);await act(()=>next.click());assert.equal(calls,2);
+ const prev=button('上一页留样');prev.focus();await act(()=>prev.click());assert.equal(document.activeElement,prev);assert.equal(prev.disabled,false);await act(()=>prev.click());assert.equal(calls,3);await act(async()=>resolve({samples:[latest],currentRulesHash:'rules',total:13,ceiling:13,nextCursor:latest.id}));assert.equal(document.activeElement,prev);assert.equal(prev.getAttribute('aria-disabled'),'true');await act(()=>prev.click());assert.equal(calls,3);
 }));
