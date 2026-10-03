@@ -76,6 +76,8 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
     if(input.action==='accept'&&run.stale)fail(3);
     // A historical candidate cannot silently withdraw a newer accepted relationship.
     if(input.action==='withdraw'&&(!run.decision||run.decision.runId!==id||run.decision.action!=='accept'))fail(4);
+    // Pair-wide decisions also make rejection a withdrawal unless it targets the accepted run.
+    if(input.action==='reject'&&run.decision?.action==='accept'&&run.decision.runId!==id)fail(8);
     const decision={version:input.version+1,runId:id,action:input.action,note:input.note.trim(),at:new Date(now()).toISOString(),inputHash:run.packet.inputHash,relation:run.candidate.comparison.relation,orientation:{left:run.packet.input.left.id,right:run.packet.input.right.id}};
     db.prepare('INSERT INTO semantic_decisions VALUES(?,?,?,?)').run(run.pairKey,decision.version,id,JSON.stringify(decision));db.exec('COMMIT');return api.get(id);
    }catch(e){db.exec('ROLLBACK');throw e;}
