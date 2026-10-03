@@ -1,3 +1,4 @@
+import {recallOccurrence} from './event-continuity.mjs';
 import {digest} from './codex-research.mjs';
 import {comparisonPacket,comparisonPrompt,MATERIAL_SEMANTIC_SCHEMA} from './semantic-events.mjs';
 
@@ -26,7 +27,7 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
  };
  return {
   plan(item,topic){
-   const recalled=recall(item.news_id),source={id:topic.id,version:topic.version,title:topic.title,kind:topic.eventExtraction?'event':'material'},left=inputRef(topic),seen=new Set();
+   const recalled=topic.eventExtraction?recallOccurrence(topic,research.list()):recall(item.news_id),source={id:topic.id,version:topic.version,title:topic.title,kind:topic.eventExtraction?'event':'material'},left=inputRef(topic),seen=new Set();
    const candidates=recalled.items.filter(c=>c.right.id!==topic.id&&c.right.status!=='archived').slice(0,3);
    const plans=candidates.map(c=>{
     const target=research.get(c.right.id),right=inputRef(target),p={newsId:item.news_id,newsRevision:item.revision,source,target:{id:target.id,version:target.version,title:target.title,kind:target.eventExtraction?'event':'material'},candidateId:c.id,recallReasons:c.reasons,recallRulesHash:recalled.rulesHash,createdAt:at()};
@@ -34,7 +35,7 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
     if(!left||!right){status='skipped';p.reason='两侧尚未都有保存的正文材料；未退回标题比较';}
     else if(refKey(left)===refKey(right)||seen.has(refKey(right))){status='skipped';p.reason='同一材料或重复材料对，不增加独立证据或模型调用';}
     else{seen.add(refKey(right));p.refs={left,right};
-     try{p.packet=comparisonPacket(store,p.refs);p.executionHash=fingerprint(p.packet);}
+     try{p.packet=comparisonPacket(store,p.refs);if(topic.eventExtraction&&p.packet.input.left.documentId===p.packet.input.right.documentId){status='skipped';p.reason='同一来源文档的事项不作为跨报道比较';delete p.refs;}else p.executionHash=fingerprint(p.packet);}
      catch{status='invalidated';p.reason='保存材料已有新修订或不满足比较要求，原研究保留';delete p.refs;}
     }
     return {id:digest({item:item.id,target:target.id}),itemId:item.id,status,payload:p};

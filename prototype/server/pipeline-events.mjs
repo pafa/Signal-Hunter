@@ -5,7 +5,7 @@ import {eventComparisonSnapshot} from './semantic-event-scopes.mjs';
 
 // Extraction proposes boundaries. Only a recorded human create decision can
 // produce a child draft job; this queue never writes an event decision.
-export function openPipelineEvents(store,research,models,extractions,{config={},now=Date.now,guard,transaction,audit,used,settings}={}){
+export function openPipelineEvents(store,research,models,extractions,{config={},now=Date.now,guard,transaction,audit,used,settings,relations=null}={}){
  const db=store.db,at=()=>new Date(now()).toISOString();
  db.exec(`CREATE TABLE IF NOT EXISTS research_pipeline_event_jobs(id TEXT PRIMARY KEY,item_id TEXT NOT NULL,topic_id TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,run_id TEXT,payload TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS pipeline_event_kind ON research_pipeline_event_jobs(kind,status);
@@ -34,7 +34,7 @@ export function openPipelineEvents(store,research,models,extractions,{config={},
   try{valid(row);}catch{stale=true;}
   return {id:row.id,itemId:row.item_id,topicId:row.topic_id,kind:row.kind,title:p.title,status:run?.status||row.status,runId:row.run_id,stale,
    reason:p.reason||run?.failure?.message||null,eventCount:row.kind==='extract'&&run?.status==='candidate'&&!run.stale?run.candidate.decomposition.events.length:null,
-   parentJobId:p.parentJobId||null,createdAt:p.createdAt,attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
+   relationCoverage:p.relationCoverage||null,parentJobId:p.parentJobId||null,createdAt:p.createdAt,attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
  }
  const insert=(row,p)=>db.prepare('INSERT INTO research_pipeline_event_jobs VALUES(?,?,?,?,?,NULL,?)').run(row.id,row.item_id,row.topic_id,row.kind,row.status,JSON.stringify(p));
  const api={
@@ -76,11 +76,13 @@ export function openPipelineEvents(store,research,models,extractions,{config={},
    let p;try{p=valid(row);}catch{
     transaction(()=>{context.assertActive();db.prepare("UPDATE research_pipeline_event_jobs SET status='invalidated' WHERE id=? AND status='queued'").run(row.id);audit(row.item_id,'event-job-invalidated',{jobId:row.id});});return {ok:true,invalidated:true};
    }
+   const relationItem={id:row.id,news_id:p.newsId,revision:p.newsRevision},relationPlan=row.kind==='dossier'&&relations&&!p.relationCoverage?relations.plan(relationItem,research.get(row.topic_id)):null;
    const link=run=>{
     context.assertActive();guard();valid(row);const latest=read(row.id);
     if(latest.status!=='queued'||latest.payload!==row.payload||fingerprint(row.kind,run.packet)!==p.executionHash)throw Error('事项队列或模型输入已变化');
     if(used()>=settings().dailyCalls)throw Error('自动研究调用额度已用完');
-    db.prepare("UPDATE research_pipeline_event_jobs SET status='running',run_id=? WHERE id=?").run(run.id,row.id);
+    if(relationPlan)relations.persist(relationItem,relationPlan);
+    db.prepare("UPDATE research_pipeline_event_jobs SET status='running',run_id=?,payload=? WHERE id=?").run(run.id,JSON.stringify({...p,...(relationPlan?{relationCoverage:relationPlan.coverage}:{})}),row.id);
     db.prepare('INSERT INTO research_pipeline_attempts(item_id,run_id,at) VALUES(?,?,?)').run(row.id,run.id,at());
     audit(row.item_id,'event-job-started',{jobId:row.id,runId:run.id,kind:row.kind,inputHash:run.packet.inputHash});
    };

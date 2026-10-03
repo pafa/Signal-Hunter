@@ -26,7 +26,7 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
  };
  const setState=(row,status,extra={})=>{db.prepare('UPDATE research_pipeline_items SET status=?,payload=? WHERE id=?').run(status,JSON.stringify({...JSON.parse(row.payload),...extra}),row.id);audit(row.id,status,extra);};
  const relations=semantic&&recall?openPipelineRelations(store,research,semantic,{config,now,guard,transaction,audit,used,settings,recall}):null;
- const events=materialEvents?openPipelineEvents(store,research,models,materialEvents,{config,now,guard,transaction,audit,used,settings}):null;
+ const events=materialEvents?openPipelineEvents(store,research,models,materialEvents,{config,now,guard,transaction,audit,used,settings,relations}):null;
  const api={
   snapshot(){const lane=db.prepare("SELECT token,lease_until,paused FROM operation_tasks WHERE name='discovery'").get(),counts={};
    const rows=db.prepare(`SELECT CASE WHEN r.status='running' AND r.expires_at<? THEN 'interrupted' WHEN r.status IS NOT NULL THEN r.status WHEN i.status='preparing' AND (? OR json_extract(i.payload,'$.token') IS NOT ?) THEN 'interrupted' ELSE i.status END status,count(*) n FROM research_pipeline_items i LEFT JOIN model_research_runs r ON r.id=i.run_id GROUP BY 1`).all(now(),Number(!lane||!!lane.paused||lane.lease_until<=now()),lane?.token||null);for(const r of rows)counts[r.status]=r.n;return {enabled:enabled&&models.status().enabled,settings:settings(),callsInLast24Hours:used(),counts,relations:relations?.snapshot()||null,events:events?.snapshot()||null,items:db.prepare('SELECT * FROM research_pipeline_items ORDER BY rowid DESC LIMIT 30').all().map(view)};},

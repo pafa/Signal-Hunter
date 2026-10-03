@@ -41,6 +41,23 @@ export function compareReports(a,b){
  return {kind,reasons:[...(kind==='analogy'?['公司主体没有匹配，只可作行业或历史类比，不能归成同一事件']:[]),...(exact?['标题规范化后相同；可能为转载或重复报道']:[]),...(sameStory?['来源链接相同，需检查修订']:[]),...(issuers.length?['提及同一发行人']:[]),...(categories.length?[`相同事件规则：${categories.join('、')}`]:[]),...(!exact&&words.length?[`共同线索：${words.slice(0,6).join('、')}`]:[]),...(changed?[`阶段表述对照：本条为${a.stage}；历史为${b.stage}`]:[])],rank:exact?100:sameStory?90:issuers.length?70:kind==='analogy'?30:50};
 }
 
+// Bounded recall for human-selected occurrences. Article-wide evidence and
+// sibling occurrences never supply matching terms or independent corroboration.
+export function recallOccurrence(topic,topics){
+ const focus=t=>{const e=t.eventExtraction.event;return terms([e.title,e.actor,e.action,e.object,e.quote].join(' '));};
+ const source=topic.eventExtraction,words=focus(topic),all=topics.filter(t=>t.eventExtraction&&t.status==='active'&&t.id!==topic.id),pool=[...all].sort((a,b)=>(b.updatedAt||b.createdAt||'').localeCompare(a.updatedAt||a.createdAt||'')||a.id.localeCompare(b.id)).slice(0,500);
+ const items=pool.flatMap(t=>{
+  const origin=t.eventExtraction;
+  if(origin.sourceTopicId===source.sourceTopicId||t.evidence.some(e=>e.materialId&&topic.evidence.some(a=>a.materialId===e.materialId)))return [];
+  // URL/document identity is verified again from immutable material snapshots
+  // before a comparison plan can be saved.
+  const overlap=intersects(words,focus(t));if(overlap.length<3||overlap.length/Math.max(1,words.length)<.35)return [];
+  const value={left:{id:topic.id,version:topic.version},right:{id:t.id,version:t.version,title:t.title,status:t.status},rank:overlap.length,reasons:[`已选事项共同线索：${overlap.slice(0,6).join('、')}`]};
+  return [{...value,id:hash(JSON.stringify({method:'occurrence-recall-1',...value,rulesHash:CONTINUITY_RULES_HASH}))}];
+ }).sort((a,b)=>b.rank-a.rank||a.right.id.localeCompare(b.right.id));
+ return {items,coverage:{topicsIndexed:pool.length,topicsTotal:all.length,method:'已选事项标题、主体、动作、对象和引文的有限词项召回；不含整篇背景，未命中不代表无关'},rulesHash:CONTINUITY_RULES_HASH};
+}
+
 export function researchPriority(record,{positions=[],watchlist=[],relatedTopicIds=[],repeat=false}={}){
  const held=positions.filter(p=>record.symbols.includes(p.symbol)||relatedTopicIds.includes(p.topicId)).map(p=>p.symbol);
  const watched=watchlist.filter(w=>record.symbols.includes(w.symbol)).map(w=>w.symbol);
