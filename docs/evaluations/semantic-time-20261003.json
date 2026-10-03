@@ -1,0 +1,246 @@
+{
+  "schema": "semantic-time-regression-1",
+  "scope": "Development regression on already inspected historical inputs, not held-out quality evidence; no automatic retries",
+  "forwardEligible": false,
+  "referenceAuthor": "assistant; known-input development regression",
+  "frozenAt": "2026-10-02T21:15:42.731Z",
+  "regressionHash": "aff80cadc19db762795f8adc8badd8004e8bac582379ad37b477a35299dd6d59",
+  "parentCorpusHash": "3ca182a529d281b17bb97857a1ab789af33f523cba4f2637d379264b8a7ce71d",
+  "codeHash": "b5b7890e9fbe5f5ce846e816d226050218d82fc797d6342434f423d954c4f952",
+  "stats": {
+    "attempts": 4,
+    "candidates": 4,
+    "relationMatches": 4,
+    "timeBasisMatches": 4
+  },
+  "cases": [
+    {
+      "caseId": "case-1",
+      "runId": "8d4650b0-5acf-4e0e-974f-86227d45c904",
+      "status": "candidate",
+      "inputHash": "a8f983c4eba39ef17bfd79c2efd911c62ed2591c139ea518628085b486a219ae",
+      "promptHash": "0c469c8851aa9b64ec33093f7515b01a5bccd22062726633c97f5e1411a81483",
+      "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+      "outputHash": "652cff20c595441fecf470f41bfbb05966db3f62d4254932b56e1d272adabd44",
+      "expectedRelations": [
+        "followup"
+      ],
+      "relation": "followup",
+      "expectedTimeBasis": {
+        "left": "relative",
+        "right": "explicit"
+      },
+      "timeBasis": {
+        "left": "relative",
+        "right": "explicit"
+      },
+      "timeFragments": {
+        "left": "today",
+        "right": "Jan. 18, 2022"
+      },
+      "timeQuoteHashes": {
+        "left": "e5421719793f94368dd977c249ac318e6fc276c3f4a28b8fd87d0b032a8c1447",
+        "right": "d3b0db2df7b298e2813fb6b917535e6bd99496653e0f69a4da8d80424156dcac"
+      },
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "event-pair-material-1/event-time-evidence-2",
+        "promptHash": "0c469c8851aa9b64ec33093f7515b01a5bccd22062726633c97f5e1411a81483",
+        "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+        "inputHash": "a8f983c4eba39ef17bfd79c2efd911c62ed2591c139ea518628085b486a219ae",
+        "startedAt": "2026-10-02T21:15:42.734Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 15094,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 974,
+          "reasoning_output_tokens": 126
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "652cff20c595441fecf470f41bfbb05966db3f62d4254932b56e1d272adabd44",
+        "finishedAt": "2026-10-02T21:16:34.270Z",
+        "toolCallsObserved": 0
+      },
+      "failure": null
+    },
+    {
+      "caseId": "case-6",
+      "runId": "307b8625-b361-4bed-8b8f-4586826a41f1",
+      "status": "candidate",
+      "inputHash": "5f766b11a6f44d2265edbe4f9352dd7f8776f52a4ab61ea6d37c35372a8f96a8",
+      "promptHash": "5bc737b9d0844d5db5cc42114440f85b52bcbae6aa3e8968ab2e0cfb969eb186",
+      "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+      "outputHash": "c0a05a1bb6521b5c7e0266c1c3559ea1c14e36e3a069bd7526c1dfb6f8de00ec",
+      "expectedRelations": [
+        "related",
+        "analogy",
+        "unrelated"
+      ],
+      "relation": "analogy",
+      "expectedTimeBasis": {
+        "left": "relative",
+        "right": "explicit"
+      },
+      "timeBasis": {
+        "left": "relative",
+        "right": "explicit"
+      },
+      "timeFragments": {
+        "left": "today",
+        "right": "April 12, 2021"
+      },
+      "timeQuoteHashes": {
+        "left": "e5421719793f94368dd977c249ac318e6fc276c3f4a28b8fd87d0b032a8c1447",
+        "right": "0a40893d41e207dde7ed5af60b01a8ef5b3d1fd4b9c903bef004b4b1fbb2b6ac"
+      },
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "event-pair-material-1/event-time-evidence-2",
+        "promptHash": "5bc737b9d0844d5db5cc42114440f85b52bcbae6aa3e8968ab2e0cfb969eb186",
+        "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+        "inputHash": "5f766b11a6f44d2265edbe4f9352dd7f8776f52a4ab61ea6d37c35372a8f96a8",
+        "startedAt": "2026-10-02T21:16:34.277Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 14902,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1001,
+          "reasoning_output_tokens": 122
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "c0a05a1bb6521b5c7e0266c1c3559ea1c14e36e3a069bd7526c1dfb6f8de00ec",
+        "finishedAt": "2026-10-02T21:17:26.681Z",
+        "toolCallsObserved": 0
+      },
+      "failure": null
+    },
+    {
+      "caseId": "case-7",
+      "runId": "e5f16cbd-44d8-4cc3-be3c-b85ae6ce59d4",
+      "status": "candidate",
+      "inputHash": "c72cd50e7b18b3f7383f248c36b771b15673d0077ab750c99e48582ee904fb58",
+      "promptHash": "61e7f33d21d926f94e2afae33481f654674c1c629125a3549d448f337cc4dd6f",
+      "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+      "outputHash": "451dffe2fb394ce45ab5d2cc517a4ad3b39a99b9931dbbce53f843f95dd6c223",
+      "expectedRelations": [
+        "related",
+        "analogy",
+        "unrelated"
+      ],
+      "relation": "analogy",
+      "expectedTimeBasis": {
+        "left": "relative",
+        "right": "explicit"
+      },
+      "timeBasis": {
+        "left": "relative",
+        "right": "explicit"
+      },
+      "timeFragments": {
+        "left": "today",
+        "right": "March 4, 2022"
+      },
+      "timeQuoteHashes": {
+        "left": "e5421719793f94368dd977c249ac318e6fc276c3f4a28b8fd87d0b032a8c1447",
+        "right": "71d389d851d21865192e73ea2c76b25c1335fc0a8512873a6679f961fd82db3d"
+      },
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "event-pair-material-1/event-time-evidence-2",
+        "promptHash": "61e7f33d21d926f94e2afae33481f654674c1c629125a3549d448f337cc4dd6f",
+        "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+        "inputHash": "c72cd50e7b18b3f7383f248c36b771b15673d0077ab750c99e48582ee904fb58",
+        "startedAt": "2026-10-02T21:17:26.687Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 13012,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 819,
+          "reasoning_output_tokens": 143
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "451dffe2fb394ce45ab5d2cc517a4ad3b39a99b9931dbbce53f843f95dd6c223",
+        "finishedAt": "2026-10-02T21:18:12.775Z",
+        "toolCallsObserved": 0
+      },
+      "failure": null
+    },
+    {
+      "caseId": "case-3",
+      "runId": "f69b2b7e-68b4-48dd-ae1d-8426f7816afb",
+      "status": "candidate",
+      "inputHash": "e736747dd21b4c2faa082b266701d15b326de3ebfaa454e0eb2fa9ca7d52bb41",
+      "promptHash": "d1a2eb3b9f4ffbe06d965de908d654de0a72e8d4f6da4fa65fea5ab328278b9c",
+      "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+      "outputHash": "6855c3deed5162e7e535338ce1d4668f96cde4e5bba87b9765075c004dc70cab",
+      "expectedRelations": [
+        "reversal"
+      ],
+      "relation": "reversal",
+      "expectedTimeBasis": {
+        "left": "explicit",
+        "right": "relative"
+      },
+      "timeBasis": {
+        "left": "explicit",
+        "right": "relative"
+      },
+      "timeFragments": {
+        "left": "Feb. 7, 2022",
+        "right": "today"
+      },
+      "timeQuoteHashes": {
+        "left": "753e52fce28b09a5d85c29c3fbfb25a69b6c9184c8b04642b62234e5616967da",
+        "right": "baf41ed10dd537de73a4e9787203ef81b7b3bad5925e7d0c8893c7161606cd77"
+      },
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "event-pair-material-1/event-time-evidence-2",
+        "promptHash": "d1a2eb3b9f4ffbe06d965de908d654de0a72e8d4f6da4fa65fea5ab328278b9c",
+        "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+        "inputHash": "e736747dd21b4c2faa082b266701d15b326de3ebfaa454e0eb2fa9ca7d52bb41",
+        "startedAt": "2026-10-02T21:18:12.782Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 15670,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1035,
+          "reasoning_output_tokens": 132
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "6855c3deed5162e7e535338ce1d4668f96cde4e5bba87b9765075c004dc70cab",
+        "finishedAt": "2026-10-02T21:19:04.930Z",
+        "toolCallsObserved": 0
+      },
+      "failure": null
+    }
+  ],
+  "preservation": {
+    "at": "2026-10-02T21:19:04.939Z",
+    "oldRunCount": 7,
+    "oldRunsUnchanged": true,
+    "materialsUnchanged": true,
+    "oldRowsHash": "95147136d6f2e89fe889032e87a2280912f51950f9776e7c5c21a4de4f903fc0",
+    "materialRowsHash": "d5a26211e614cc18c470bc7b11036f8c3a5ea8e3836b4c7dce5203d97dc8f402",
+    "currentRunCount": 11
+  },
+  "limitations": [
+    "Four re-used historical pairs cannot estimate out-of-sample accuracy or prove all repeated materials consistent",
+    "Span validation cannot establish that a cited time refers to the target event; semantic review remains necessary",
+    "Relative expressions currently supported by the validator are limited to the documented English/Chinese list",
+    "Publication-date extraction issue found in the prior diagnostic is not repaired in this candidate"
+  ],
+  "privacy": "No full article body or full source quote included; originals and output kept locally"
+}

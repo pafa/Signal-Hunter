@@ -12,7 +12,7 @@ import {safeErrorText} from '../shared/safe-errors.mjs';
 const at='2026-10-02T06:00:00Z',config={binary:'/test/codex',model:'test-model',timeoutMs:1000};
 const news=[{id:digest('proposal'),title:'虚构甲公司拟收购乙公司，尚需批准',url:'https://example.invalid/proposal',publisher:'合成测试',publishedAt:at},{id:digest('denial'),title:'虚构甲公司否认收购乙公司的传闻',url:'https://example.invalid/denial',publisher:'合成测试',publishedAt:at}];
 const input={left:{id:news[1].id,revision:1},right:{id:news[0].id,revision:1}};
-function comparison(packet){return {relation:'reversal',left:{actor:'虚构甲公司',action:'否认',object:'收购乙公司',eventTime:'未知',stage:'否认传闻',quote:packet.input.left.title},right:{actor:'虚构甲公司',action:'拟收购',object:'乙公司',eventTime:'未知',stage:'待批准',quote:packet.input.right.title},reason:'标题的收购对象相同，但仅凭标题不能核实是否同一项传闻。',missingEvidence:['核对两份全文与具体交易对象']};}
+function comparison(packet){return {relation:'reversal',left:{actor:'虚构甲公司',action:'否认',object:'收购乙公司',eventTime:'未知',timeEvidence:{basis:'unknown',quote:'',quoteField:'none'},stage:'否认传闻',quote:packet.input.left.title},right:{actor:'虚构甲公司',action:'拟收购',object:'乙公司',eventTime:'未知',timeEvidence:{basis:'unknown',quote:'',quoteField:'none'},stage:'待批准',quote:packet.input.right.title},reason:'标题的收购对象相同，但仅凭标题不能核实是否同一项传闻。',missingEvidence:['核对两份全文与具体交易对象']};}
 function candidate(packet){const value=comparison(packet),rawOutput=JSON.stringify(value);return {status:'candidate',reviewStatus:'unreviewed',comparison:value,rawOutput,trace:{model:config.model,inputHash:packet.inputHash,outputHash:digest(rawOutput)}};}
 function fixture(runner=async p=>candidate(p)){
  const store=openStore(':memory:');store.ingest(news,at);const service=createService(store,{mode:'research',modelConfig:config,semanticRunner:runner});

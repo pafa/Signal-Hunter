@@ -7,13 +7,20 @@ import './semantic-events.css';
 import SemanticMaterialLibrary from './SemanticMaterialLibrary';
 import SemanticBatches from './SemanticBatches';
 import EventClusters from './EventClusters';
+const publicationTime=value=>typeof value!=='string'||!value?'未提供':value.length===10?`${value}（仅日期）`:value.replace('T',' ').replace(/\.000(?=Z|[+-])/,'').replace(/Z$/,' UTC').replace(/([+-]\d{2}:\d{2})$/,' $1');
+export function TimeEvidence({event,input}){
+ const evidence=event.timeEvidence;
+ if(!evidence)return <p className="m-note">旧版未记录时间依据；上方为历史模型表述。</p>;
+ const label={explicit:'原文明确日期或期间（未独立核实）',relative:'原文相对时间（具体日历日期待核）',unknown:'未知：缺少本侧时间依据'}[evidence.basis];
+ return <div className="event-time-evidence"><strong>时间依据：{label}</strong>{evidence.quote&&<blockquote>{evidence.quote}</blockquote>}{evidence.basis==='relative'&&<p>来源发布日期：{publicationTime(input.publishedAt)}。这是来源元数据，不是确定的事件日期。</p>}</div>;
+}
 const actions={accept:'采纳此判断',reject:'不采纳',withdraw:'撤销采纳'};
 export function ComparisonResult({run}){
  const c=run.candidate?.comparison,hasMaterial=['left','right'].some(side=>run.packet.input[side].kind==='material');
  return <>
   <p>{semanticRunLabel(run)} · {time(run.createdAt)}{run.stale?(hasMaterial?' · 材料或新闻已修订，旧候选不可采纳':' · 新闻已修订，旧候选不可采纳'):''}</p>
   {run.failure&&<p role="alert" className="m-warning">{run.failure.message}</p>}
-  <div className="event-pair">{['left','right'].map(side=><article key={side}><small>{side==='left'?'左侧':'右侧'}{run.packet.input[side].kind==='material'?'材料':'新闻'} · v{run.packet.input[side].revision} · {semanticScopeLabels[run.packet.input[side].contentScope]||'仅标题'}</small><h4>{run.packet.input[side].title}</h4><p>发布 {time(run.packet.input[side].publishedAt)} · 本版可用 {time(run.packet.input[side].availableAt)}</p>{c&&<dl>{[['actor','主体'],['action','动作'],['object','对象'],['eventTime','事件时间'],['stage','阶段'],['quote',c[side].quoteField==='body'?'原文引用（正文）':'原文引用（标题）']].map(([key,label])=><React.Fragment key={key}><dt>{label}</dt><dd>{c[side][key]}</dd></React.Fragment>)}</dl>}{run.packet.input[side].body&&<details><summary>查看冻结正文与指纹</summary><p>内容指纹：{run.packet.input[side].contentHash}</p><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'24rem',overflow:'auto'}}>{run.packet.input[side].body}</pre></details>}</article>)}</div>
+  <div className="event-pair">{['left','right'].map(side=><article key={side}><small>{side==='left'?'左侧':'右侧'}{run.packet.input[side].kind==='material'?'材料':'新闻'} · v{run.packet.input[side].revision} · {semanticScopeLabels[run.packet.input[side].contentScope]||'仅标题'}</small><h4>{run.packet.input[side].title}</h4><p>发布 {publicationTime(run.packet.input[side].publishedAt)} · 本版可用 {time(run.packet.input[side].availableAt)}</p>{c&&<dl>{[['actor','主体'],['action','动作'],['object','对象'],['eventTime','事件时间'],['stage','阶段'],['quote',c[side].quoteField==='body'?'原文引用（正文）':'原文引用（标题）']].map(([key,label])=><React.Fragment key={key}><dt>{label}</dt><dd>{c[side][key]}</dd></React.Fragment>)}</dl>}{c&&<TimeEvidence event={c[side]} input={run.packet.input[side]}/>} {run.packet.input[side].body&&<details><summary>查看冻结正文与指纹</summary><p>内容指纹：{run.packet.input[side].contentHash}</p><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'24rem',overflow:'auto'}}>{run.packet.input[side].body}</pre></details>}</article>)}</div>
   {c&&<><h3>{kinds[c.relation]}</h3><p>{c.reason}</p><h4>还需核对</h4>{c.missingEvidence.length?<ul>{c.missingEvidence.map((v,i)=><li key={i}>{v}</li>)}</ul>:<p>模型未列出具体缺口，仍需本人核对标题与原文。</p>}</>}
   {run.decision&&<p className="m-note">本输入对最新决定 v{run.decisionVersion}：{actions[run.decision.action]}{run.decision.runId!==run.id?'（针对另一份比较结果）':''}。{run.active?'当前采纳，限本次输入版本。':''}</p>}
   <details><summary>冻结输入与模型记录</summary><p>{hasMaterial?'按每侧标明的阅读范围比较；只使用已保存材料，未重新抓取或独立核实。':'标题级比较；没有读取正文，'}引用相符不等于推论正确。这里只保存成对判断，不自动归并新闻、研究或证据。</p><p>模型：{run.model} · 输入指纹：{run.packet.inputHash}</p>{run.candidate&&<p>提示词 {run.candidate.trace.promptVersion} · 输出指纹 {run.candidate.trace.outputHash} · 观察到的工具调用 {run.candidate.trace.toolCallsObserved??'未提供'} · 运行警告 {run.candidate.trace.runtimeWarningCount??'未提供'}</p>}</details>

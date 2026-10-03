@@ -10,7 +10,7 @@ import {digest} from '../server/codex-research.mjs';
 import {openModelResearchRuns} from '../server/model-research-runs.mjs';
 const at='2026-10-03T01:00:00Z',config={binary:'/test/codex',model:'test-model',timeoutMs:1000};
 function candidate(packet,relation='followup'){
- const fields=side=>({actor:'合成甲',action:'待核',object:'合成事件',eventTime:'未知',stage:'待核',quote:packet.input[side].body||packet.input[side].title,...(packet.schema==='event-pair-1'?{}:{quoteField:packet.input[side].body?'body':'title'})});
+ const fields=side=>({actor:'合成甲',action:'待核',object:'合成事件',eventTime:'未知',timeEvidence:{basis:'unknown',quote:'',quoteField:'none'},stage:'待核',quote:packet.input[side].body||packet.input[side].title,...(packet.schema==='event-pair-1'?{}:{quoteField:packet.input[side].body?'body':'title'})});
  const comparison={relation,left:fields('left'),right:fields('right'),reason:'合成核对，不代表真实事件',missingEvidence:['待核原始来源']},rawOutput=JSON.stringify(comparison);
  return {status:'candidate',reviewStatus:'unreviewed',comparison,rawOutput,trace:{model:config.model,promptVersion:packet.schema,inputHash:packet.inputHash,outputHash:digest(rawOutput)}};
 }
