@@ -53,12 +53,16 @@ test('pre-date-precision comparisons retain decisions across upgrade without rew
   const saved=JSON.parse(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(started.id).payload);
   // Reconstruct the event-pair-1 packet persisted before datePrecision was added.
   for(const side of ['left','right'])delete saved.packet.input[side].datePrecision;
+  for(const side of ['left','right'])delete saved.candidate.comparison[side].timeEvidence;
   saved.packet.inputHash=digest(saved.packet.input);saved.candidate.trace.inputHash=saved.packet.inputHash;
+  saved.candidate.rawOutput=JSON.stringify(saved.candidate.comparison);saved.candidate.trace.outputHash=digest(saved.candidate.rawOutput);
   const frozen=JSON.stringify(saved);
   f.store.db.prepare('UPDATE semantic_runs SET payload=? WHERE id=?').run(frozen,saved.id);
   assert.equal(f.runs.get(saved.id).stale,false);
   const accepted=f.runs.decide(saved.id,{version:0,action:'accept',note:'Review unchanged legacy input'});
   assert.equal(accepted.active,true);
+  const reconfigured=openSemanticEvents(f.store,{enabled:true,config:{...config,model:'new-model'}});
+  try{assert.equal(reconfigured.get(saved.id).active,true);}finally{await reconfigured.close();}
   const history=accepted.history;
   f.store.ingest(news,'2026-10-02T07:00:00Z');
   assert.equal(f.runs.get(saved.id).active,true);
@@ -73,6 +77,35 @@ test('pre-date-precision comparisons retain decisions across upgrade without rew
   assert.equal(f.runs.get(saved.id).active,true);
   f.store.ingest([{...news[1],title:'Changed source headline'}],'2026-10-02T08:00:00Z');
   assert.equal(f.runs.get(saved.id).stale,true);assert.deepEqual(f.runs.get(saved.id).history,history);
+ }finally{await f.close();}
+});
+test('stored comparison integrity failures disable acceptance without rewriting candidate or decisions',async()=>{
+ for(const mutate of [r=>r.candidate.comparison.relation='repeat',r=>r.candidate.rawOutput='broken JSON',r=>r.candidate.trace.outputHash='wrong',r=>r.candidate.trace.model='other',r=>r.candidate.reviewStatus='complete',r=>r.packet.input.left.title='Changed archived title']){
+  const f=fixture();try{
+   const start=f.runs.start(input);await f.runs.wait(start.id);
+   const run=JSON.parse(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(start.id).payload);mutate(run);
+   const frozen=JSON.stringify(run);f.store.db.prepare('UPDATE semantic_runs SET payload=? WHERE id=?').run(frozen,start.id);
+   assert.equal(f.runs.get(start.id).stale,true);assert.equal(f.runs.get(start.id).active,false);
+   assert.equal(f.runs.list().runs[0].stale,true);
+   assert.throws(()=>f.runs.decide(start.id,{version:0,action:'accept',note:'Cannot accept mismatched stored output'}));
+   assert.equal(f.store.db.prepare('SELECT count(*) n FROM semantic_decisions').get().n,0);
+   assert.equal(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(start.id).payload,frozen);
+  }finally{await f.close();}
+ }
+});
+test('a damaged accepted comparison stops being active but can still be explicitly withdrawn using the saved decision',async()=>{
+ const f=fixture();try{
+  const start=f.runs.start(input);await f.runs.wait(start.id);
+  const accepted=f.runs.decide(start.id,{version:0,action:'accept',note:'Original reviewed comparison'});
+  const run=JSON.parse(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(start.id).payload);
+  run.candidate.comparison.relation='repeat';const frozen=JSON.stringify(run);
+  f.store.db.prepare('UPDATE semantic_runs SET payload=? WHERE id=?').run(frozen,start.id);
+  assert.equal(f.runs.get(start.id).active,false);assert.deepEqual(f.runs.get(start.id).history,accepted.history);
+  const withdrawn=f.runs.decide(start.id,{version:1,action:'withdraw',note:'Withdraw after integrity warning'});
+  assert.equal(withdrawn.active,false);assert.equal(withdrawn.history.length,2);
+  for(const key of ['relation','inputHash','orientation'])assert.deepEqual(withdrawn.decision[key],accepted.decision[key]);
+  assert.deepEqual(withdrawn.history[1],accepted.decision);
+  assert.equal(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(start.id).payload,frozen);
  }finally{await f.close();}
 });
 test('reverse orientation shares decision sequence and preserves which result was accepted',async()=>{

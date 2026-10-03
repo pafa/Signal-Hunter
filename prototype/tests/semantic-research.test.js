@@ -42,6 +42,19 @@ test('new source revisions or evidence mismatch cannot reuse an older semantic r
  const f=fixture();try{f.accept(await f.run());const c=f.r.related(f.a.id).semantic.items[0];f.link(c.basis);f.material(f.a,'公告甲','修订正文');assert.equal(f.r.related(f.a.id).semantic.total,0);assert.equal(f.r.related(f.a.id).links[0].basisStatus.current,false);assert.throws(()=>f.link(c.basis),/比較|比较依据/);assert.equal(f.s.get(c.basis.runId).packet.input.left.body,'公告甲');
  }finally{await f.close();}
 });
+test('damaged stored model output is removed from recall and marks saved research basis stale without rewriting history',async()=>{
+ const f=fixture();try{
+  const run=f.accept(await f.run()),c=f.r.related(f.a.id).semantic.items[0];f.link(c.basis);
+  const packet=f.r.packet(f.a.id),topic=f.store.db.prepare('SELECT payload FROM research_topics WHERE id=?').get(f.a.id).payload,history=f.r.history(f.a.id),paper=f.service.paper.snapshot();
+  const saved=JSON.parse(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(run.id).payload);saved.candidate.rawOutput='Damaged stored response';
+  f.store.db.prepare('UPDATE semantic_runs SET payload=? WHERE id=?').run(JSON.stringify(saved),run.id);
+  assert.equal(f.r.related(f.a.id).semantic.total,0);assert.equal(f.r.related(f.b.id).semantic.total,0);
+  assert.equal(f.r.related(f.a.id).links[0].basisStatus.current,false);assert.equal(f.r.related(f.b.id).incoming[0].basisStatus.current,false);
+  assert.notEqual(f.r.packet(f.a.id).inputHash,packet.inputHash);assert.throws(()=>f.link(c.basis),/比较依据/);
+  assert.equal(f.store.db.prepare('SELECT payload FROM research_topics WHERE id=?').get(f.a.id).payload,topic);
+  assert.deepEqual(f.r.history(f.a.id),history);assert.deepEqual(f.service.paper.snapshot(),paper);
+ }finally{await f.close();}
+});
 test('forged decision, source side, run, target or client evidence cannot create a research version',async()=>{
  const f=fixture();try{f.accept(await f.run());const b=f.r.related(f.a.id).semantic.items[0].basis,before=f.r.get(f.a.id);const third=f.r.create({title:'没有关联的研究',summary:'缺证据'});
  for(const patch of [{runId:'missing'},{decisionVersion:0},{decisionVersion:b.decisionVersion+1},{sourceSide:'right'},{sourceSide:'other'},{inputHash:'client hash'}])assert.throws(()=>f.link(b,{semanticBasis:{runId:b.runId,decisionVersion:b.decisionVersion,sourceSide:b.sourceSide,...patch}}),/比较依据/);

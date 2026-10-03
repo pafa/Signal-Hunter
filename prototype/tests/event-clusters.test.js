@@ -44,6 +44,17 @@ test('material revisions retain document membership and mixed input source scope
 test('rejection, withdrawal and superseding decisions invalidate current evidence but retain frozen history',async()=>{
  const f=fixture();try{const b=await f.batch(f.refs.slice(0,2)),run=f.b.get(b.id).items[0].runId;f.s.decide(run,{version:0,action:'accept',note:'核对'});const saved=f.c.save(f.command(b.id)),old=f.c.get(saved.id).history[0];f.s.decide(run,{version:1,action:'withdraw',note:'发现疑点'});assert.equal(f.c.get(saved.id).health.current,false);assert.equal(f.c.preview(b.id).groups[0].pairs[0].status,'rejected');assert.deepEqual(f.c.get(saved.id).history[0],old);const other=f.s.start({left:f.refs[0],right:f.refs[1]});await f.s.wait(other.id);f.s.decide(other.id,{version:2,action:'accept',note:'核对新版'});assert.equal(f.c.preview(b.id).groups[0].pairs[0].status,'superseded');assert.equal(f.c.get(saved.id).health.current,false);}finally{await f.close();}
 });
+test('stored output corruption invalidates cluster evidence without rewriting the confirmed cluster',async()=>{
+ const f=fixture();try{
+  const batch=await f.batch(f.refs.slice(0,2)),request=f.command(batch.id),saved=f.c.save(request),before=f.c.get(saved.id);
+  const id=f.b.get(batch.id).items[0].runId,run=JSON.parse(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(id).payload);
+  run.candidate.rawOutput='Damaged stored response';f.store.db.prepare('UPDATE semantic_runs SET payload=? WHERE id=?').run(JSON.stringify(run),id);
+  assert.equal(f.c.get(saved.id).health.current,false);assert.deepEqual(f.c.get(saved.id).history,before.history);
+  assert(f.c.preview(batch.id).groups.every(g=>!g.canSave));
+  assert.throws(()=>f.c.save({...request,requestId:randomUUID()}));
+  assert.equal(f.c.get(saved.id).version,before.version);assert.equal(f.store.db.prepare('SELECT count(*) n FROM event_cluster_members').get().n,2);
+ }finally{await f.close();}
+});
 test('clusters sharing active document identities cannot merge implicitly; explicit archival releases assignments',async()=>{
  const f=fixture();try{const a=await f.batch(f.refs.slice(0,2)),b=await f.batch(f.refs.slice(2)),ca=f.c.save(f.command(a.id)),cb=f.c.save(f.command(b.id)),all=await f.batch(f.refs),g=f.c.preview(all.id).groups[0];assert.equal(g.overlaps.length,2);assert.equal(g.canSave,false);assert.throws(()=>f.c.save(f.command(all.id,g)),/其他事件簇/);f.c.archive(cb.id,{version:1,note:'核对后撤销此独立归组，保留历史',requestId:randomUUID()});assert.equal(f.c.get(cb.id).history.length,2);const updated=f.c.save(f.command(all.id));assert.equal(updated.id,ca.id);assert.equal(f.c.get(ca.id).members.length,4);assert.equal(f.c.list({status:'active'}).total,1);assert.equal(f.c.list({status:'archived'}).total,1);}finally{await f.close();}
 });
