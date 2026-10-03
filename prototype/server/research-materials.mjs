@@ -11,7 +11,7 @@ export function materialInput(data,at){
  if(!['excerpt','user-supplied-text','extracted-text'].includes(data.scope))throw new Error('请选择材料阅读范围');
  let publishedAt=null;
  if(data.publishedAt){const s=data.publishedAt;if(typeof s!=='string'||!/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(s)||!Number.isFinite(Date.parse(s))||new Date(`${s.slice(0,10)}T00:00:00Z`).toISOString().slice(0,10)!==s.slice(0,10)||Date.parse(s)>Date.parse(at))throw new Error('来源日期无效或晚于获取时间');publishedAt=s;}
- const provenance=Object.hasOwn(data,'publicationDateEvidence')?{publicationDateEvidence:validatePublicationEvidence(data.publicationDateEvidence,publishedAt)}:{};
+ const provenance=Object.hasOwn(data,'publicationDateEvidence')?{publicationDateEvidence:validatePublicationEvidence(data.publicationDateEvidence,publishedAt,url)}:{};
  if(Object.keys(provenance).length&&data.scope!=='extracted-text')throw new Error('来源日期读取依据仅用于网页提取材料');
  return {title,sourceName,body,url,scope:data.scope,publishedAt,...provenance,datePrecision:!publishedAt?'unknown':publishedAt.length===10?'day':'instant'};
 }
