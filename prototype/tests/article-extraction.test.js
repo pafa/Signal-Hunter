@@ -46,5 +46,5 @@ test('scope changes append immutable material revisions and remain in frozen sem
  }finally{s.close();}
 });
 test('research and material-comparison prompts disclose unread scope without altering headline-only prompt',()=>{
- assert.ok(codexPrompt({}).includes(ARTICLE_SCOPE_INSTRUCTIONS));assert.equal(CODEX_PROMPT_VERSION,'codex-research-4');assert.ok(comparisonPrompt({schema:MATERIAL_SEMANTIC_VERSION,input:{}}).includes(ARTICLE_SCOPE_INSTRUCTIONS));assert.equal(comparisonPrompt({schema:SEMANTIC_VERSION,input:{}}).includes(ARTICLE_SCOPE_INSTRUCTIONS),false);
+ assert.ok(codexPrompt({}).includes(ARTICLE_SCOPE_INSTRUCTIONS));assert.equal(CODEX_PROMPT_VERSION,'codex-research-5');assert.ok(comparisonPrompt({schema:MATERIAL_SEMANTIC_VERSION,input:{}}).includes(ARTICLE_SCOPE_INSTRUCTIONS));assert.equal(comparisonPrompt({schema:SEMANTIC_VERSION,input:{}}).includes(ARTICLE_SCOPE_INSTRUCTIONS),false);
 });
