@@ -1,3 +1,4 @@
+import {processMarketAccounts} from './market-execution.mjs';
 import {openEvaluationReview} from './evaluation-review.mjs';
 import {strategyProfiles} from '../shared/strategy-profiles.mjs';
 import {openMarketSimulation} from './market-simulation.mjs';
@@ -123,6 +124,6 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   };
   const providerFetch=createProviderGate(store,{fetcher,now});
   const scopedFetcher=context=>(url,options={})=>providerFetch(url,{...options,signal:context?.signal?AbortSignal.any([context.signal,...(options.signal?[options.signal]:[])]):options.signal},context);
-  const scheduler=createPersistentScheduler(store.db,{observations:context=>{context.assertActive();return observations.process(research.list(),paper.snapshot());},news:context=>offline?{skipped:'offline'}:service.refreshNews(context),daily:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),3,w=>service.refreshDaily(w.symbol,!!context.input?.manual,context)),minutes:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),2,w=>service.refreshQuote(w.symbol,context)),...(backupTask?{backup:backupTask}:{})},{now,intervals:{observations:10000,news:newsCooldown,daily:60000,minutes:quoteCooldown,backup:3600000}});
+  const scheduler=createPersistentScheduler(store.db,{execution:context=>offline?{skipped:'offline'}:processMarketAccounts(marketSimulations,context),observations:context=>{context.assertActive();return observations.process(research.list(),paper.snapshot());},news:context=>offline?{skipped:'offline'}:service.refreshNews(context),daily:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),3,w=>service.refreshDaily(w.symbol,!!context.input?.manual,context)),minutes:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),2,w=>service.refreshQuote(w.symbol,context)),...(backupTask?{backup:backupTask}:{})},{now,initiallyPaused:['execution'],intervals:{execution:10000,observations:10000,news:newsCooldown,daily:60000,minutes:quoteCooldown,backup:3600000}});
   return service;
 }
