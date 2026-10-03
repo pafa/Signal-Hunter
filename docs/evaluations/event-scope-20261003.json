@@ -1,0 +1,174 @@
+{
+  "schema": "scoped-event-development-diagnostic-1",
+  "date": "2026-10-03",
+  "baseline": "f400d3d4dd060af7ffb7d1b4db929b2afad81b02",
+  "planHash": "ee0f8db93bfd3fb68d710519d43ba6f8a8b2c0a00fba50794e839d8d7e0936f7",
+  "codeHash": "353507089fdaeb85bc95d68d37dcae155249daa69f1659b371f0c8fc560a9da2",
+  "model": "gpt-6-astra",
+  "effort": "high",
+  "cases": [
+    {
+      "case": "same-policy-cross-source",
+      "inputHash": "e138b0f26f47156821d2ddd4bbf349fc94495021c54752d18c4e59ab7a8832ce",
+      "expected": [
+        "followup",
+        "repeat"
+      ],
+      "relation": "followup",
+      "status": "candidate",
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "event-pair-scoped-1/event-time-evidence-2/article-reading-scope-1",
+        "promptHash": "09201589ae20dbf3b9012ef308d58b791f354420f13790e92fb0d5894861d496",
+        "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+        "inputHash": "e138b0f26f47156821d2ddd4bbf349fc94495021c54752d18c4e59ab7a8832ce",
+        "startedAt": "2026-10-03T00:07:17.238Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 27689,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 854,
+          "reasoning_output_tokens": 85
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "c59ab43f1397c3af97f606031daa9da2715a9dccaa3b789badc91ebb7917b21d",
+        "finishedAt": "2026-10-03T00:08:03.627Z",
+        "toolCallsObserved": 0
+      },
+      "plannedPromptMatches": true,
+      "sourceUrls": [
+        "https://www.csrc.gov.cn/csrc/c100028/c7508366/content.shtml",
+        "https://www.szse.cn/aboutus/trends/news/t20240925_609603.html"
+      ]
+    },
+    {
+      "case": "different-policy-cross-source",
+      "inputHash": "52399d9b56f73904b1f5a09b89df3be2c80bf592b350b421d93075422d8ae390",
+      "expected": [
+        "related",
+        "unrelated"
+      ],
+      "relation": "unrelated",
+      "status": "candidate",
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "event-pair-scoped-1/event-time-evidence-2/article-reading-scope-1",
+        "promptHash": "f1fa05956db178a287121bbc2fef282434c1fbe87c6a48112233e2cc5370de75",
+        "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+        "inputHash": "52399d9b56f73904b1f5a09b89df3be2c80bf592b350b421d93075422d8ae390",
+        "startedAt": "2026-10-03T00:08:03.644Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 27700,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 842,
+          "reasoning_output_tokens": 88
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "dd66e403e8e86a4ceb7f97db5c11422f9f4eba1f0ea49112936af986c1549947",
+        "finishedAt": "2026-10-03T00:08:48.731Z",
+        "toolCallsObserved": 0
+      },
+      "plannedPromptMatches": true,
+      "sourceUrls": [
+        "https://www.csrc.gov.cn/csrc/c100028/c7508366/content.shtml",
+        "https://www.szse.cn/aboutus/trends/news/t20240925_609603.html"
+      ]
+    },
+    {
+      "case": "same-article-different-instruments",
+      "inputHash": "6646ba397e97bbf2c43df424d72c2b6f22b9461076df5838604b44655afc6bc2",
+      "expected": [
+        "related",
+        "unrelated"
+      ],
+      "relation": "related",
+      "status": "candidate",
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "event-pair-scoped-1/event-time-evidence-2/article-reading-scope-1",
+        "promptHash": "9e0b775a25f71609042687064fc564bca36e7e33b1657e231475836a2a1337d6",
+        "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+        "inputHash": "6646ba397e97bbf2c43df424d72c2b6f22b9461076df5838604b44655afc6bc2",
+        "startedAt": "2026-10-03T00:08:48.755Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 39653,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 910,
+          "reasoning_output_tokens": 47
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "dc857e17ca962ff58fcffdeb3caabe1f8a2ce16c3eff19658e839f20e5550f55",
+        "finishedAt": "2026-10-03T00:09:37.769Z",
+        "toolCallsObserved": 0
+      },
+      "plannedPromptMatches": true,
+      "sourceUrls": [
+        "https://www.szse.cn/aboutus/trends/news/t20240925_609603.html"
+      ]
+    }
+  ],
+  "priorRows": {
+    "research_materials": {
+      "priorRows": 21,
+      "allPreserved": true
+    },
+    "research_topics": {
+      "priorRows": 6,
+      "allPreserved": true
+    },
+    "research_versions": {
+      "priorRows": 27,
+      "allPreserved": true
+    },
+    "research_source_attempts": {
+      "priorRows": 21,
+      "allPreserved": true
+    },
+    "semantic_runs": {
+      "priorRows": 12,
+      "allPreserved": true
+    },
+    "semantic_decisions": {
+      "priorRows": 0,
+      "allPreserved": true
+    },
+    "material_event_runs": {
+      "priorRows": 4,
+      "allPreserved": true
+    },
+    "material_event_decisions": {
+      "priorRows": 0,
+      "allPreserved": true
+    },
+    "model_research_runs": {
+      "priorRows": 1,
+      "allPreserved": true
+    },
+    "paper_books": {
+      "priorRows": 1,
+      "allPreserved": true
+    },
+    "paper_versions": {
+      "priorRows": 1,
+      "allPreserved": true
+    }
+  },
+  "limits": [
+    "Three assistant-labeled development cases reused from previous material extraction diagnostics; not independent labels, holdout, forward evaluation or an accuracy estimate.",
+    "Four reviewed occurrence topics created only in an isolated database copy; actual comparison results remain unadopted, with no clusters or orders created.",
+    "Full source text, raw model output, exact prompts and code snapshots kept in private local evidence; this file includes metadata only.",
+    "Same-document occurrences share a source. All bodies and unread attachment metadata remain frozen; no new fetch or attachment reading.",
+    "Scope v1 is immutable and distinct from research version. Material revision or topic archival invalidates current use. Entity resolution, automatic news processing, and cluster replacement across re-extraction remain incomplete."
+  ]
+}

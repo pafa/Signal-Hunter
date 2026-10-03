@@ -1,0 +1,337 @@
+{
+  "schema": "material-event-diagnostic-1",
+  "baseCommit": "258b89f487c98c48489e2b9eec7c3e8d54de2472",
+  "currentVersion": "material-events-2",
+  "initialPlanHash": "543a116c4661c0b8aab63e0c4e92a815cfb48f02325801e9eb0bff243f01afff",
+  "correctivePlanHash": "f35ae06b44ba05053a7b65863f090eff014ca9deb95ea0062b961f837ef1ff10",
+  "initialCodeHash": "fc2816fb2b884072781a831661225d36635f155ee00bde51631b209a9f9cf1cd",
+  "correctiveCodeHash": "c5987e658f178adb8ff0f921a0166977c31ad1d4113d03eb99ed34fdbecfc16b",
+  "scope": "Three historical Chinese materials, three initial real Codex calls plus one targeted development correction; not independent or forward validation",
+  "sources": [
+    {
+      "id": "policy-clauses",
+      "url": "https://www.csrc.gov.cn/csrc/c100028/c7508366/content.shtml",
+      "materialId": "88ea4731741f1934558852fefac8f40bd5e54a463f9a85a57e380f56a8c9c0fb",
+      "revision": 2,
+      "chars": 1009,
+      "bodyHash": "b666314f65e61fd2995b6c1a18da8a6760a206c9fe3eefc87071b9dbf18a4b04",
+      "contentHash": "189211a1855729550de6e5f09f4be8ce413e72b8fec65cd2abef5a83d94e67b0",
+      "scope": "extracted-text",
+      "publishedAt": "2024-09-24",
+      "availableAt": "2026-10-02T22:39:12.109Z",
+      "provenance": "previously frozen actual fetch replay"
+    },
+    {
+      "id": "single-response",
+      "url": "https://www.csrc.gov.cn/csrc/c100028/c7462111/content.shtml",
+      "materialId": "6b6fa10129cd10d3141512433bdd23e1df3f477dcb55cbdbfb69166e5772e48b",
+      "revision": 3,
+      "chars": 320,
+      "bodyHash": "1478888ac637f05c3acb1f731253e057a472e914a37a4430c857419f57056be9",
+      "contentHash": "086793c81aa201dc68c099c8b23949323c0a10c0c34a95dd51b5c52a75dd39de",
+      "scope": "extracted-text",
+      "publishedAt": "2024-02-06",
+      "availableAt": "2026-10-02T22:39:12.107Z",
+      "provenance": "previously frozen actual fetch replay"
+    },
+    {
+      "id": "multi-policy",
+      "url": "https://www.szse.cn/aboutus/trends/news/t20240925_609603.html",
+      "materialId": "43e9ec03e1315a92f86ac44357548dad37d6b9f8f2a063298d06803f4df38b2d",
+      "revision": 1,
+      "chars": 18151,
+      "bodyHash": "0357aee372b20a7a767224afe0a1cfc0ac16b2482fde70563b3c8acfee02f039",
+      "contentHash": "53255d5ec7ca18cd86e559f79e9995584713cb67084b34574417d57dae9f8d74",
+      "scope": "extracted-text",
+      "publishedAt": null,
+      "availableAt": "2026-10-02T23:20:54.706Z",
+      "provenance": "new actual fetch"
+    }
+  ],
+  "runs": [
+    {
+      "case": "policy-clauses",
+      "runId": "9d00dc79-6939-4a05-942a-9367fe2e5cb5",
+      "status": "candidate",
+      "eventCount": 2,
+      "timeRoles": {
+        "unrecorded": 2
+      },
+      "missingEvidenceCount": 3,
+      "promptHashMatchesFrozenPlan": true,
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "material-events-1",
+        "promptHash": "ea1e4378e8a2e81ff1143a06cd1f87a42407e23e1576f76c92d2a250dc36631d",
+        "schemaHash": "fd16932b66c3da9dd5e8f4bb28e4ad82f616033846a3a5f12beb3c2cedbfb859",
+        "inputHash": "0947725f170239f19171dd18e0883eac1872bf7d3f74c423a5a02d43ed0fddd6",
+        "startedAt": "2026-10-02T23:20:54.725Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 12408,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 917,
+          "reasoning_output_tokens": 111
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "822ec45c6ac3a27d1fbb466ff4e789a334205f6d4c4a665b92f81ae31cbb9619",
+        "finishedAt": "2026-10-02T23:21:44.149Z",
+        "toolCallsObserved": 0
+      }
+    },
+    {
+      "case": "single-response",
+      "runId": "89af9976-b523-4b02-9229-6ec70961e083",
+      "status": "candidate",
+      "eventCount": 2,
+      "timeRoles": {
+        "unrecorded": 2
+      },
+      "missingEvidenceCount": 2,
+      "promptHashMatchesFrozenPlan": true,
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "material-events-1",
+        "promptHash": "9976619b71918c2182d17363ef949540077b70570e513c7ec877ebd932c0c6b8",
+        "schemaHash": "fd16932b66c3da9dd5e8f4bb28e4ad82f616033846a3a5f12beb3c2cedbfb859",
+        "inputHash": "7ef516ad6ec00f6d322451d98754ed0c1593cae61e3550b889fb8cf7f6c405f7",
+        "startedAt": "2026-10-02T23:21:44.155Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 11689,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 998,
+          "reasoning_output_tokens": 169
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "aa3ab5d51a170b0f83150203994698071fe0399583bc71a547628357a64a77fc",
+        "finishedAt": "2026-10-02T23:22:36.584Z",
+        "toolCallsObserved": 0
+      }
+    },
+    {
+      "case": "multi-policy",
+      "runId": "7c822208-3e3f-45df-9eea-7dab567fc56f",
+      "status": "candidate",
+      "eventCount": 12,
+      "timeRoles": {
+        "unrecorded": 12
+      },
+      "missingEvidenceCount": 10,
+      "promptHashMatchesFrozenPlan": true,
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "material-events-1",
+        "promptHash": "fa15791d2a39aeebf2c61a007d7cce14b7b90226450b6e1401c593454b99b399",
+        "schemaHash": "fd16932b66c3da9dd5e8f4bb28e4ad82f616033846a3a5f12beb3c2cedbfb859",
+        "inputHash": "57a3ba21f846fd257366c13f02be6339e272f883e6d7cb26120cf3f5284a4edb",
+        "startedAt": "2026-10-02T23:22:36.592Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 24151,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 5345,
+          "reasoning_output_tokens": 1034
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "53f4ab7b14ecb0915a6f561777d72f28b7c92f10e4b6958295e9f0116fda6c91",
+        "finishedAt": "2026-10-02T23:26:21.292Z",
+        "toolCallsObserved": 0
+      }
+    },
+    {
+      "case": "multi-policy-v2",
+      "runId": "4d8817d2-892f-4df0-b79e-338524bec67f",
+      "status": "candidate",
+      "eventCount": 12,
+      "timeRoles": {
+        "deadline": 1,
+        "event": 7,
+        "unknown": 4
+      },
+      "missingEvidenceCount": 11,
+      "promptHashMatchesFrozenPlan": true,
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "material-events-2",
+        "promptHash": "e34102ec69b3073a30afdf527ec85812745437bc5c9234594e44cfbc14ac2d79",
+        "schemaHash": "69bc96957ea90f65663559b9d2f69de7be2db8554aca7d6b9be21cd74c20ef4e",
+        "inputHash": "57a3ba21f846fd257366c13f02be6339e272f883e6d7cb26120cf3f5284a4edb",
+        "startedAt": "2026-10-02T23:30:42.285Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 24322,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 5824,
+          "reasoning_output_tokens": 1034
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "108399043bedba77664e3bfe71f1acb7e57002c4274b32519051460588b1e167",
+        "finishedAt": "2026-10-02T23:34:43.709Z",
+        "toolCallsObserved": 0
+      }
+    }
+  ],
+  "findings": [
+    "Policy clauses remain grouped with a separate companion consultation candidate; source attachment remains unread",
+    "One response article yields an underlying announcement and regulator response as distinct candidates",
+    "Long transcript reaches 12-item cap and explicitly lists omitted matters; completeness is not established",
+    "Initial output put a policy expiry into a generic event-time field. Version 2 adds time-purpose roles and the targeted run labels that expiry as deadline",
+    "Grouping granularity differs between the two transcript runs; no stable ground truth or quality rate is claimed"
+  ],
+  "preserved": {
+    "research_materials": {
+      "preserved": 20,
+      "sha256": "352dcdd8e0b3994eb5ab81875f4e09b8a0757870b038fca833c27b2ef0ad5f27"
+    },
+    "research_topics": {
+      "preserved": 3,
+      "sha256": "d0ebef7a74f82308e918a1f5d11b867e24f2df05ba0d2138135376d0fc6600e7"
+    },
+    "research_versions": {
+      "preserved": 21,
+      "sha256": "813b7c2d833e2e8f16a8cb14b5c31be9fbb07ff2fc69ceb7cc9c45f3099b8727"
+    },
+    "research_source_attempts": {
+      "preserved": 18,
+      "sha256": "b1101d3796cc7c3017369e08b97921a05ce568eca60818cdc64e6bae66eb9e82"
+    },
+    "semantic_runs": {
+      "preserved": 12,
+      "sha256": "208b0cf9054399e04d9815edb8e305630709101daa2449737c24575b7503510e"
+    },
+    "semantic_decisions": {
+      "preserved": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "model_research_runs": {
+      "preserved": 1,
+      "sha256": "a2435453b2c89d5fb810b01920735c4d6ae46c24181d3fcc38486ae1bae1ad5c"
+    },
+    "paper_books": {
+      "preserved": 1,
+      "sha256": "48dc8a9128c9b4e0b69fd71105afc03c7b0b5d48778458d22e0399368d223f7b"
+    },
+    "paper_versions": {
+      "preserved": 1,
+      "sha256": "51359cd70fea69e5deeb192556ccf20e6652e7811293b36fb96fd8683fde3510"
+    }
+  },
+  "restart": {
+    "research_materials": {
+      "rows": 22,
+      "sha256": "4ab9830f4adeaf1494f2e5e2f12600035ec261717d9058e38619e83207e8bc01"
+    },
+    "research_topics": {
+      "rows": 8,
+      "sha256": "9f01f900e0221c392e9cca51b66c1f893eb8685432467714ab66fac9f540990e"
+    },
+    "research_versions": {
+      "rows": 30,
+      "sha256": "dd473ebbf1f5f8f4ad4cda04908f970bfb571bd54d3542c7b08e9abe5a56f5d8"
+    },
+    "research_source_attempts": {
+      "rows": 22,
+      "sha256": "674df7e7998c7ee14ac98b7fbe09c0cbde088fcc0a5b9fe70f7f6d6735afaef2"
+    },
+    "semantic_runs": {
+      "rows": 12,
+      "sha256": "ab65868fcccc98fef063f75d583abec3d6afa14d07020210bd7d4ab1c60fedf0"
+    },
+    "semantic_decisions": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "model_research_runs": {
+      "rows": 1,
+      "sha256": "2f9c17d93a621ee90b5c3a69894f2a9b2a8546ff6aefe816153a5b751aeab819"
+    },
+    "material_event_runs": {
+      "rows": 5,
+      "sha256": "7eb935d3c7bcfdd343a01f4b3827e58b60beed9dcaec06d09550a33b0b17091d"
+    },
+    "material_event_decisions": {
+      "rows": 3,
+      "sha256": "d095617b2ae6670719ad98a487ee85c8288de534714bcbe1e4188662465c0ca3"
+    },
+    "paper_books": {
+      "rows": 1,
+      "sha256": "5bbb2c86e32e764d446b68392a6542602766c27b56fd880e8e934e4ec36bd2f2"
+    },
+    "paper_versions": {
+      "rows": 1,
+      "sha256": "51359cd70fea69e5deeb192556ccf20e6652e7811293b36fb96fd8683fde3510"
+    }
+  },
+  "checks": {
+    "tests": 549,
+    "targetedTests": 14,
+    "build": true,
+    "existingLargeBundleWarning": true,
+    "releaseFiles": 306,
+    "browserPlugin": "unavailable",
+    "browserFallback": "pinned Playwright CLI 0.1.22",
+    "desktop": [
+      1440,
+      1000
+    ],
+    "narrow": [
+      390,
+      844
+    ],
+    "dialogWidthPairs": [
+      [
+        778,
+        778
+      ],
+      [
+        376,
+        376
+      ]
+    ],
+    "browserErrors": 0,
+    "browserWarnings": 0,
+    "syntheticUIModelCalls": 1,
+    "realModelCalls": 4,
+    "uiFlow": [
+      "select material",
+      "generate synthetic candidates",
+      "reject second",
+      "reopen second",
+      "create first research",
+      "open child provenance",
+      "view real deadline role",
+      "select legacy output"
+    ],
+    "originalWeekTopics": 8
+  },
+  "limits": [
+    "Each real call observed zero tools and one runtime warning",
+    "Final time-role schema was tested on the long transcript; the two shorter real outputs retain the earlier schema",
+    "Omitted items and varying grouping require manual review; no cross-run semantic deduplication or automatic company identity",
+    "Initial JSX delimiter error was fixed before browser QA; initial preservation script rowid alias failed, then all nine original business tables were checked read-only without rerunning the models",
+    "An exact-label browser selector timed out before a model request; the observed combobox role selector completed the interaction",
+    "Initial frozen code differs from final runtime in the added time-role schema and owned error labels; corrected run uses a separately frozen unchanged runtime snapshot",
+    "Only isolated fixture topics were created in browser QA. Original service, data, daemon and trading configuration remain unchanged"
+  ],
+  "finalCodeAudit": {
+    "codeHash": "8ccd2c198a8cb6e570e385ad014a06c9a21ef832245ba31808b6870b392a8837",
+    "changedSinceModelRun": [
+      "prototype/server/material-event-runs.mjs"
+    ],
+    "promptAndSchemaUnchanged": true,
+    "reason": "Final idempotency normalization accepts reordered JSON keys; semantic inputs and model prompt/parser unchanged"
+  }
+}

@@ -1,0 +1,3 @@
+export const marketOrderStates={pending:'待本人审批',approved:'已批准，待成交',partial:'部分成交',filled:'全部成交',rejected:'本人拒绝',cancelled:'已撤销',expired:'已过期',invalidated:'版本失效'};
+export const marketConfigFields={issuerCapPct:'发行人仓位上限 %',themeCapPct:'主题仓位上限 %',cashFloorPct:'现金底线 %',feeBps:'综合费用 bp',slippageBps:'不利滑点 bp',maxHoldDays:'持有复核最长天数',maxOrderMinutes:'最长订单有效分钟',quoteMaxAgeSeconds:'行情最大允许延迟秒'};
+export const marketErrors=['市场模拟尚未配置','市场模拟已经初始化','市场模拟版本已变化，请刷新后重试','市场模拟参数无效，请填写全部风险与费用参数','市场模拟请求标识无效或已用于其他内容','市场模拟申请参数无效','市场模拟研究版本已变化或证券未关联','市场模拟订单不存在','此市场模拟订单不支持该操作','市场模拟审批依据已变化，请重新核对','市场模拟风险检查未通过，请查看具体原因','市场模拟仅接受明确的模拟确认','市场模拟金额超过精度或范围限制','当前模式不启用市场模拟','市场模拟执行数据必须由服务端适配器提供','恢复副本需先完成核对确认'];

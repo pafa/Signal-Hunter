@@ -2,8 +2,15 @@ import {existsSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {readInstanceProfile,verifyInstanceDatabase,instanceIdentity} from './instance-profile.mjs';
 
 export function runtimeConfig(env=process.env) {
+ if(env.SIGNAL_INSTANCE_PROFILE){
+  const profile=readInstanceProfile(env.SIGNAL_INSTANCE_PROFILE);
+  const expected={SIGNAL_MODE:profile.mode,SIGNAL_DB_PATH:profile.database,SIGNAL_API_PORT:String(profile.apiPort),SIGNAL_FRONTEND_PORT:String(profile.frontendPort),SIGNAL_SERVE_STATIC:'1'};
+  for(const [key,value] of Object.entries(expected))if(env[key]!==undefined&&env[key]!==value)throw new Error(`固定实例与 ${key} 冲突，拒绝覆盖配置`);
+  return {mode:profile.mode,apiPort:profile.apiPort,frontendPort:profile.frontendPort,production:true,dbPath:profile.database,profile,instance:instanceIdentity(profile.database,profile.mode,profile)};
+ }
  const mode=env.SIGNAL_MODE||'legacy';
  if(!['legacy','demo','research'].includes(mode))throw new Error('SIGNAL_MODE 只能为 demo、research 或 legacy');
  const port=(name,fallback)=>{const n=Number(env[name]||fallback);if(!Number.isInteger(n)||n<1024||n>65535)throw new Error(`${name} 必须为 1024–65535 的端口`);return n;};
@@ -11,7 +18,8 @@ export function runtimeConfig(env=process.env) {
  if(apiPort===frontendPort)throw new Error('网页与 API 必须使用不同端口');
  const filename={legacy:'workbench.sqlite',demo:'demo.sqlite',research:'research.sqlite'}[mode];
  const production=env.SIGNAL_SERVE_STATIC==='1';
- return {mode,apiPort,frontendPort,production,dbPath:resolve(env.SIGNAL_DB_PATH||fileURLToPath(new URL(`../../data/runtime/${filename}`,import.meta.url)))};
+ const dbPath=resolve(env.SIGNAL_DB_PATH||fileURLToPath(new URL(`../../data/runtime/${filename}`,import.meta.url)));
+ return {mode,apiPort,frontendPort,production,dbPath,instance:instanceIdentity(dbPath,mode)};
 }
 
 export function assertDatabaseMode(store,mode,{persist=true}={}) {
@@ -25,7 +33,8 @@ export function assertDatabaseMode(store,mode,{persist=true}={}) {
 }
 
 // Validate before openStore performs schema initialization. A mistaken path must not migrate a private DB.
-export function checkDatabaseFile({dbPath,mode}) {
+export function checkDatabaseFile({dbPath,mode,profile}) {
+ if(profile){verifyInstanceDatabase(profile);return;}
  if(!existsSync(dbPath))return;
  const db=new DatabaseSync(dbPath,{readOnly:true});
  try{
