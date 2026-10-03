@@ -15,6 +15,9 @@ if(args.find(x=>!x.startsWith('--')))env.SIGNAL_MODE=args.find(x=>!x.startsWith(
 if(args.includes('--production'))env.SIGNAL_SERVE_STATIC='1';
 if(!env.SIGNAL_INSTANCE_PROFILE){env.SIGNAL_MODE||='demo';env.SIGNAL_SERVE_STATIC||='0';}
 const config=runtimeConfig(env),{mode,production}=config;
+// Resolve relative input in the caller's directory once. Children run from the
+// application directory and must open the same database that was checked here.
+env.SIGNAL_DB_PATH=config.dbPath;
 const cwd=fileURLToPath(new URL('../',import.meta.url));
 checkDatabaseFile(config);
 if(production&&!existsSync(cwd+'dist/index.html'))throw new Error('生产文件不存在，请先运行 npm run build');
