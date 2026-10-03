@@ -50,15 +50,16 @@ export function minuteUrl(secid) {
 export function parseMinutes(payload, spec) {
   const data=payload?.data;
   if (!data || String(data.code).toUpperCase()!==spec.code) throw new Error('行情未返回匹配的股票');
-  const points=[];
+  const points=[],minuteQuality={version:'minute-quality/1',invalidRows:0,duplicateTimes:[],roundedTimes:[]},seen=new Set();
   for (const row of data.trends||[]) {
     const [time,,close]=String(row).split(',');const price=Number(close);
-    if (!validProviderMinute(time) || !Number.isFinite(price) || price<=0) continue;
+    if (!validProviderMinute(time) || !Number.isFinite(price) || price<=0){minuteQuality.invalidRows++;continue;}
+    if(seen.has(time))minuteQuality.duplicateTimes.push(time);seen.add(time);
     points.push({time,close:price});
   }
   if (!points.length) throw new Error('行情没有有效分钟数据');
   const unique=[...new Map(points.map(point=>[point.time,point])).values()].sort((a,b)=>a.time.localeCompare(b.time));
-  return {symbol:spec.symbol,name:String(data.name||spec.code),market:spec.market,currency:spec.currency,marketTimezone:spec.marketTimezone,providerTimezone:spec.providerTimezone,provider:'eastmoney-public',interval:'1m',deliveryDelay:'unverified',adjustment:'none',lastBarMayBeIncomplete:true,points:unique,providerTime:unique.at(-1).time,last:unique.at(-1).close};
+  return {symbol:spec.symbol,name:String(data.name||spec.code),market:spec.market,currency:spec.currency,marketTimezone:spec.marketTimezone,providerTimezone:spec.providerTimezone,provider:'eastmoney-public',interval:'1m',deliveryDelay:'unverified',adjustment:'none',lastBarMayBeIncomplete:true,minuteQuality,points:unique,providerTime:unique.at(-1).time,last:unique.at(-1).close};
 }
 
 export async function fetchText(url, fetcher=fetch) {
@@ -85,11 +86,15 @@ export function parseYahooMinutes(payload,spec){
  const data=payload?.chart?.result?.[0],meta=data?.meta;
  if(!meta||meta.symbol?.toUpperCase()!==yahooSymbol(spec)||meta.currency!==spec.currency)throw new Error('备用行情证券或币种不匹配');
  if(meta.exchangeTimezoneName&&meta.exchangeTimezoneName!==spec.marketTimezone)throw new Error('备用行情交易所时区不匹配');
- const closes=data.indicators?.quote?.[0]?.close||[],points=[];
- for(const [i,t] of (data.timestamp||[]).entries())if(Number.isInteger(t)&&t>0&&t<=4102444800&&Number.isFinite(closes[i])&&closes[i]>0)points.push({time:new Date(t*1000).toISOString().slice(0,16).replace('T',' '),close:closes[i]});
+ const closes=data.indicators?.quote?.[0]?.close||[],points=[],minuteQuality={version:'minute-quality/1',invalidRows:0,duplicateTimes:[],roundedTimes:[]},seen=new Set();
+ if(closes.length!==(data.timestamp||[]).length)minuteQuality.invalidRows++;
+ for(const [i,t] of (data.timestamp||[]).entries()){
+  if(!Number.isInteger(t)||t<=0||t>4102444800||!Number.isFinite(closes[i])||closes[i]<=0){minuteQuality.invalidRows++;continue;}
+  const time=new Date(t*1000).toISOString().slice(0,16).replace('T',' ');if(t%60!==0)minuteQuality.roundedTimes.push(time);if(seen.has(time))minuteQuality.duplicateTimes.push(time);seen.add(time);points.push({time,close:closes[i]});
+ }
  const unique=[...new Map(points.map(p=>[p.time,p])).values()].sort((a,b)=>a.time.localeCompare(b.time));
  if(!unique.length)throw new Error('备用行情没有有效分钟数据');
- return {symbol:spec.symbol,name:meta.longName||meta.shortName||spec.code,market:spec.market,currency:spec.currency,marketTimezone:meta.exchangeTimezoneName||spec.marketTimezone,providerTimezone:'UTC',provider:'yahoo-public-chart',interval:'1m',deliveryDelay:'unverified',adjustment:'none',lastBarMayBeIncomplete:true,points:unique,providerTime:unique.at(-1).time,last:unique.at(-1).close};
+ return {symbol:spec.symbol,name:meta.longName||meta.shortName||spec.code,market:spec.market,currency:spec.currency,marketTimezone:meta.exchangeTimezoneName||spec.marketTimezone,providerTimezone:'UTC',provider:'yahoo-public-chart',interval:'1m',deliveryDelay:'unverified',adjustment:'none',lastBarMayBeIncomplete:true,minuteQuality,points:unique,providerTime:unique.at(-1).time,last:unique.at(-1).close};
 }
 export async function fetchMinutes(symbol,fetcher=fetch){
  try{return await fetchEastmoneyMinutes(symbol,fetcher);}catch(primaryError){
