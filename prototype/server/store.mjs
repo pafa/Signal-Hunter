@@ -27,12 +27,13 @@ export function openStore(path) {
     for(const key of ['newsDiscoveryEnabled','newsTrackingEnabled',...OFFICIAL_NEWS_SOURCES.map(s=>s.setting)])if(key in changes&&typeof changes[key]!=='boolean')throw new Error('订阅开关需要布尔值');
     db.exec('BEGIN IMMEDIATE');try{for(const [key,value] of Object.entries(changes))db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').run(key,typeof value==='string'?value.trim():String(value));db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}return getSettings();
   };
-  const mapNews=row=>({...JSON.parse(row.payload),firstSeen:row.first_seen,articleFirstSeen:row.first_seen,revisionFirstSeen:db.prepare('SELECT received_at FROM revisions WHERE news_id=? AND version=?').get(row.id,row.revision)?.received_at||null,lastSeen:row.last_seen,revision:row.revision,selected:!!row.selected,read:!!row.read,note:row.note});
-  const newsRows=()=>db.prepare('SELECT * FROM news ORDER BY last_seen DESC LIMIT 500').all().map(mapNews).sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt));
+  const selectNews='SELECT n.*,r.received_at AS revision_first_seen FROM news n LEFT JOIN revisions r ON r.news_id=n.id AND r.version=n.revision';
+  const mapNews=row=>({...JSON.parse(row.payload),firstSeen:row.first_seen,articleFirstSeen:row.first_seen,revisionFirstSeen:row.revision_first_seen||null,lastSeen:row.last_seen,revision:row.revision,selected:!!row.selected,read:!!row.read,note:row.note});
+  const newsRows=()=>db.prepare(selectNews+' ORDER BY n.last_seen DESC LIMIT 500').all().map(mapNews).sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt));
   return {
     db,getSettings,setSettings,
     news:newsRows,
-    newsById(id){const row=db.prepare('SELECT * FROM news WHERE id=?').get(id);return row?mapNews(row):null;},
+    newsById(id){const row=db.prepare(selectNews+' WHERE n.id=?').get(id);return row?mapNews(row):null;},
     revisionAvailableAt(id,revision){return db.prepare('SELECT received_at FROM revisions WHERE news_id=? AND version=?').get(id,revision)?.received_at||null;},
     ingest(items,receivedAt=new Date().toISOString(),onCommit=null) {
       let added=0,updated=0;db.exec('BEGIN IMMEDIATE');
