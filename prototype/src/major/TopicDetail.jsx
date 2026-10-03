@@ -1,3 +1,4 @@
+import useEditorDraft from './useEditorDraft';
 import DossierEditor from './DossierEditor';
 import RelatedResearch from './RelatedResearch';
 import SourceResearch from './SourceResearch';
@@ -11,16 +12,18 @@ import {Button} from './Primitives';
 import {request,time,stanceNames,verificationNames} from './api';
 
 function HypothesisEditor({topic,busy,mutate}){
- const [draft,setDraft]=useState(topic.hypothesis),[nextEvidence,setNextEvidence]=useState(topic.nextEvidence||''),[base,setBase]=useState(topic.version),[saved,setSaved]=useState(false);
+ const initial=()=>({hypothesis:topic.hypothesis,nextEvidence:topic.nextEvidence||''});
+ const editor=useEditorDraft(topic,'hypothesis',initial,v=>v&&typeof v.nextEvidence==='string'&&v.hypothesis&&['logic','trigger','invalidation','industryHorizon','holdingHorizon','action','reviewAt'].every(k=>typeof v.hypothesis[k]==='string'));
+ const {base,value,dirty,volatile}=editor.draft,{hypothesis:draft,nextEvidence}=value;const [saved,setSaved]=useState(false);
  const fields=[['logic','影响逻辑'],['trigger','交易触发条件'],['invalidation','反证与失效条件'],['industryHorizon','产业假设期限'],['holdingHorizon','单笔预期持有期']];
- const change=(key,value)=>{setDraft(v=>({...v,[key]:value}));setSaved(false);};
- return <form className="m-form m-hypothesis" onSubmit={async e=>{e.preventDefault();const result=await mutate(`/api/research/${topic.id}`,'PATCH',{version:base,hypothesis:draft,nextEvidence});if(result){setBase(result.research.topics.find(t=>t.id===topic.id).version);setSaved(true);}}}>
- <p className="m-note">研究动作是待评估意向。保存后进入研究队列，尚未提交交易申请。</p>
- {base!==topic.version&&<p className="m-warning">主题已有新版本。你的输入仍保留，请先查看版本记录，再重新打开此表单。</p>}
+ const change=(key,value)=>{editor.change(v=>({...v,hypothesis:{...v.hypothesis,[key]:value}}));setSaved(false);};
+ return <form className="m-form m-hypothesis" onSubmit={async e=>{e.preventDefault();if(busy||base!==topic.version)return;const submitted=editor.draft;const result=await mutate(`/api/research/${topic.id}`,'PATCH',{version:base,hypothesis:draft,nextEvidence});if(result){const t=result.research.topics.find(t=>t.id===topic.id);editor.ack(submitted,{hypothesis:t.hypothesis,nextEvidence:t.nextEvidence||''},t.version);setSaved(true);}}}>
+ <p className="m-note">研究动作是待评估意向，保存不提交交易。未保存输入保留在本浏览器标签页，切换页面或刷新后可恢复。</p>{volatile&&<p role="alert">会话存储不可用，草稿仅保留到页面关闭，请及时保存。</p>}<fieldset className="m-editor-fields" disabled={busy}>
+ {base!==topic.version&&<p className="m-warning">主题已有新版本。你的输入仍保留，请先查看版本记录；核对后可明确使用当前版本继续编辑，或丢弃草稿。</p>}
  {fields.map(([key,label])=><label key={key}>{label}<textarea value={draft[key]} maxLength={2000} onChange={e=>change(key,e.target.value)} rows={key==='logic'||key==='invalidation'?3:2}/></label>)}
- <label>下一步观察点<textarea required maxLength={2000} rows={2} value={nextEvidence} onChange={e=>{setNextEvidence(e.target.value);setSaved(false);}}/></label><div className="m-form-row"><label>拟研究动作<select value={draft.action} onChange={e=>change('action',e.target.value)}>{[['observe','继续观察'],['buy','研究买入'],['add','研究增仓'],['reduce','研究减仓'],['exit','研究清仓']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label><label>下次复核日期<input type="date" value={draft.reviewAt} onChange={e=>change('reviewAt',e.target.value)}/></label></div>
- <div className="m-form-actions"><span>{saved?'已保存新版本，未提交交易申请':`编辑基于 v${base}`}</span><Button primary type="submit" disabled={busy||base!==topic.version}>保存交易假设</Button></div>
- </form>;
+ <label>下一步观察点<textarea required maxLength={2000} rows={2} value={nextEvidence} onChange={e=>{editor.change(v=>({...v,nextEvidence:e.target.value}));setSaved(false);}}/></label><div className="m-form-row"><label>拟研究动作<select value={draft.action} onChange={e=>change('action',e.target.value)}>{[['observe','继续观察'],['buy','研究买入'],['add','研究增仓'],['reduce','研究减仓'],['exit','研究清仓']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label><label>下次复核日期<input type="date" value={draft.reviewAt} onChange={e=>change('reviewAt',e.target.value)}/></label></div>
+ <div className="m-form-actions"><span>{saved&&!dirty?'已保存新版本，未提交交易申请':`编辑基于 v${base}`}</span><Button primary type="submit" disabled={busy||base!==topic.version}>保存交易假设</Button>{dirty&&<Button type="button" onClick={()=>{editor.reset();setSaved(false);}}>丢弃假设草稿并载入最新版本</Button>}{base!==topic.version&&<Button type="button" onClick={()=>editor.change(v=>v,topic.version)}>已核对更新，保留假设草稿继续编辑</Button>}</div>
+ </fieldset></form>;
 }
 
 function History({topic}){

@@ -19,3 +19,5 @@
 @media(min-width:1151px){.m-radar-row>small{display:block;line-height:13px}}
 
 .m-rule-list details{margin-top:8px;font-size:12px}.m-rule-list summary{cursor:pointer;color:#71d6cc}.m-rule-list dl{font-size:12px;line-height:1.8}.m-rule-list dt{color:#71d6cc;margin-top:12px}.m-rule-list dd{margin:3px 0 0;color:#a6b7c9}
+
+.m-form>.m-editor-fields{min-inline-size:0;min-width:0;margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:13px}.m-editor-fields .m-form-actions{flex-wrap:wrap}.m-editor-fields fieldset{min-inline-size:0}
