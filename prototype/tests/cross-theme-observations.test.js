@@ -25,7 +25,7 @@ test('overlap joins distinct topics across pools without merging accounts or dou
  assert.equal(JSON.stringify(f.books),before);f.books[1].lots[0].topicId='a';assert.equal(overlaps(crossThemeCandidates(f.snapshots(),f.topics,f.clusters)).length,0);
 });
 test('approved and partially filled buys include only remaining quantity; pending, sell and cancelled orders excluded',()=>{
- const f=fixture();f.books[1].lots=[];const order={id:'order',topicId:'b',symbol:'AAPL.US',side:'buy',status:'partial',qty:10,filledQty:4,budgetCents:100000,spentCents:40000};f.books[1].orders=[order,{...order,id:'pending',status:'pending'},{...order,id:'sell',side:'sell'},{...order,id:'cancelled',status:'cancelled'}];
+ const f=fixture();f.books[1].lots=[];const order={id:'order',topicId:'b',symbol:'AAPL.US',side:'buy',status:'partial',approval:{evidence:{quotes:{'AAPL.US':structuredClone(f.quote)}}},qty:10,filledQty:4,budgetCents:100000,spentCents:40000};f.books[1].orders=[order,{...order,id:'pending',status:'pending'},{...order,id:'sell',side:'sell'},{...order,id:'cancelled',status:'cancelled'}];
  const hit=overlaps(crossThemeCandidates(f.snapshots(),f.topics))[0].hit;assert.equal(hit.input.metrics.valueCents,70000);assert.equal(hit.input.metrics.buyOrderCount,1);assert.equal(hit.input.entries[1].qty,6);
 });
 test('stale issuer input does not change a filled issuer, and unknown valuations are never zero',()=>{
@@ -49,7 +49,16 @@ test('failed insertion rolls back all cross-theme episode consumption and retry 
  }finally{s.close();}
 });
 test('losing the quote identity of a working buy cannot retire or rearm its previous overlap episode',()=>{
- const f=fixture();f.books[1].lots=[];f.books[1].orders=[{id:'pending-fill',topicId:'b',symbol:'AAPL.US',side:'buy',status:'approved',qty:1,filledQty:0,budgetCents:11000,spentCents:0}];
+ const f=fixture();f.books[1].lots=[];f.books[1].orders=[{id:'pending-fill',topicId:'b',symbol:'AAPL.US',side:'buy',status:'approved',approval:{evidence:{quotes:{'AAPL.US':structuredClone(f.quote)}}},qty:1,filledQty:0,budgetCents:11000,spentCents:0}];
  const s=openStore(':memory:'),inbox=openObservationInbox(s,{clock:()=>at,getMarketSnapshots:f.snapshots});const run=()=>inbox.process(f.topics,{positions:[]});
  try{run();const item=inbox.snapshot().items.find(i=>i.kind==='cross-theme-review');assert(item);f.missing(true);run();assert(inbox.snapshot().marketChecks.some(c=>c.accountId==='cross-theme'&&c.active&&c.status==='unknown'));f.missing(false);run();assert.equal(inbox.snapshot().items.filter(i=>i.kind==='cross-theme-review').length,1);assert.equal(inbox.snapshot().items.find(i=>i.id===item.id).input.episode,1);}finally{s.close();}
+});
+
+test('working buys retain approval issuer across a changed quote and do not report a false known overlap value',()=>{
+ const f=fixture();f.books[1].lots=[];const approval={evidence:{quotes:{'AAPL.US':structuredClone(f.quote)}}};
+ f.books[1].orders=[{id:'approved',topicId:'b',symbol:'AAPL.US',side:'buy',status:'approved',qty:1,filledQty:0,budgetCents:11000,spentCents:0,approval}];
+ f.quote.issuerId='changed';let hits=overlaps(crossThemeCandidates(f.snapshots(),f.topics,f.clusters));
+ const issuer=hits.find(c=>c.hit.input.groupKind==='issuer');assert.equal(issuer.hit.input.groupId,'synthetic-issuer');assert.equal(issuer.state,'unknown');assert.equal(issuer.hit.input.metrics.valueCents,null);
+ assert(hits.every(c=>c.hit.input.entries.every(e=>e.valueCents===null)));
+ delete f.books[1].orders[0].approval;hits=overlaps(crossThemeCandidates(f.snapshots(),f.topics,f.clusters));assert(!hits.some(c=>c.hit.input.groupKind==='issuer'));assert.equal(hits[0].hit.input.metrics.valueCents,null);
 });

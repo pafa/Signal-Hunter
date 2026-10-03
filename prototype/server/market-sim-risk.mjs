@@ -48,9 +48,15 @@ export function quoteIssues(symbol,q,config,at,{execution=false,allowLimitUp=fal
  return [...new Set(issues)];
 }
 export const working=o=>['approved','partial'].includes(o.status);
+// A quote may change price, but cannot silently replace the issuer frozen by a fill or approval.
+export function issuerIssues(symbol,issuerId,q){
+ return typeof issuerId!=='string'||!issuerId.trim()||q?.issuerId!==issuerId?[`${symbol}：行情发行人与原持仓或批准依据不一致或缺失`]:[];
+}
+export function lotQuoteIssues(lot,q,config,at){return [...quoteIssues(lot.symbol,q,config,at),...issuerIssues(lot.symbol,lot.issuerId,q)];}
+const approvalIssuerIssues=(order,q)=>working(order)?issuerIssues(order.symbol,order.approval?.evidence?.quotes?.[order.symbol]?.issuerId,q):[];
 export function valuation(book,quotes,at){
  const missing=[],positions=book.lots.map(l=>{
-  const q=quotes[l.symbol],issues=quoteIssues(l.symbol,q,book.config,at);missing.push(...issues);
+  const q=quotes[l.symbol],issues=lotQuoteIssues(l,q,book.config,at);missing.push(...issues);
   let value=null;try{if(!issues.length)value=amount(l.qty,q.mark,q.fx.usdPerUnit);}catch{missing.push(`${l.symbol}：估值金额无效`);}
   return {...l,valueCents:value,unrealizedCents:value===null?null:value-l.costCents,overdue:Date.parse(l.holdUntil)<=Date.parse(at)};
  });
@@ -61,6 +67,8 @@ export function valuation(book,quotes,at){
 export function assessOrder(book,order,quotes,at){
  const reasons=[],q=quotes[order.symbol],v=valuation(book,quotes,at);
  reasons.push(...quoteIssues(order.symbol,q,book.config,at,{execution:true,allowLimitUp:order.side==='buy'&&book.profile?.entry==='cn-main-board-limit-up'}));
+ reasons.push(...approvalIssuerIssues(order,q));
+ if(order.side==='sell')for(const lot of book.lots.filter(l=>l.symbol===order.symbol&&l.topicId===order.topicId))reasons.push(...issuerIssues(lot.symbol,lot.issuerId,q));
  if(Date.parse(order.expiresAt)<=Date.parse(at))reasons.push('订单已过期');
  if(order.side==='buy'&&Date.parse(order.holdUntil)<=Date.parse(at))reasons.push('持有期限已到');
  if(reasons.length)return {eligible:false,reasons:[...new Set(reasons)],valuation:v};
@@ -79,7 +87,7 @@ export function assessOrder(book,order,quotes,at){
   const buys=[...outstanding.filter(o=>o.side==='buy'),order],projected=[...v.positions],costs=[];
   reasons.push(...v.missing);
   for(const o of buys){
-   const bq=quotes[o.symbol],issues=quoteIssues(o.symbol,bq,book.config,at);if(issues.length){reasons.push(...issues);continue;}
+   const bq=quotes[o.symbol],issues=[...quoteIssues(o.symbol,bq,book.config,at),...approvalIssuerIssues(o,bq)];if(issues.length){reasons.push(...issues);continue;}
    const remaining=o.qty-o.filledQty,gross=amount(remaining,o.limitPrice,bq.fx.usdPerUnit),charge=fee(gross,book.config.feeBps),cost=gross+charge;
    if(cost>o.budgetCents-o.spentCents)reasons.push(`${o.symbol}：限价与费用超过剩余USD预算`);
    costs.push(cost);projected.push({symbol:o.symbol,topicId:o.topicId,valueCents:amount(remaining,bq.mark,bq.fx.usdPerUnit)});

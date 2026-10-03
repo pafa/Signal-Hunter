@@ -2,7 +2,7 @@ import {withMarketObservationPeaks} from './market-observations.mjs';
 import {strategyRisk,entryIssues} from './strategy-risk.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {instrument} from '../shared/securities.mjs';
-import {amount,cents,decimal,fee,sum,validateConfig,quoteIssues,valuation,assessOrder,working,marketFail as fail,isInstant} from './market-sim-risk.mjs';
+import {amount,cents,decimal,fee,sum,validateConfig,lotQuoteIssues,valuation,assessOrder,working,marketFail as fail,isInstant} from './market-sim-risk.mjs';
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const text=(v,n=1200)=>typeof v==='string'&&!!v.trim()&&v.length<=n;
 const active=o=>o.status==='pending'||working(o);
@@ -110,7 +110,7 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
     b.unsettled=b.unsettled.filter(x=>Date.parse(x.at)>Date.parse(at));
     const risk=strategyRisk(withMarketObservationPeaks(db,b,accountId),market.quotes,at);
     if(risk.peakCents>b.highWaterCents){b.highWaterCents=risk.peakCents;changed=true;}
-    for(const lot of b.lots){const q=market.quotes[lot.symbol];if(!quoteIssues(lot.symbol,q,b.config,at).length&&decimal(q.mark)>decimal(lot.peakPrice||lot.entryPrice||q.mark)){lot.peakPrice=String(q.mark);changed=true;}}
+    for(const lot of b.lots){const q=market.quotes[lot.symbol];if(!lotQuoteIssues(lot,q,b.config,at).length&&decimal(q.mark)>decimal(lot.peakPrice||lot.entryPrice||q.mark)){lot.peakPrice=String(q.mark);changed=true;}}
     if(hash(risk.alerts)!==hash(b.riskObservations)){b.riskObservations=risk.alerts;updates.push({kind:'risk-observation',...risk});changed=true;}
     if(risk.alerts.some(a=>a.kind==='pool-stop')&&!b.riskPaused){b.riskPaused=true;changed=true;}
     for(const o of b.orders.filter(active)){

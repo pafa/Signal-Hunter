@@ -1,6 +1,6 @@
 import {hash} from './providers.mjs';
-import {amount,quoteIssues,working,sum} from './market-sim-risk.mjs';
-const ENGINE='cross-theme-review/1',accountId='cross-theme';
+import {amount,quoteIssues,issuerIssues,working,sum} from './market-sim-risk.mjs';
+const ENGINE='cross-theme-review/2',accountId='cross-theme';
 const digest=x=>hash(JSON.stringify(x));
 // Evidence overlap is a review condition, not a correlation estimate or a new trading limit.
 export function crossThemeCandidates(snapshots,topics,clustersForTopic=()=>[]){
@@ -12,12 +12,12 @@ export function crossThemeCandidates(snapshots,topics,clustersForTopic=()=>[]){
  for(const s of snapshots){
   if(!s.book)continue;const {book:b,quotes,at}=s;
   for(const x of [...b.lots.map(l=>({kind:'lot',record:l})),...b.orders.filter(o=>working(o)&&o.side==='buy'&&o.qty>o.filledQty).map(o=>({kind:'buy-order',record:o}))]){
-   const r=x.record,q=quotes[r.symbol],issues=quoteIssues(r.symbol,q,b.config,at),qty=x.kind==='lot'?r.qty:r.qty-r.filledQty;
+   const r=x.record,q=quotes[r.symbol],issuer=x.kind==='lot'?r.issuerId:r.approval?.evidence?.quotes?.[r.symbol]?.issuerId,issues=[...quoteIssues(r.symbol,q,b.config,at),...issuerIssues(r.symbol,issuer,q)],qty=x.kind==='lot'?r.qty:r.qty-r.filledQty;
    const topic=byTopic.get(r.topicId),entry={key:`${s.accountId}:${x.kind}:${r.id}`,accountId:s.accountId,kind:x.kind,id:r.id,topicId:r.topicId,topicVersion:topic?.version??null,topicTitle:topic?.title||'研究缺失',symbol:r.symbol,qty,record:structuredClone(r),quote:q?structuredClone(q):null,bookVersion:b.version,valueCents:null};
    if(!issues.length)try{entry.valueCents=amount(qty,q.mark,q.fx.usdPerUnit);}catch{issues.push('估值金额无效');}
    entry.valuationIssues=issues;entries.push(entry);
-   // Lots retain the issuer identity recorded at fill; a new quote cannot silently regroup them.
-   const issuer=x.kind==='lot'?r.issuerId:q?.issuerId,identityOK=typeof issuer==='string'&&!!issuer&&q?.issuerId===issuer&&!issues.length;
+   // Both fills and approvals retain their original issuer; changed quotes cannot regroup exposure.
+   const identityOK=typeof issuer==='string'&&!!issuer&&q?.issuerId===issuer&&!issues.length;
    if(typeof issuer==='string'&&issuer)add('issuer',issuer,entry,{issuerId:issuer,verified:identityOK},identityOK);
    if(!identityOK)missing.push(`${entry.key}：发行人或估值输入未核验`);
    if(!topic)missing.push(`${entry.key}：研究缺失`);

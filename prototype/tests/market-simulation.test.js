@@ -117,3 +117,57 @@ test('HTTP has no client-injected quote/fill path, and demo cannot initialize a 
   assert.equal(isInstant('2024-02-29T12:00:00.123+08:00'),true);
   const f=setup();try{assert.throws(()=>f.propose({budgetUSD:100.001}),/申请参数无效/);}finally{f.close();}
  });
+
+test('issuer changes after approval cannot execute an old approval or overwrite its frozen evidence',()=>{
+ const f=setup();try{
+  const order=f.propose();f.approve(order.id);const approval=JSON.stringify(f.sim.snapshot().orders[0].approval);
+  f.advance(1000,{issuerId:'different-issuer'});const b=f.sim.process();
+  assert.equal(b.fills.length,0);assert.equal(b.cashCents,10000000);assert.match(b.orders[0].waitReason,/发行人/);
+  assert.equal(JSON.stringify(b.orders[0].approval),approval);
+  f.advance();assert.equal(f.sim.process().fills.length,1);
+ }finally{f.close();}
+});
+test('held issuer identity survives quote changes; valuation and sale stay blocked until original identity returns',()=>{
+ const f=setup();try{
+  const buy=f.propose();f.approve(buy.id);f.advance();f.sim.process();const frozen=JSON.stringify(f.sim.snapshot().fills),peak=f.sim.snapshot().lots[0].peakPrice;
+  const sell=f.propose({side:'sell',limitPrice:'99'});f.approve(sell.id);
+  f.advance(1000,{issuerId:'different-issuer',mark:'200'});let b=f.sim.process();
+  assert.equal(b.navCents,null);assert.equal(b.positions[0].valueCents,null);assert.match(b.missing.join(';'),/发行人/);
+  assert.equal(JSON.stringify(b.fills),frozen);assert.equal(b.lots[0].issuerId,'AAPL.US');assert.equal(b.lots[0].peakPrice,peak);
+  assert.equal(f.sim.review(sell.id).eligible,false);
+  f.advance();b=f.sim.process();assert.equal(b.fills.length,2);assert.equal(b.lots.length,0);assert.notEqual(b.navCents,null);
+ }finally{f.close();}
+});
+
+ test('issuer mismatch blocks new buys against an existing holding without manufacturing valuation or risk peaks',()=>{
+  const f=setup();try{
+   const first=f.propose();f.approve(first.id);f.advance();f.sim.process();
+   const next=f.propose({qty:1,budgetUSD:102});f.advance(1000,{issuerId:'changed',mark:'200'});
+   const review=f.sim.review(next.id);assert.equal(review.eligible,false);assert.match(review.reasons.join(';'),/发行人/);
+   assert.equal(review.valuation.navCents,null);assert.equal(f.sim.snapshot().fills.length,1);
+  }finally{f.close();}
+ });
+ test('a mismatched outstanding buy cannot be reclassified to evade issuer caps on another pending order',()=>{
+  const f=setup();try{
+   let t=f.research.addCompany(f.topic.id,{version:f.topic.version,symbol:'MSFT.US',note:'Synthetic second issuer'});f.topic.version=t.version;
+   const first=f.propose();f.approve(first.id);f.advance(1000,{issuerId:'changed'});
+   f.market().quotes['MSFT.US']=quote('MSFT.US','2026-10-02T14:00:01.000Z');
+   const next=f.propose({symbol:'MSFT.US',qty:1,budgetUSD:102});const review=f.sim.review(next.id);
+   assert.equal(review.eligible,false);assert.match(review.reasons.join(';'),/AAPL.US.*发行人/);
+   assert.equal(f.sim.snapshot().fills.length,0);
+  }finally{f.close();}
+ });
+ test('persisted fills retain issuer identity across reopen and missing legacy identity stays unknown',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'signal-issuer-')),path=join(dir,'test.sqlite'),f=setup(path);let store;
+  try{
+   const first=f.propose();f.approve(first.id);f.advance();f.sim.process();const saved=f.sim.snapshot();f.close();
+   store=openStore(path);const q=quote('AAPL.US','2026-10-02T14:00:02.000Z',{issuerId:'changed'});
+   const sim=openMarketSimulation(store,null,{clock:()=>q.asOf,getInputs:()=>({quotes:{'AAPL.US':q}})});
+   assert.equal(sim.snapshot().navCents,null);assert.deepEqual(sim.snapshot().fills,saved.fills);
+   q.issuerId='AAPL.US';assert.notEqual(sim.snapshot().navCents,null);
+   const b=JSON.parse(store.db.prepare('SELECT payload FROM market_sim_book').get().payload);delete b.lots[0].issuerId;
+   store.db.prepare('UPDATE market_sim_book SET payload=?').run(JSON.stringify(b));
+   assert.equal(sim.snapshot().navCents,null);assert.match(sim.snapshot().missing.join(';'),/发行人/);
+   assert.deepEqual(sim.snapshot().fills,saved.fills);
+  }finally{if(store)store.close();else f.close();rmSync(dir,{recursive:true,force:true});}
+ });
