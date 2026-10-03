@@ -60,6 +60,50 @@ test('candidate persistence rejects invalid adapter output and trace mismatches'
   const f=setup(async packet=>{const r=result(packet);mutate(r);return r;});try{const started=f.runs.start(f.topic.id,{version:1});assert.equal((await f.runs.wait(started.id)).failure.code,'output');assert.equal(f.research.get(f.topic.id).version,1);}finally{await f.close();}
  }
 });
+test('adoption rejects stored output or provenance mismatches without changing research, paper or the saved run',async()=>{
+ for(const mutate of [
+  r=>r.candidate.sections[0].paragraphs[0]='Stored text no longer matches the model response',
+  r=>r.candidate.missingEvidence=['Changed after generation'],
+  r=>r.candidate.rawOutput='invalid stored JSON',
+  r=>r.candidate.trace.outputHash='wrong',
+  r=>r.candidate.trace.model='different-model',
+  r=>r.candidate.reviewStatus='complete',
+  r=>r.packet.input.topicVersion=2,
+ ]){
+  const f=setup();try{
+   const started=f.runs.start(f.topic.id,{version:1});await f.runs.wait(started.id);
+   const row=f.store.db.prepare('SELECT payload FROM model_research_runs WHERE id=?').get(started.id),run=JSON.parse(row.payload);mutate(run);
+   const payload=JSON.stringify(run);f.store.db.prepare('UPDATE model_research_runs SET payload=? WHERE id=?').run(payload,started.id);
+   const topic=f.research.get(f.topic.id),history=f.research.history(f.topic.id),book=f.paper.snapshot();
+   assert.throws(()=>f.runs.adopt(f.topic.id,started.id,{version:1}),CodexResearchError);
+   assert.deepEqual(f.research.get(f.topic.id),topic);assert.deepEqual(f.research.history(f.topic.id),history);assert.deepEqual(f.paper.snapshot(),book);
+   assert.equal(f.store.db.prepare('SELECT payload FROM model_research_runs WHERE id=?').get(started.id).payload,payload,'failed validation must preserve the stored record for diagnosis');
+  }finally{await f.close();}
+ }
+});
+test('adoption rechecks the exact candidate inside the research transaction',async()=>{
+ const f=setup();try{
+  const started=f.runs.start(f.topic.id,{version:1});await f.runs.wait(started.id);
+  const original=f.research.adoptModelDraft.bind(f.research),topic=f.research.get(f.topic.id),history=f.research.history(f.topic.id);
+  f.research.adoptModelDraft=(...args)=>{
+   const run=f.runs.get(f.topic.id,started.id);run.candidate.sections[0].paragraphs[0]='Replaced between preview and transaction';
+   f.store.db.prepare('UPDATE model_research_runs SET payload=? WHERE id=?').run(JSON.stringify(run),started.id);
+   return original(...args);
+  };
+  assert.throws(()=>f.runs.adopt(f.topic.id,started.id,{version:1}),CodexResearchError);
+  assert.deepEqual(f.research.get(f.topic.id),topic);assert.deepEqual(f.research.history(f.topic.id),history);
+  assert.equal(f.runs.get(f.topic.id,started.id).status,'candidate');
+ }finally{await f.close();}
+});
+test('an intact stored candidate remains adoptable after the configured model changes',async()=>{
+ const f=setup();let reopened;try{
+  const started=f.runs.start(f.topic.id,{version:1});await f.runs.wait(started.id);
+  reopened=openModelResearchRuns(f.store,f.research,{enabled:true,config:{...config,model:'new-model'}});
+  const topic=reopened.adopt(f.topic.id,started.id,{version:1});
+  assert.equal(topic.dossier.reviewStatus,'draft');assert.equal(topic.dossier.sourceModelRun.model,config.model);
+  assert.equal(reopened.get(f.topic.id,started.id).acceptedVersion,2);
+ }finally{if(reopened)await reopened.close();await f.close();}
+});
 test('HTTP exposes read-only status, async generation and explicit adoption; demo blocks model use even with configuration',async()=>{
  for(const mode of ['demo','research']){
   const store=openStore(':memory:'),service=createService(store,{mode,modelConfig:config,modelRunner:async packet=>result(packet)}),handler=createHandler(store,service);

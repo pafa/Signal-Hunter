@@ -2,6 +2,14 @@ import {initializeModelLease,claimModelLease,releaseModelLease} from './model-le
 import {randomUUID} from 'node:crypto';
 import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest} from './codex-research.mjs';
 
+function validateCandidate(result,packet,{model,topicId}){
+ validatePacket(packet);
+ validateCodexDraft({sections:result?.sections,missingEvidence:result?.missingEvidence},packet);
+ if(result.status!=='candidate'||result.reviewStatus!=='unreviewed'||packet.input.topicId!==topicId||result.trace?.inputHash!==packet.inputHash||result.trace?.model!==model||result.trace?.topicVersion!==packet.input.topicVersion||result.trace?.topicId!==topicId||typeof result.rawOutput!=='string'||digest(result.rawOutput)!==result.trace.outputHash)throw new CodexResearchError('output');
+ let raw;try{raw=validateCodexDraft(JSON.parse(result.rawOutput),packet);}catch{throw new CodexResearchError('output');}
+ if(digest(raw)!==digest({sections:result.sections,missingEvidence:result.missingEvidence}))throw new CodexResearchError('output');
+}
+
 export function openModelResearchRuns(store,research,{enabled=false,config={},runner=generateCodexDraft,now=()=>Date.now()}={}){
  const db=store.db,jobs=new Map();let closed=false;initializeModelLease(db);
  db.exec(`CREATE TABLE IF NOT EXISTS model_research_runs(id TEXT PRIMARY KEY,topic_id TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,expires_at INTEGER NOT NULL,payload TEXT NOT NULL);
@@ -37,10 +45,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(result=>{
     if(controller.signal.aborted)throw new CodexResearchError('cancelled');
     // Independently revalidate injected/provider output before persisting it as a candidate.
-    validateCodexDraft({sections:result.sections,missingEvidence:result.missingEvidence},packet);
-    if(result.status!=='candidate'||result.reviewStatus!=='unreviewed'||result.trace?.inputHash!==packet.inputHash||result.trace?.model!==config.model||result.trace?.topicVersion!==packet.input.topicVersion||result.trace?.topicId!==topicId||typeof result.rawOutput!=='string'||digest(result.rawOutput)!==result.trace.outputHash)throw new CodexResearchError('output');
-    let raw;try{raw=validateCodexDraft(JSON.parse(result.rawOutput),packet);}catch{throw new CodexResearchError('output');}
-    if(digest(raw)!==digest({sections:result.sections,missingEvidence:result.missingEvidence}))throw new CodexResearchError('output');
+    validateCandidate(result,packet,{model:run.model,topicId});
     write({...run,status:'candidate',finishedAt:new Date(now()).toISOString(),candidate:result});
    }).catch(error=>{
     const failure=error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型调用失败；原研究保留，可检查配置后重试'};
@@ -55,9 +60,13 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
   cancel(topicId,id){api.get(topicId,id);const job=jobs.get(id);if(!job)throw new Error('此调用不在本实例运行；已结束或等待中断恢复');job.controller.abort();return {id,status:'cancelling'};},
   adopt(topicId,id,{version}={}){
    const run=api.get(topicId,id);if(run.status!=='candidate')throw new Error('此模型结果不可采纳或已经处理');
+   validateCandidate(run.candidate,run.packet,{model:run.model,topicId});
    const packet=research.packet(topicId);if(version!==packet.input.topicVersion||packet.inputHash!==run.packet.inputHash)throw new Error('研究或材料已变化；此候选保留在历史中，请重新生成');
    return research.adoptModelDraft(topicId,{version,runId:id},run.candidate,()=>{
-    if(read(id).status!=='candidate')throw new Error('此候选已被处理');
+    const current=read(id);if(current.status!=='candidate')throw new Error('此候选已被处理');
+    // Bind the transaction to the exact stored record checked above, including
+    // its original model configuration, rather than today's configured model.
+    if(digest(current)!==digest(run))throw new CodexResearchError('output');
     write({...run,status:'adopted',acceptedVersion:version+1,acceptedAt:new Date(now()).toISOString()});
    });
   },
