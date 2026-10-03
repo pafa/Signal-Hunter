@@ -515,3 +515,8 @@ GET `/api/research-pipeline` 查看队列；PATCH 同路径提交 `version,daily
 前向调用详情可展开“登记复核标签与主张结局”。只有原调用中的主张可以登记结局，新增预测应在研究中另建并进入后续调用。结局材料先保存到原研究，再刷新复核档案选择版本和逐字引文；材料原文及修订留在本机。结局时点未知可留空，未解决和部分兑现不作二元评分。
 
 `GET /api/forward-evaluations/records/:runId/review`返回冻结主张、复核版本和历史；同路径`review-inputs`返回原研究当前关联的可选材料及不可核实项。`POST .../:runId/label`和`POST .../:runId/outcome`仅接受`requestId,version,value`，服务端追加新复核行，不修改研究、模型run或市场账本。新`forward_reviews`表随SQLite备份，恢复核对前禁止写入。页面未知保存结果可原请求重试，版本冲突保留草稿并要求显式载入新版；不自动提交，也不自动认定独立验证通过。
+
+
+前向档案的“固定窗口报告”选择基线与已结束的本机时间段，保存全部调用、失败、排除和当时的复核版本。此操作不启动模型、不改研究，不自动开启前向登记。旧报告保留，后续更正需要另存报告。
+
+GET /api/forward-windows 返回最近50份摘要和总数；GET /api/forward-windows/:id 读取完整本机报告，可按ID读取更早报告；POST /api/forward-windows 仅接受requestId,title,baselineId,start,end（API时间须带时区）。完整报告含私有基线、输入与结局引用，不应复制到公开PR。窗口最多5000调用/64 MiB，超限要求缩短窗口，不截断。新增forward_windows表随SQLite备份；恢复锁、实例校验、同源和请求幂等沿用现有流程。源码改变需重启完整候选后再冻结报告。

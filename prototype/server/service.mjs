@@ -1,3 +1,4 @@
+import {openForwardWindows} from './forward-windows.mjs';
 import {openForwardReviews} from './forward-reviews.mjs';
 import {openForwardEvaluations} from './forward-evaluations.mjs';
 import {openResearchPipeline} from './research-pipeline.mjs';
@@ -46,6 +47,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const marketSimulation=marketSimulations.aggressive;
   const forwardEvaluations=openForwardEvaluations(store,research,eventClusters,{enabled:mode==='research'&&!!modelConfig,config:modelConfig||{},now});
   const forwardReviews=openForwardReviews(store,research,forwardEvaluations,{enabled:mode==='research',now});
+  const forwardWindows=openForwardWindows(store,forwardEvaluations,forwardReviews,{enabled:mode==='research',now});
   const modelResearch=openModelResearchRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(modelRunner?{runner:modelRunner}:{}),now,onStart:run=>forwardEvaluations.capture(run)});
   const materialEvents=openMaterialEventRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(materialEventRunner?{runner:materialEventRunner}:{}),now});
   const researchPipeline=openResearchPipeline(store,research,modelResearch,{enabled:!offline&&!!modelConfig,config:modelConfig||{},now,materialEvents,batches:semanticBatches,clusters:eventClusters,semantic:semanticEvents,recall:newsId=>{continuity.process(research.list());return continuity.recall(newsId);}});
@@ -62,7 +64,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   if(offline&&!restorePending())initializeDemoData(store);
   const service={
     mode,instance,
-    research,researchPipeline,paper,observations,referenceFx,securityDirectory,modelResearch,materialEvents,companyEntities,semanticEvents,semanticBatches,eventClusters,evaluations,forwardEvaluations,forwardReviews,marketSimulation,marketSimulations,
+    research,researchPipeline,paper,observations,referenceFx,securityDirectory,modelResearch,materialEvents,companyEntities,semanticEvents,semanticBatches,eventClusters,evaluations,forwardEvaluations,forwardReviews,forwardWindows,marketSimulation,marketSimulations,
     processEvents(){try{const changed=continuity.process(research.list());if(changed||store.checks().events?.state==='error')store.status('events',{state:'ok',receivedAt:clock()});return {ok:true,changed};}catch(error){store.status('events',{state:'error',attemptedAt:clock(),error:errorText(error)});return {error:errorText(error)};}},
     eventContinuity(params={}){return {...continuity.snapshot({...params,positions:paper.snapshot().positions,watchlist:store.watchlist()}),health:store.checks().events||{state:'pending'}};},
     eventDetail(id){return continuity.detail(id);},
