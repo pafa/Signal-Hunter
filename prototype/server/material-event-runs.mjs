@@ -27,7 +27,7 @@ export function openMaterialEventRuns(store,research,{enabled=false,config={},ru
  const api={
   list(topicId){research.get(topicId);return {enabled:enabled&&!closed,model:config.model||null,runs:db.prepare('SELECT payload,expires_at FROM material_event_runs WHERE topic_id=? ORDER BY rowid DESC LIMIT 50').all(topicId).map(row=>summary(expired(JSON.parse(row.payload),row.expires_at)))};},
   get(topicId,id){const r=read(id);if(r.topicId!==topicId)throw new Error('拆分记录不属于此研究');return {...r,stale:stale(r),reviews:(r.candidate?.decomposition.events||[]).map((_,i)=>history(id,i))};},
-  start(topicId,data){
+  start(topicId,data,beforeCommit=()=>{}){
    guard();if(!data||Object.keys(data).sort().join(',')!=='materialId,requestId,revision,version'||typeof data.requestId!=='string'||!/^[-a-zA-Z0-9]{16,80}$/.test(data.requestId))throw new Error('拆分请求参数无效');
    const {requestId}=data,request={version:data.version,materialId:data.materialId,revision:data.revision},prior=db.prepare('SELECT payload FROM material_event_runs WHERE request_id=?').get(requestId);
    if(prior){const r=JSON.parse(prior.payload);if(r.topicId!==topicId||Object.keys(request).some(k=>r.request[k]!==request[k]))throw new Error('请求标识已用于其他输入');return summary(read(r.id));}
@@ -35,7 +35,7 @@ export function openMaterialEventRuns(store,research,{enabled=false,config={},ru
    const packet=materialEventsPacket(store,research,topicId,request),timeoutMs=config.timeoutMs??180000;
    if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>600000)throw new Error('模型超时配置无效');
    const run={id:randomUUID(),topicId,requestId,request,packet,status:'running',model:config.model,createdAt:new Date(now()).toISOString()};
-   db.exec('BEGIN IMMEDIATE');try{guard();recover();claimModelLease(db,run.id,now(),timeoutMs+30000);db.prepare('INSERT INTO material_event_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,requestId,run.status,now()+timeoutMs+30000,JSON.stringify(run));db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+   db.exec('BEGIN IMMEDIATE');try{guard();recover();claimModelLease(db,run.id,now(),timeoutMs+30000);db.prepare('INSERT INTO material_event_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,requestId,run.status,now()+timeoutMs+30000,JSON.stringify(run));beforeCommit(run);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(candidate=>{
     if(controller.signal.aborted)throw new CodexResearchError('cancelled');

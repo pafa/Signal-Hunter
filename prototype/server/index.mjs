@@ -72,6 +72,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&/^\/api\/research-pipeline\/events\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retryEvent(url.pathname.split('/')[4]);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&/^\/api\/research-pipeline\/relations\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retryRelation(url.pathname.split('/')[4]);reply(200,updatedSnapshot());return;}
     if(req.method==='PATCH'&&url.pathname==='/api/research-pipeline'){service.researchPipeline.configure(data);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&/^\/api\/research-pipeline\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retry(url.pathname.split('/')[3]);reply(200,updatedSnapshot());return;}

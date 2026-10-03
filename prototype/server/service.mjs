@@ -43,8 +43,8 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const marketSimulations=Object.fromEntries(Object.entries(strategyProfiles).map(([accountId,profile])=>[accountId,openMarketSimulation(store,research,{accountId,profile,enabled:!offline,clock,...(marketInputs?{getInputs:()=>marketInputs(accountId)}:{})})]));
   const marketSimulation=marketSimulations.aggressive;
   const modelResearch=openModelResearchRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(modelRunner?{runner:modelRunner}:{}),now});
-  const researchPipeline=openResearchPipeline(store,research,modelResearch,{enabled:!offline&&!!modelConfig,config:modelConfig||{},now,semantic:semanticEvents,recall:newsId=>{continuity.process(research.list());return continuity.recall(newsId);}});
   const materialEvents=openMaterialEventRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(materialEventRunner?{runner:materialEventRunner}:{}),now});
+  const researchPipeline=openResearchPipeline(store,research,modelResearch,{enabled:!offline&&!!modelConfig,config:modelConfig||{},now,materialEvents,semantic:semanticEvents,recall:newsId=>{continuity.process(research.list());return continuity.recall(newsId);}});
   const companyEntities=openCompanyEntityRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(companyEntityRunner?{runner:companyEntityRunner}:{}),now});
   const intake=openNewsIntake(store,{clock});
   const continuity=openContinuity(store,{clock});
