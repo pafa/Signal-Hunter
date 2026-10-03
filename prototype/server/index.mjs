@@ -44,6 +44,8 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&/^\/api\/observation-rules\/[-a-zA-Z0-9]{8,80}\/history$/.test(url.pathname)){reply(200,service.observations.rules.history(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/operations'){reply(200,service.operations());return;}
     if(req.method==='GET'&&/^\/api\/news\/intake\/[-a-f0-9]{36}$/.test(url.pathname)){reply(200,service.newsIntakeDetail(url.pathname.split('/')[4]));return;}
+    if(req.method==='GET'&&url.pathname==='/api/reference-fx'){reply(200,service.referenceFx.status());return;}
+    if(req.method==='GET'&&url.pathname==='/api/reference-fx/convert'){const data=Object.fromEntries(url.searchParams);if(Object.keys(data).some(k=>!['snapshotId','currency','amount'].includes(k)))throw new Error('参考汇率输入或快照无效');reply(200,service.referenceFx.convert(data));return;}
     if(req.method==='GET'&&url.pathname==='/api/security-directory'){reply(200,{...service.securityDirectory.status({market:url.searchParams.get('market')||'US'}),search:service.securityDirectory.search(Object.fromEntries(url.searchParams))});return;}
     if(req.method==='GET'&&url.pathname==='/api/health'){reply(200,service.health());return;}
     if(req.method==='GET'&&url.pathname==='/api/paper/history'){reply(200,service.paper.history());return;}
@@ -69,6 +71,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&url.pathname==='/api/reference-fx/refresh'){reply(200,await service.referenceFx.refresh(data));return;}
     if(req.method==='POST'&&url.pathname==='/api/security-directory/refresh'){reply(202,service.securityDirectory.refresh(data));return;}
     if(req.method==='POST'&&url.pathname.startsWith('/api/evaluations')){
       const m=/^\/api\/evaluations(?:\/([-a-f0-9]{36})\/(annotate|seal))?$/.exec(url.pathname);
