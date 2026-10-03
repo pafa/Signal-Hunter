@@ -52,6 +52,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.research.newsItem(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/news/search'){reply(200,service.research.newsPage(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/material-events(?:\/[-a-z0-9]{36})?$/.test(url.pathname)){const p=url.pathname.split('/');reply(200,p[5]?service.materialEvents.get(p[3],p[5]):service.materialEvents.list(p[3]));return;}
+    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/company-entities(?:\/[-a-z0-9]{36})?$/.test(url.pathname)){const p=url.pathname.split('/');reply(200,p[5]?service.companyEntities.get(p[3],p[5]):service.companyEntities.list(p[3]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/materials$/.test(url.pathname)){reply(200,service.research.materialList(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/packet$/.test(url.pathname)){reply(200,service.research.packet(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/model-runs$/.test(url.pathname)){reply(200,{...service.modelResearch.status(),runs:service.modelResearch.list(url.pathname.split('/')[3])});return;}
@@ -89,6 +90,12 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
       if(!p[5])reply(202,service.materialEvents.start(p[3],data));
       else if(p[6]==='cancel'){if(Object.keys(data).length)throw new Error('取消参数无效');reply(200,service.materialEvents.cancel(p[3],p[5]));}
       else {const run=service.materialEvents.decide(p[3],p[5],data);reply(200,{...updatedSnapshot(),materialEventRun:run});}return;
+    }
+    if(req.method==='POST'&&/^\/api\/research\/[^/]+\/company-entities(?:\/[-a-z0-9]{36}\/(?:cancel|decision))?$/.test(url.pathname)){
+      const p=url.pathname.split('/');
+      if(!p[5])reply(202,service.companyEntities.start(p[3],data));
+      else if(p[6]==='cancel'){if(Object.keys(data).length)throw new Error('取消参数无效');reply(200,service.companyEntities.cancel(p[3],p[5]));}
+      else {const run=service.companyEntities.decide(p[3],p[5],data);reply(200,{...updatedSnapshot(),companyEntityRun:run});}return;
     }
     if(req.method==='POST'&&url.pathname==='/api/semantic-events'){reply(202,service.semanticEvents.start(data));return;}
     if(req.method==='POST'&&/^\/api\/event-clusters\/[-a-z0-9]{36}\/replacement-preview$/.test(url.pathname)){reply(200,service.eventClusters.replacementPreview(url.pathname.split('/')[3],data));return;}

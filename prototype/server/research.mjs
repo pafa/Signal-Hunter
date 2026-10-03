@@ -208,15 +208,17 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    topic.researchUpdatedAt=at;
    return commit(topic,`主张修订：${clean.revisionReason}`,data.version);
   },
-  addCompany(id,data){const topic=get(id);
+  addCompany(id,data,beforeWrite=()=>{},entityResolution=null){const topic=get(id);
    if(data.replace!==undefined&&typeof data.replace!=='boolean')throw new Error('关系修订标记无效');
    if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
    const company=normalizeCompanyRelation(data,withAvailability(topic),clock()),index=topic.companies.findIndex(c=>c.symbol===company.symbol);
    if(index>=0&&!data.replace)throw new Error('公司已关联；请选择修订关系，避免静默覆盖');
    if(index<0&&data.replace)throw new Error('待修订的公司关系不存在');
    if(index<0&&topic.companies.length>=20)throw new Error('一个主题最多关联 20 个标的');
+   if(entityResolution)company.entityResolution=structuredClone(entityResolution);
+   else if(index>=0&&topic.companies[index].entityResolution)company.entityResolution=structuredClone(topic.companies[index].entityResolution);
    if(index>=0)topic.companies[index]=company;else topic.companies.push(company);
-   return commit(topic,index>=0?'修订公司关系：旧关系保留在历史版本':'关联公司：主体、传导方向和关系来源分别记录',data.version);
+   return commit(topic,index>=0?'修订公司关系：旧关系保留在历史版本':'关联公司：主体、传导方向和关系来源分别记录',data.version,beforeWrite);
   },
   removeCompany(id,data){const topic=get(id),symbol=instrument(data.symbol).symbol;
    if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
