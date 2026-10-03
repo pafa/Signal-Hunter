@@ -13,7 +13,7 @@ export async function request(path,method='GET',data){
  if(identity)instanceId=identity;
  return result;
 }
-export const time=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'未知';
+export const time=value=>value?/^\d{4}-\d{2}-\d{2}$/.test(value)?`${value}（仅日期）`:new Date(value).toLocaleString('zh-CN',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'未知';
 export const stanceNames={supports:'支持',against:'反向约束',context:'背景',unverified:'待核实'};
 export const verificationNames={primary:'官方资料',reported:'媒体 / 公告报道',reviewed:'人工核验',unverified:'未核实'};
 export const familyNames={adoption:'采用 / 活跃',mechanism:'运行机制',ecosystem:'生态连接',constraint:'限制 / 风险',supply:'供给能力',purchase:'采购 / 订单',earnings:'财务兑现',corporate:'公司行动',other:'其他'};

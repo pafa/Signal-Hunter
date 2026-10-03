@@ -13,7 +13,7 @@ export function comparisonPacket(store,input){
  const records=['left','right'].map(side=>{
   const ref=input[side];if(Object.keys(ref).sort().join(',')!=='id,revision'||typeof ref.id!=='string'||!Number.isSafeInteger(ref.revision)||ref.revision<1)fail(0);
   const n=store.newsById(ref.id);if(!n||n.revision!==ref.revision)fail(1);
-  return {id:n.id,revision:n.revision,title:n.title,url:n.url,publisher:n.publisher,publishedAt:n.publishedAt,availableAt:n.revisionFirstSeen,contentScope:'headline-only'};
+  return {id:n.id,revision:n.revision,title:n.title,url:n.url,publisher:n.publisher,publishedAt:n.publishedAt,datePrecision:n.datePrecision||'instant',availableAt:n.revisionFirstSeen,contentScope:'headline-only'};
  });
  const value={left:records[0],right:records[1]},packet={schema:SEMANTIC_VERSION,input:value,inputHash:digest(value)};
  if(Buffer.byteLength(JSON.stringify(packet))>65536)throw new CodexResearchError('packet');
@@ -43,7 +43,18 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
  const write=run=>db.prepare('UPDATE semantic_runs SET status=?,payload=? WHERE id=?').run(run.status,JSON.stringify(run),run.id);
  const recover=()=>{if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')return;for(const row of db.prepare("SELECT * FROM semantic_runs WHERE status='running' AND expires_at<?").all(now()))write(expired(JSON.parse(row.payload),row.expires_at));};recover();
  const decisions=key=>db.prepare('SELECT payload FROM semantic_decisions WHERE pair_key=? ORDER BY version DESC').all(key).map(r=>JSON.parse(r.payload));
- const stale=run=>{try{return comparisonPacket(store,Object.fromEntries(['left','right'].map(s=>[s,{id:run.packet.input[s].id,revision:run.packet.input[s].revision}]))).inputHash!==run.packet.inputHash;}catch{return true;}};
+ const stale=run=>{try{
+  const current=comparisonPacket(store,Object.fromEntries(['left','right'].map(s=>[s,{id:run.packet.input[s].id,revision:run.packet.input[s].revision}])));
+  if(current.inputHash===run.packet.inputHash)return false;
+  // Old event-pair-1 packets implied instant precision. Compare that exact shape
+  // without changing the archived packet/hash or overlooking new day-only inputs.
+  if(run.packet.schema!==SEMANTIC_VERSION||digest(run.packet.input)!==run.packet.inputHash)return true;
+  for(const side of ['left','right']){
+   if(Object.hasOwn(run.packet.input[side],'datePrecision')||current.input[side].datePrecision!=='instant')return true;
+   delete current.input[side].datePrecision;
+  }
+  return digest(current.input)!==run.packet.inputHash;
+ }catch{return true;}};
  const view=run=>{const history=decisions(run.pairKey),latest=history[0]||null;return {...run,stale:stale(run),decisionVersion:latest?.version||0,decision:latest,history,active:!!latest&&latest.runId===run.id&&latest.action==='accept'&&!stale(run)};};
  const summary=run=>{const v=view(run);return {id:v.id,status:v.status,createdAt:v.createdAt,left:v.packet.input.left,right:v.packet.input.right,relation:v.candidate?.comparison.relation,stale:v.stale,active:v.active,decision:v.decision};};
  const api={

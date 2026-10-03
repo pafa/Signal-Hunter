@@ -29,7 +29,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
  CREATE TABLE IF NOT EXISTS triage(news_id TEXT NOT NULL,news_revision INTEGER NOT NULL,rules_version TEXT NOT NULL,payload TEXT NOT NULL,processed_at TEXT NOT NULL,PRIMARY KEY(news_id,news_revision,rules_version));`);
  const get=id=>{const r=db.prepare('SELECT payload FROM research_topics WHERE id=?').get(id);if(!r)throw new Error('研究主题不存在');return JSON.parse(r.payload);};
  const withAvailability=topic=>({...topic,evidence:topic.evidence.map(e=>e.newsId?{...e,availableAt:store.revisionAvailableAt(e.newsId,e.newsRevision),availabilityBasis:'新闻修订实际接收时间；历史原字段保留'}:e)});
- const newsEvidence=(n,at)=>({id:`news:${n.id}:v${n.revision}`,newsId:n.id,newsRevision:n.revision,claim:n.title,sourceName:n.publisher,url:n.url,publishedAt:n.publishedAt,datePrecision:'instant',firstSeen:n.revisionFirstSeen,articleFirstSeen:n.articleFirstSeen,revisionFirstSeen:n.revisionFirstSeen,availableAt:n.revisionFirstSeen,originKey:n.publisher,verification:'unverified',contentScope:'headline-only',addedAt:at});
+ const newsEvidence=(n,at)=>({id:`news:${n.id}:v${n.revision}`,newsId:n.id,newsRevision:n.revision,claim:n.title,sourceName:n.publisher,url:n.url,publishedAt:n.publishedAt,datePrecision:n.datePrecision||'instant',firstSeen:n.revisionFirstSeen,articleFirstSeen:n.articleFirstSeen,revisionFirstSeen:n.revisionFirstSeen,availableAt:n.revisionFirstSeen,originKey:n.publisher,verification:'unverified',contentScope:'headline-only',addedAt:at});
  const commit=(topic,reason,expectedVersion,beforeWrite=()=>{})=>{
   db.exec('BEGIN IMMEDIATE');try{
    const old=db.prepare('SELECT payload FROM research_topics WHERE id=?').get(topic.id);const current=old?JSON.parse(old.payload):null;

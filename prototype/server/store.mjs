@@ -2,6 +2,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {hash,instrument} from './providers.mjs';
+import {OFFICIAL_NEWS_SOURCES} from '../shared/news-sources.mjs';
 
 export function openStore(path) {
   if(path!==':memory:') mkdirSync(dirname(path),{recursive:true});
@@ -17,11 +18,11 @@ export function openStore(path) {
     CREATE TABLE IF NOT EXISTS checks(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`);
   db.exec(`CREATE TABLE IF NOT EXISTS daily_quotes(symbol TEXT PRIMARY KEY,payload TEXT NOT NULL,received_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS daily_snapshots(symbol TEXT NOT NULL,hash TEXT NOT NULL,payload TEXT NOT NULL,received_at TEXT NOT NULL,PRIMARY KEY(symbol,hash));`);
-  const getSettings=()=>({keywords:db.prepare("SELECT value FROM settings WHERE key='keywords'").get()?.value||'',newsDiscoveryEnabled:db.prepare("SELECT value FROM settings WHERE key='newsDiscoveryEnabled'").get()?.value!=='false',newsTrackingEnabled:db.prepare("SELECT value FROM settings WHERE key='newsTrackingEnabled'").get()?.value!=='false'});
+  const getSettings=()=>({keywords:db.prepare("SELECT value FROM settings WHERE key='keywords'").get()?.value||'',newsDiscoveryEnabled:db.prepare("SELECT value FROM settings WHERE key='newsDiscoveryEnabled'").get()?.value!=='false',newsTrackingEnabled:db.prepare("SELECT value FROM settings WHERE key='newsTrackingEnabled'").get()?.value!=='false',...Object.fromEntries(OFFICIAL_NEWS_SOURCES.map(s=>[s.setting,db.prepare('SELECT value FROM settings WHERE key=?').get(s.setting)?.value==='true']))});
   const setSettings=changes=>{
-    if(Object.keys(changes).some(key=>!['keywords','newsDiscoveryEnabled','newsTrackingEnabled'].includes(key)))throw new Error('不支持的订阅设置');
+    if(Object.keys(changes).some(key=>!['keywords','newsDiscoveryEnabled','newsTrackingEnabled',...OFFICIAL_NEWS_SOURCES.map(s=>s.setting)].includes(key)))throw new Error('不支持的订阅设置');
     if('keywords' in changes&&(typeof changes.keywords!=='string'||changes.keywords.length>120))throw new Error('关键词最多 120 字符');
-    for(const key of ['newsDiscoveryEnabled','newsTrackingEnabled'])if(key in changes&&typeof changes[key]!=='boolean')throw new Error('订阅开关需要布尔值');
+    for(const key of ['newsDiscoveryEnabled','newsTrackingEnabled',...OFFICIAL_NEWS_SOURCES.map(s=>s.setting)])if(key in changes&&typeof changes[key]!=='boolean')throw new Error('订阅开关需要布尔值');
     db.exec('BEGIN IMMEDIATE');try{for(const [key,value] of Object.entries(changes))db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').run(key,typeof value==='string'?value.trim():String(value));db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}return getSettings();
   };
   const mapNews=row=>({...JSON.parse(row.payload),firstSeen:row.first_seen,articleFirstSeen:row.first_seen,revisionFirstSeen:db.prepare('SELECT received_at FROM revisions WHERE news_id=? AND version=?').get(row.id,row.revision)?.received_at||null,lastSeen:row.last_seen,revision:row.revision,selected:!!row.selected,read:!!row.read,note:row.note});

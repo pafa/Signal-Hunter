@@ -25,7 +25,8 @@
     "research:codex": "node scripts/codex-research.mjs",
     "instance:create": "node scripts/create-instance.mjs",
     "start:instance": "node scripts/start.mjs --instance",
-    "recovery:rehearse": "node scripts/recovery-rehearsal.mjs"
+    "recovery:rehearse": "node scripts/recovery-rehearsal.mjs",
+    "news:verify": "node scripts/verify-news-sources.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",

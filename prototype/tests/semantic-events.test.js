@@ -47,6 +47,34 @@ test('reingestion does not stale a comparison; a new headline revision disables 
   assert.throws(()=>f.runs.start(input),/已修订/);
  }finally{await f.close();}
 });
+test('pre-date-precision comparisons retain decisions across upgrade without rewriting frozen inputs',async()=>{
+ const f=fixture();try{
+  const started=f.runs.start(input);await f.runs.wait(started.id);
+  const saved=JSON.parse(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(started.id).payload);
+  // Reconstruct the event-pair-1 packet persisted before datePrecision was added.
+  for(const side of ['left','right'])delete saved.packet.input[side].datePrecision;
+  saved.packet.inputHash=digest(saved.packet.input);saved.candidate.trace.inputHash=saved.packet.inputHash;
+  const frozen=JSON.stringify(saved);
+  f.store.db.prepare('UPDATE semantic_runs SET payload=? WHERE id=?').run(frozen,saved.id);
+  assert.equal(f.runs.get(saved.id).stale,false);
+  const accepted=f.runs.decide(saved.id,{version:0,action:'accept',note:'Review unchanged legacy input'});
+  assert.equal(accepted.active,true);
+  const history=accepted.history;
+  f.store.ingest(news,'2026-10-02T07:00:00Z');
+  assert.equal(f.runs.get(saved.id).active,true);
+  assert.equal(f.store.db.prepare('SELECT payload FROM semantic_runs WHERE id=?').get(saved.id).payload,frozen);
+  assert.deepEqual(f.runs.get(saved.id).history,history);
+  // Missing precision is compatible only with the prior instant default, not day precision.
+  const originalNews=f.store.db.prepare('SELECT payload FROM news WHERE id=?').get(news[1].id).payload;
+  const changed=JSON.parse(originalNews);changed.datePrecision='day';
+  f.store.db.prepare('UPDATE news SET payload=? WHERE id=?').run(JSON.stringify(changed),news[1].id);
+  assert.equal(f.runs.get(saved.id).stale,true);assert.equal(f.runs.get(saved.id).active,false);
+  f.store.db.prepare('UPDATE news SET payload=? WHERE id=?').run(originalNews,news[1].id);
+  assert.equal(f.runs.get(saved.id).active,true);
+  f.store.ingest([{...news[1],title:'Changed source headline'}],'2026-10-02T08:00:00Z');
+  assert.equal(f.runs.get(saved.id).stale,true);assert.deepEqual(f.runs.get(saved.id).history,history);
+ }finally{await f.close();}
+});
 test('reverse orientation shares decision sequence and preserves which result was accepted',async()=>{
  const f=fixture();try{
   const a=f.runs.start(input);await f.runs.wait(a.id);f.runs.decide(a.id,{version:0,action:'accept',note:'第一次判断'});
