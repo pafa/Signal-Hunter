@@ -1,6 +1,7 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {Button} from './Primitives';
 import {request,time} from './api';
+import SecurityDirectory from './SecurityDirectory';
 import ArticleReadingScope from './ArticleReadingScope';
 import PublicationDateEvidence from './PublicationDateEvidence';
 
@@ -29,6 +30,7 @@ export default function CompanyEntities({topic,materials,busy,mutate}){
  const disabled=busy||working,running=data?.runs.some(r=>r.status==='running'),candidate=detail?.candidate?.resolution;
  return <section className="model-research material-events company-entities" aria-label="公司与证券身份识别">
   <h3>材料中的公司与证券身份</h3><p className="m-note">选择已保存材料，调用本机 Codex 区分公司、子公司和产品，并对照有限证券目录。多市场证券分别保留候选；未识别不代表未上市，目录候选也不证明在材料日期已上市。事项研究仅识别该事项原引用范围。</p>
+  <SecurityDirectory/>
   <label>身份识别材料<select value={materialId} onChange={e=>setMaterialId(e.target.value)}><option value="">请选择材料</option>{materials.map(m=><option key={m.id} value={m.id}>{m.title} · 材料 v{m.revision}</option>)}</select></label>
   <Button primary disabled={disabled||running||!data?.enabled||!materialId||topic.status==='archived'} onClick={generate}>使用 Codex 识别公司身份</Button>
   <p className="m-note">{data?.enabled?`模型 ${data.model}；发送所选材料，消耗一次当前账号调用，并非离线推理。`:'当前未启用本机 Codex 身份识别。'}生成后逐项核对并选择证券；确认仅关联研究并尝试加入关注，不生成交易。</p>
@@ -37,6 +39,7 @@ export default function CompanyEntities({topic,materials,busy,mutate}){
   {selected&&!detail&&<p>正在读取身份识别记录…</p>}
   {detail&&<>
    <p role="status">{states[detail.status]} · {detail.packet.input.material.title} · 材料 v{detail.packet.input.material.revision}</p>
+   {detail.packet.input.directorySnapshot&&<p className="m-note">官方目录生成日期 {detail.packet.input.directorySnapshot.sourceDates.map(s=>s.date).join(" / ")}；名称召回 {detail.packet.input.directorySnapshot.selected} 条 / 全库 {detail.packet.input.directorySnapshot.totalEligible} 条，超限省略 {detail.packet.input.directorySnapshot.omitted} 条。{detail.packet.input.directorySnapshot.limitation}</p>}
    {detail.stale&&<p className="m-warning">材料、事项或目录已变化，旧候选保留；请使用当前材料重新识别。</p>}
    {detail.status==='running'&&<Button disabled={disabled} onClick={cancel}>取消身份识别调用</Button>}
    {detail.failure&&<p className="m-warning">{detail.failure.message}</p>}

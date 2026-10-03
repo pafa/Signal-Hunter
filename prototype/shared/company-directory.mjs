@@ -55,8 +55,9 @@ export function normalizeCompanyAnalysis(value={}){
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!Object.hasOwn(COMPANY_ANALYSIS_FIELDS,k)))throw new Error('公司影响分析字段无效');
  const out={};for(const key of Object.keys(COMPANY_ANALYSIS_FIELDS)){const v=value[key]??'';if(typeof v!=='string'||v.length>1000)throw new Error('每项公司影响分析最多 1000 字符');out[key]=v.trim();}return out;
 }
-export function normalizeCompanyRelation(data,topic,at){
- const identity=companyIdentity(data.symbol),kind=data.kind||'mentioned',relationStatus=data.relationStatus||'pending',direction=data.direction||'unclear';
+export function normalizeCompanyRelation(data,topic,at,directoryIdentity=null){
+ const parsed=companyIdentity(data.symbol);
+ const identity=directoryIdentity?.directorySnapshotId&&directoryIdentity.symbol===parsed.symbol?{...parsed,...directoryIdentity}:parsed,kind=data.kind||'mentioned',relationStatus=data.relationStatus||'pending',direction=data.direction||'unclear';
  if(!Object.hasOwn(COMPANY_RELATIONS,kind)||!Object.hasOwn(RELATION_STATUS,relationStatus)||!Object.hasOwn(DIRECTIONS,direction))throw new Error('公司关系类型、状态或方向无效');
  const note=typeof data.note==='string'?data.note.trim():'';if(!note||note.length>1200)throw new Error('公司关联依据不能为空且最多 1200 字符');
  const evidenceIds=data.evidenceIds??[];if(!Array.isArray(evidenceIds)||evidenceIds.length>20||new Set(evidenceIds).size!==evidenceIds.length||evidenceIds.some(id=>!topic.evidence.some(e=>e.id===id)))throw new Error('公司关系引用的证据不存在或重复');

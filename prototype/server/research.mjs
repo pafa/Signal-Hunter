@@ -21,7 +21,7 @@ const enums={stance:['supports','against','context','unverified'],family:['adopt
 const dateValid=value=>{try{return /^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(`${value}T00:00:00Z`).toISOString().slice(0,10)===value;}catch{return false;}};
 const defaultChain=()=>[{id:'fact',title:'事实变化',question:'相对原有信息改变了什么？'},{id:'mechanism',title:'影响机制',question:'变化如何传到公司的业务？'},{id:'earnings',title:'财务兑现',question:'如何改变盈利及事前预期？'}];
 
-export function openResearch(store,{seed=true,clock=()=>new Date().toISOString(),sourceReader=readPublicArticle,seeds=researchSeeds,semanticEvents=null,eventClusters=null}={}) {
+export function openResearch(store,{seed=true,clock=()=>new Date().toISOString(),sourceReader=readPublicArticle,seeds=researchSeeds,semanticEvents=null,eventClusters=null,securityDirectory=null}={}) {
  const db=store.db;
  const screenings=openScreeningSamples(db,{clock}),triageKey=`${RULES_VERSION}@${screenings.rulesHash}`;
  const materials=openMaterials(db,{clock}),sourceJobs=new Set();
@@ -67,6 +67,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
  };
  return {
   process,get,list,screenings,
+  directorySelection:text=>securityDirectory?.selection(text)||null,
   newsItem(id){const news=store.newsById(id);if(!news)throw new Error('新闻不存在');return {...news,triage:classifyHeadline(news)};},
   materialList(id){return materials.list(get(id));},
   packet(id){return materials.packet(withSemanticStatus(withAvailability(get(id))));},
@@ -211,7 +212,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   addCompany(id,data,beforeWrite=()=>{},entityResolution=null){const topic=get(id);
    if(data.replace!==undefined&&typeof data.replace!=='boolean')throw new Error('关系修订标记无效');
    if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
-   const company=normalizeCompanyRelation(data,withAvailability(topic),clock()),index=topic.companies.findIndex(c=>c.symbol===company.symbol);
+   const company=normalizeCompanyRelation(data,withAvailability(topic),clock(),entityResolution?.identity||topic.companies.find(c=>c.symbol===String(data.symbol).trim().toUpperCase())?.entityResolution?.identity),index=topic.companies.findIndex(c=>c.symbol===company.symbol);
    if(index>=0&&!data.replace)throw new Error('公司已关联；请选择修订关系，避免静默覆盖');
    if(index<0&&data.replace)throw new Error('待修订的公司关系不存在');
    if(index<0&&topic.companies.length>=20)throw new Error('一个主题最多关联 20 个标的');

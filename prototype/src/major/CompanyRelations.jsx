@@ -22,7 +22,7 @@ export default function CompanyRelations({topic,onClose,busy,mutate,watch=[],def
  return <Modal title="公司关联与纠错" onClose={()=>{if(!busy)onClose();}}>
  <p className="m-note">关系与消息真伪分别判断。关联会尝试加入关注，交易仍需单独申请。撤销本事件关联会保留全局关注、其他事件和持仓。</p>
  <p className="m-note">未提交输入保留在当前浏览器会话；保存后进入研究版本。{restored?' 已恢复未提交草稿。':''}</p>{volatile&&<p role="alert">浏览器存储不可用，草稿仅在本页内存保留；关闭页面前请保存。</p>}
- <div className="company-relations">{topic.companies.map(c=>{const i=companyIdentity(c.symbol),wait=deferred.find(d=>d.topicId===topic.id&&d.symbol===c.symbol);return <article key={c.symbol}>
+ <div className="company-relations">{topic.companies.map(c=>{const i=c.entityResolution?.identity||companyIdentity(c.symbol),wait=deferred.find(d=>d.topicId===topic.id&&d.symbol===c.symbol);return <article key={c.symbol}>
   <header><span><strong>{c.name}</strong><code>{c.symbol} · {i.currency}</code></span><Button onClick={()=>select(c,true)} disabled={busy}>修订关系</Button></header>
   <p>{COMPANY_RELATIONS[c.kind]||c.role||'历史关联'} · {RELATION_STATUS[c.relationStatus]||'关系待复核'} · {DIRECTIONS[c.direction]||'方向待评估'}</p>
   <p>{c.note}</p>{c.entityResolution&&<details><summary>身份识别与本人选择的原始依据</summary><p>{c.entityResolution.mention.name} · {c.entityResolution.identity.symbol} · 材料 v{c.entityResolution.materialRevision}</p><blockquote>{c.entityResolution.mention.quote}</blockquote><p>{c.entityResolution.mention.reason}</p><p>核对说明：{c.entityResolution.reviewNote}</p><p>目录 {c.entityResolution.directoryVersion} · 模型 {c.entityResolution.trace.model}；这是当时冻结的依据，后续修订不重写。</p></details>}<small>{wait?`关注待处理：${wait.reason}`:watch.some(w=>w.symbol===c.symbol)?'已在关注清单':'关注状态以数据源管理为准'}</small>

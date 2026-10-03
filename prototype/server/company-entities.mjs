@@ -11,8 +11,10 @@ export function companyEntitiesPacket(store,research,topicId,data){
  const base=materialEventsPacket(store,research,topicId,data),topic=research.get(topicId);
  let eventFocus=null;
  if(topic.eventExtraction){const scope=eventComparisonSnapshot(store.db,{id:topicId,revision:1});if(scope.materialId!==data.materialId)throw new Error('事项身份识别只能使用原拆分材料');eventFocus=scope.eventFocus;}
- const directory=COMPANY_DIRECTORY.map(({symbol,name,aliases,issuerKey,market,currency,identityStatus,identitySource,identityBasis})=>({symbol,name,aliases,issuerKey,market,currency,identityStatus,identitySource,identityBasis}));
- const input={topicId,material:base.input.material,eventFocus,directoryVersion:DIRECTORY_VERSION,directoryUse:'research-only; listing validity at source date is unverified',directory};
+ let directory=COMPANY_DIRECTORY.map(({symbol,name,aliases,issuerKey,market,currency,identityStatus,identitySource,identityBasis})=>({symbol,name,aliases,issuerKey,market,currency,identityStatus,identitySource,identityBasis}));
+ const selected=research.directorySelection?.(eventFocus?.quote||base.input.material.title+'\n'+base.input.material.body);
+ if(selected)directory=[...directory.filter(c=>!c.symbol.endsWith('.US')),...selected.entries];
+ const input={topicId,material:base.input.material,eventFocus,...(selected?{directorySnapshot:selected.basis}:{}),directoryVersion:DIRECTORY_VERSION,directoryUse:'research-only; listing validity at source date is unverified',directory};
  const packet={schema:COMPANY_ENTITIES_VERSION,sourceResearchVersion:topic.version,input,inputHash:digest(input)};
  if(Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');return packet;
 }
