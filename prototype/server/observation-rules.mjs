@@ -1,3 +1,4 @@
+import {evaluateMinuteAnomaly,minuteStatisticalDefinition} from './minute-anomaly.mjs';
 import {evaluateDailyAnomaly,statisticalDefinition} from './daily-anomaly.mjs';
 import {hash,instrument} from './providers.mjs';
 import {evidenceStamp,positionReference} from '../shared/review-state.mjs';
@@ -18,9 +19,10 @@ export function validateObservationDefinition(input,topic){
  const conditions=input.conditions.map(c=>{
   if(c?.type==='at'&&exact(c,['type','at'])&&observationInstant(c.at)!==null)return {type:c.type,at:new Date(observationInstant(c.at)).toISOString()};
   if(['research-change','counterevidence'].includes(c?.type)&&exact(c,['type']))return {type:c.type};
-  if(c?.type==='daily-anomaly'){
-   if(!exact(c,['type','symbol','interval','metric','windowSize','zThreshold','direction'])||c.interval!==undefined&&c.interval!=='1d'||!['return','volume'].includes(c.metric)||!Number.isInteger(c.windowSize)||c.windowSize<5||c.windowSize>120||typeof c.zThreshold!=='number'||!Number.isFinite(c.zThreshold)||c.zThreshold<1||c.zThreshold>20||!['high','low','both'].includes(c.direction)||!topic.companies.some(x=>x.symbol===c.symbol))failure('统计观察需选择关联证券、5–120日基线、1–20倍标准差和偏离方向');
-   const spec=instrument(c.symbol);return {type:c.type,symbol:spec.symbol,currency:spec.currency,interval:'1d',metric:c.metric,windowSize:c.windowSize,zThreshold:c.zThreshold,direction:c.direction};
+  if(['daily-anomaly','minute-anomaly'].includes(c?.type)){
+   const minute=c.type==='minute-anomaly',interval=minute?'1m':'1d';
+   if(!exact(c,['type','symbol','interval','metric','windowSize','zThreshold','direction'])||c.interval!==undefined&&c.interval!==interval||!(minute?['return']:['return','volume']).includes(c.metric)||!Number.isInteger(c.windowSize)||c.windowSize<5||c.windowSize>120||typeof c.zThreshold!=='number'||!Number.isFinite(c.zThreshold)||c.zThreshold<1||c.zThreshold>20||!['high','low','both'].includes(c.direction)||!topic.companies.some(x=>x.symbol===c.symbol))failure('统计观察需选择关联证券、5–120个基线样本、1–20倍标准差和偏离方向；分钟只支持价格变化');
+   const spec=instrument(c.symbol);return {type:c.type,symbol:spec.symbol,currency:spec.currency,interval,metric:c.metric,windowSize:c.windowSize,zThreshold:c.zThreshold,direction:c.direction};
   }
   if(c?.type==='price'&&exact(c,['type','symbol','interval','operator','value','mode','maxGapSeconds','holdSeconds'])&&['1d','1m'].includes(c.interval)&&['gte','lte'].includes(c.operator)&&typeof c.value==='number'&&Number.isFinite(c.value)&&c.value>0&&c.value<=1e12&&topic.companies.some(x=>x.symbol===c.symbol)){
    const spec=instrument(c.symbol),base={type:c.type,symbol:spec.symbol,currency:spec.currency,interval:c.interval,operator:c.operator,value:c.value};
@@ -45,7 +47,7 @@ export function evaluateObservation(rule,topic,{at,quote,check,offline=false,pre
    const added=(topic.evidence||[]).filter(e=>e.stance==='against'&&!rule.binding.counterevidence.includes(evidenceStamp(e))).map(e=>({id:e.id,stamp:evidenceStamp(e),claim:e.claim,verification:e.verification}));
    return outcome(added.length?'true':'false','新增或修订的反向线索',{evidence:added});
   }
-  const comparison={conditionType:c.type,...(c.type==='daily-anomaly'?{statistical:statisticalDefinition(c)}:{}),symbol:c.symbol,currency:c.currency,interval:c.interval,operator:c.operator,threshold:c.value};
+  const comparison={conditionType:c.type,...(c.type==='daily-anomaly'?{statistical:statisticalDefinition(c)}:c.type==='minute-anomaly'?{statistical:minuteStatisticalDefinition(c)}:{}),symbol:c.symbol,currency:c.currency,interval:c.interval,operator:c.operator,threshold:c.value};
   if(!topic.companies.some(x=>x.symbol===c.symbol))return outcome('unknown','证券已不在本研究关联公司中',comparison);
   const q=quote(c.symbol,c.interval),status=check(c.symbol,c.interval),received=observationInstant(q?.receivedAt);
   if(!q||q.symbol!==c.symbol||q.currency!==c.currency||received===null||received>now)return outcome('unknown','缺少证券、币种或接收时间一致的行情',comparison);
@@ -54,6 +56,7 @@ export function evaluateObservation(rule,topic,{at,quote,check,offline=false,pre
   // Offline examples remain visibly synthetic; online checks never infer a price from missing/stale caches.
   if(!offline&&(!d.configuredSources.includes(q.provider)||c.interval==='1m'&&Date.parse(d.dataAt)>now||d.sourceState!=='last-attempt-succeeded'||!(c.interval==='1d'?['aligned']:['recent-unverified','closed-session-cache']).includes(d.dataState)))return outcome('unknown','行情缺失、过期、来源失败或时间未核验',provenance);
   if(c.type==='daily-anomaly')return evaluateDailyAnomaly(c,q,{at,provenance});
+  if(c.type==='minute-anomaly')return evaluateMinuteAnomaly(c,q,{at,provenance});
   const point=c.interval==='1d'?q.points?.findLast(p=>p.date===q.lastDate&&Number.isFinite(p.close)&&p.close>0):q.points?.findLast(p=>p.time===q.providerTime&&Number.isFinite(p.close)&&p.close>0);
   if(!point)return outcome('unknown','行情时点与价格不一致',provenance);
   const matches=c.operator==='gte'?point.close>=c.value:point.close<=c.value;
@@ -112,7 +115,7 @@ export function openObservationRules(store,{clock=()=>new Date().toISOString(),g
     if(result.state==='true'){
      checked.firstMatchedAt||=at;
      const affectedPositions=(book.positions||[]).filter(p=>p.topicId===topic.id||topic.companies.some(c=>c.symbol===p.symbol)).map(positionReference).sort((a,b)=>a.lifecycleId.localeCompare(b.lifecycleId));
-     const symbols=[...new Set([...rule.definition.conditions.filter(c=>['price','daily-anomaly'].includes(c.type)).map(c=>c.symbol),...affectedPositions.map(p=>p.symbol)])];
+     const symbols=[...new Set([...rule.definition.conditions.filter(c=>['price','daily-anomaly','minute-anomaly'].includes(c.type)).map(c=>c.symbol),...affectedPositions.map(p=>p.symbol)])];
      hits.push({id:hash(JSON.stringify([ENGINE,rule.id,rule.version])),topicId:topic.id,topicVersion:topic.version,title:topic.title,kind:'configured',reason:rule.definition.label,symbols,affectedPositions,input:{ruleVersion:ENGINE,definition:rule,binding:rule.binding,topicVersion:topic.version,evaluatedAt:at,results:result.results}});
     }
     db.prepare('INSERT INTO observation_rule_checks VALUES(?,?,?) ON CONFLICT(rule_id,version) DO UPDATE SET payload=excluded.payload').run(rule.id,rule.version,JSON.stringify(checked));
