@@ -20,6 +20,13 @@ const messages={configuration:'请配置本机 Codex 可执行路径、模型和
 export class CodexResearchError extends Error{
  constructor(code,trace={}){super(messages[code]||messages.process);this.name='CodexResearchError';this.code=code;this.trace=trace;}
 }
+// Rejected model text is local diagnostic data, never a candidate or an error message.
+// Keep it out of automatic Error serialization; consumers explicitly persist it.
+export function rejectedOutputDiagnostic(error,inputHash){
+ const d=error?.outputDiagnostic;
+ if(!(error instanceof CodexResearchError)||error.code!=='output'||error.trace?.inputHash!==inputHash||!d||!['json','schema'].includes(d.stage)||typeof d.rawOutput!=='string'||Buffer.byteLength(d.rawOutput)>262144||digest(d.rawOutput)!==error.trace.outputHash)return undefined;
+ return {stage:d.stage,rawOutput:d.rawOutput,outputHash:error.trace.outputHash};
+}
 export function validatePacket(packet){
  if(!packet||packet.schema!==PACKET_VERSION||packet.analysisMode!=='assistant-review-required'||!packet.input||typeof packet.input.topicId!=='string'||!packet.input.topicId||!Number.isSafeInteger(packet.input.topicVersion)||packet.input.topicVersion<1||!Array.isArray(packet.input.evidence)||packet.input.evidence.length>150||packet.input.evidence.some(e=>!e||typeof e.id!=='string'||!e.id)||new Set(packet.input.evidence.map(e=>e.id)).size!==packet.input.evidence.length||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
  return packet;
@@ -98,7 +105,7 @@ function invoke(binary,args,{cwd,env,input='',timeoutMs,signal,events=false}){
 export async function runStructuredCodex({prompt,schema,promptVersion,inputHash,metadata={},validate},{binary,model,effort='high',timeoutMs=180000,signal,env=process.env}={}){
  validateConfig({binary,model,effort,timeoutMs});
  const startedAt=new Date().toISOString(),trace={...metadata,provider:'local-codex-cli',model,effort,promptVersion,promptHash:digest(prompt),schemaHash:digest(schema),inputHash,startedAt};
- let dir;
+ let dir,raw,validationStage;
  try{
   dir=await mkdtemp(join(tmpdir(),'signal-codex-'));
   const environment=codexEnvironment(env),version=await invoke(binary,['--version'],{cwd:dir,env:environment,timeoutMs:Math.min(timeoutMs,10000),signal});
@@ -110,14 +117,21 @@ export async function runStructuredCodex({prompt,schema,promptVersion,inputHash,
   for(const feature of ['shell_tool','unified_exec','apps','plugins','multi_agent','browser_use','computer_use','hooks','memories','goals','code_mode_host','image_generation','view_image','skill_search','sleep_tool'])args.push('--disable',feature);
   const result=await invoke(binary,[...args,'-'],{cwd:dir,env:environment,input:prompt,timeoutMs,signal,events:true});
   trace.usage=result.usage;trace.runtimeWarningCount=result.warningCount;
-  let raw,handle;
+  let handle;
   try{handle=await open(outputFile,constants.O_RDONLY|constants.O_NOFOLLOW);const stat=await handle.stat();if(!stat.isFile()||stat.size>262144)throw 0;raw=await handle.readFile('utf8');}catch{throw new CodexResearchError('output');}finally{await handle?.close();}
-  trace.outputHash=digest(raw);
+  trace.outputHash=digest(raw);validationStage='json';
   let parsed;try{parsed=JSON.parse(raw);}catch{throw new CodexResearchError('output');}
+  validationStage='schema';
   const draft=validate(parsed);
   if(signal?.aborted)throw new CodexResearchError('cancelled');
   return {status:'candidate',reviewStatus:'unreviewed',...draft,trace:{...trace,finishedAt:new Date().toISOString(),toolCallsObserved:0},rawOutput:raw};
- }catch(error){throw new CodexResearchError(error instanceof CodexResearchError?error.code:'process',{...trace,finishedAt:new Date().toISOString()});}
+ }catch(error){
+  const failure=new CodexResearchError(error instanceof CodexResearchError?error.code:'process',{...trace,finishedAt:new Date().toISOString()});
+  if(failure.code==='output'&&validationStage&&typeof raw==='string'&&Buffer.byteLength(raw)<=262144){
+   Object.defineProperty(failure,'outputDiagnostic',{value:{stage:validationStage,rawOutput:raw}});
+  }
+  throw failure;
+ }
  finally{if(dir)await rm(dir,{recursive:true,force:true});}
 }
 

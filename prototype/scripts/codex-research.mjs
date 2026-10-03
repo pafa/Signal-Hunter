@@ -1,6 +1,6 @@
 import {mkdir,readFile,writeFile,stat} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
-import {generateCodexDraft,validatePacket,CodexResearchError} from '../server/codex-research.mjs';
+import {generateCodexDraft,validatePacket,CodexResearchError,rejectedOutputDiagnostic} from '../server/codex-research.mjs';
 
 // Input is an exported, immutable research packet. This command never opens a database.
 const [packetPath,outputPath,...extra]=process.argv.slice(2);
@@ -21,7 +21,7 @@ try{
   console.log(JSON.stringify({status:result.status,model:result.trace.model,sections:result.sections.length,inputHash:result.trace.inputHash,outputHash:result.trace.outputHash,outputDirectory:destination}));
  }catch(error){
   const failed={status:'failed',code:error instanceof CodexResearchError?error.code:'storage',message:error instanceof CodexResearchError?error.message:'候选保存失败',trace:error.trace||{}};
-  await writeFile(join(destination,'failure.json'),JSON.stringify(failed,null,2),{flag:'wx',mode:0o600});
+  await writeFile(join(destination,'failure.json'),JSON.stringify({...failed,outputDiagnostic:rejectedOutputDiagnostic(error,packet.inputHash)},null,2),{flag:'wx',mode:0o600});
   console.error(JSON.stringify(failed));process.exitCode=2;
  }
 }catch(error){console.error(error instanceof CodexResearchError?error.message:'材料包、参数或输出目录无效；输出目录必须全新且父目录已存在');process.exitCode=1;}

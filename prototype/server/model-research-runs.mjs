@@ -1,6 +1,6 @@
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {randomUUID} from 'node:crypto';
-import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest} from './codex-research.mjs';
+import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest,rejectedOutputDiagnostic} from './codex-research.mjs';
 
 function validateCandidate(result,packet,{model,topicId}){
  validatePacket(packet);
@@ -49,7 +49,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
     write({...run,status:'candidate',finishedAt:new Date(now()).toISOString(),candidate:result});
    }).catch(error=>{
     const failure=error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型调用失败；原研究保留，可检查配置后重试'};
-    write({...run,status:failure.code==='cancelled'?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure});
+    write({...run,status:failure.code==='cancelled'?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure,outputDiagnostic:rejectedOutputDiagnostic(error,packet.inputHash)});
    }).finally(()=>{jobs.delete(run.id);releaseModelLease(db,run.id);});
    // HTTP starts return before completion. Observe storage failures even when nobody calls wait().
    // The initial input record remains available for interrupted-run recovery; do not log raw SQL.
