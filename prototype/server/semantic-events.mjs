@@ -56,7 +56,18 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
  const write=run=>db.prepare('UPDATE semantic_runs SET status=?,payload=? WHERE id=?').run(run.status,JSON.stringify(run),run.id);
  const recover=()=>{if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')return;for(const row of db.prepare("SELECT * FROM semantic_runs WHERE status='running' AND expires_at<?").all(now()))write(expired(JSON.parse(row.payload),row.expires_at));};recover();
  const decisions=key=>db.prepare('SELECT payload FROM semantic_decisions WHERE pair_key=? ORDER BY version DESC').all(key).map(r=>JSON.parse(r.payload));
- const stale=run=>{try{return comparisonPacket(store,Object.fromEntries(['left','right'].map(s=>[s,{id:run.packet.input[s].id,revision:run.packet.input[s].revision,...(run.packet.input[s].kind==='material'?{kind:'material'}:{})}]))).inputHash!==run.packet.inputHash;}catch{return true;}};
+ const stale=run=>{try{
+  const current=comparisonPacket(store,Object.fromEntries(['left','right'].map(s=>[s,{id:run.packet.input[s].id,revision:run.packet.input[s].revision,...(run.packet.input[s].kind==='material'?{kind:'material'}:{})}])));
+  if(current.inputHash===run.packet.inputHash)return false;
+  // Old event-pair-1 packets implied instant precision. Compare that exact shape
+  // without changing the archived packet/hash or overlooking new day-only inputs.
+  if(run.packet.schema!==SEMANTIC_VERSION||digest(run.packet.input)!==run.packet.inputHash)return true;
+  for(const side of ['left','right']){
+   if(Object.hasOwn(run.packet.input[side],'datePrecision')||current.input[side].datePrecision!=='instant')return true;
+   delete current.input[side].datePrecision;
+  }
+  return digest(current.input)!==run.packet.inputHash;
+ }catch{return true;}};
  const view=run=>{const history=decisions(run.pairKey),latest=history[0]||null,isStale=stale(run);return {...run,stale:isStale,decisionVersion:latest?.version||0,decision:latest,history,active:!!latest&&latest.runId===run.id&&latest.action==='accept'&&!isStale};};
  const summary=run=>{const v=view(run);return {id:v.id,status:v.status,createdAt:v.createdAt,left:comparisonSummary(v.packet.input.left),right:comparisonSummary(v.packet.input.right),relation:v.candidate?.comparison.relation,stale:v.stale,active:v.active,decision:v.decision};};
  const api={
@@ -90,6 +101,8 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
     if(input.action==='accept'&&run.stale)fail(3);
     // A historical candidate cannot silently withdraw a newer accepted relationship.
     if(input.action==='withdraw'&&(!run.decision||run.decision.runId!==id||run.decision.action!=='accept'))fail(4);
+    // Pair-wide decisions also make rejection a withdrawal unless it targets the accepted run.
+    if(input.action==='reject'&&run.decision?.action==='accept'&&run.decision.runId!==id)fail(8);
     const decision={version:input.version+1,runId:id,action:input.action,note:input.note.trim(),at:new Date(now()).toISOString(),inputHash:run.packet.inputHash,relation:run.candidate.comparison.relation,orientation:{left:run.packet.input.left.id,right:run.packet.input.right.id}};
     db.prepare('INSERT INTO semantic_decisions VALUES(?,?,?,?)').run(run.pairKey,decision.version,id,JSON.stringify(decision));db.exec('COMMIT');return api.get(id);
    }catch(e){db.exec('ROLLBACK');throw e;}

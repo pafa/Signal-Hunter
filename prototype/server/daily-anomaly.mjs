@@ -1,11 +1,11 @@
 import {sessionFor,dailyEligibility} from '../shared/market-clock.mjs';
-export const DAILY_ANOMALY_ENGINE='daily-anomaly/1';
+export const DAILY_ANOMALY_ENGINE='daily-anomaly/2';
 const validDate=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&Number.isFinite(Date.parse(d))&&new Date(d+'T12:00:00Z').toISOString().slice(0,10)===d;
 const previous=d=>new Date(Date.parse(d+'T12:00:00Z')-86400000).toISOString().slice(0,10);
 export const statisticalDefinition=c=>({engine:DAILY_ANOMALY_ENGINE,metric:c.metric,windowSize:c.windowSize,zThreshold:c.zThreshold,direction:c.direction});
 // Descriptive sample statistic; no normality assumption, probability, forecast or trading permission.
 export function evaluateDailyAnomaly(c,q,{at,provenance}){
- const input={...provenance,statistical:{...statisticalDefinition(c),priceBasis:q.priceBasis||null,volumeBasis:q.volumeBasis||null,actionCoverage:'仅供应商报告；不证明公司行动完整'}},s=input.statistical;
+ const input={...provenance,statistical:{...statisticalDefinition(c),priceBasis:q.priceBasis||null,actionsParsed:q.actionsParsed===true,volumeBasis:q.volumeBasis||null,actionCoverage:'仅供应商报告；不证明公司行动完整'}},s=input.statistical;
  const result=(state,reason)=>({state,reason,input}),unknown=reason=>result('unknown',reason);
  if(q.interval!=='1d'||!validDate(q.lastDate)||!Array.isArray(q.points)||q.points.length>1000)return unknown('日线结构、日期或样本上限无效');
  if(!dailyEligibility(c.symbol,q.lastDate,q.receivedAt).complete||!dailyEligibility(c.symbol,q.lastDate,at).complete)return unknown('最后日线在获取时或检查时尚未结束');
@@ -19,6 +19,7 @@ export function evaluateDailyAnomaly(c,q,{at,provenance}){
  if(expected.length!==count||points.some((p,i)=>p.date!==expected[i]))return unknown('窗口存在交易日缺口、重复、乱序或非交易日，不跨缺口计算');
  if(q.duplicateDates?.some(d=>d>=points[0].date&&d<=q.lastDate))return unknown('供应商在统计窗口返回重复日线日期，不能静默选取其中一条');
  if(points.some(p=>!Number.isFinite(p.close)||p.close<=0))return unknown('统计窗口有缺失或无效收盘价，不补值');
+ if(q.actionsParsed!==true)return unknown('公司行动解析依据缺失，需刷新日线；旧快照与待办保留');
  if(!Array.isArray(q.actions)||q.actions.some(a=>!a||!validDate(a.date)))return unknown('公司行动元数据缺失或日期无效，不能排除口径变化');
  const actions=q.actions.filter(a=>a.date>=points[0].date&&a.date<=q.lastDate);s.actions=actions;
  if(actions.length)return unknown('统计窗口含供应商报告的公司行动，先核对除权、拆股或分红口径');
