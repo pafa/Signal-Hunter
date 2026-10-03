@@ -29,6 +29,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/market-simulation/history'){reply(200,market.history());return;}
     if(req.method==='GET'&&/^\/api\/market-simulation\/history\/\d+$/.test(url.pathname)){reply(200,market.event(Number(url.pathname.split('/')[4])));return;}
     if(req.method==='GET'&&/^\/api\/market-simulation\/orders\/[-a-z0-9]{36}\/review$/.test(url.pathname)){reply(200,market.review(url.pathname.split('/')[4]));return;}
+    if(req.method==='GET'&&url.pathname==='/api/semantic-events/events'){reply(200,service.semanticEvents.events(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/semantic-events/materials'){reply(200,service.semanticEvents.materials(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/event-clusters'){reply(200,service.eventClusters.list(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/event-clusters\/[-a-z0-9]{36}$/.test(url.pathname)){reply(200,service.eventClusters.get(url.pathname.split('/')[3]));return;}

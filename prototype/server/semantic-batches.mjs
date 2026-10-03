@@ -6,7 +6,7 @@ import {batchErrors} from '../shared/semantic-batch-labels.mjs';
 import {semanticErrors} from '../shared/semantic-labels.mjs';
 import {safeErrorText} from '../shared/safe-errors.mjs';
 const fail=i=>{throw new Error(batchErrors[i]);};
-const ref=r=>({id:r.id,revision:r.revision,...(r.kind==='material'?{kind:'material'}:{})});
+const ref=r=>({id:r.id,revision:r.revision,...(r.kind?{kind:r.kind}:{})});
 const executionHash=packet=>digest({packet,prompt:comparisonPrompt(packet),schema:packet.schema===SEMANTIC_VERSION?SEMANTIC_SCHEMA:MATERIAL_SEMANTIC_SCHEMA});
 export function openSemanticBatches(store,semantic,{enabled=false,config={},now=Date.now}={}){
  const db=store.db;

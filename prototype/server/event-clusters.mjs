@@ -4,7 +4,7 @@ import {comparisonSummary} from './semantic-materials.mjs';
 import {clusterErrors} from '../shared/event-cluster-labels.mjs';
 const algorithm='complete-pair-consistency-1';
 const same=new Set(['repeat','followup','reversal']);
-const memberKey=r=>r.kind==='material'?`material:${r.documentId}`:`news:${r.id}`;
+const memberKey=r=>r.kind==='event'?`event:${r.id}`:r.kind==='material'?`material:${r.documentId}`:`news:${r.id}`;
 const exact=(a,b)=>a.id===b.id&&a.revision===b.revision&&(a.kind||'news')===(b.kind||'news');
 const fail=i=>{throw new Error(clusterErrors[i]);};
 const text=(s,max)=>typeof s==='string'&&!!s.trim()&&s.trim().length<=max;
@@ -97,7 +97,8 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
    return {items:rows.map(r=>summary(JSON.parse(r.payload))),total,offset,limit};
   },
   forResearch(topic){
-   const refs=topic.evidence.flatMap(e=>e.materialId?[{kind:'material',id:e.materialId,revision:e.materialRevision}]:e.newsId?[{id:e.newsId,revision:e.newsRevision}]:[]);
+   const refs=topic.evidence.filter(e=>!topic.eventExtraction||!e.materialId).flatMap(e=>e.materialId?[{kind:'material',id:e.materialId,revision:e.materialRevision}]:e.newsId?[{id:e.newsId,revision:e.newsRevision}]:[]);
+   if(topic.eventExtraction)refs.push({kind:'event',id:topic.id,revision:1});
    const keys=refs.flatMap(r=>{if(r.kind!=='material')return [memberKey(r)];const m=db.prepare('SELECT document_id FROM research_materials WHERE id=?').get(r.id);return m?[`material:${m.document_id}`]:[];});
    if(!keys.length)return [];
    const rows=db.prepare('SELECT DISTINCT c.payload FROM event_clusters c JOIN event_cluster_members m ON m.cluster_id=c.id WHERE m.member_key IN (SELECT value FROM json_each(?)) ORDER BY c.id').all(JSON.stringify(keys));
