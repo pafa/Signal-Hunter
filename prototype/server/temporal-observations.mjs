@@ -1,5 +1,5 @@
 import {marketClock} from '../shared/market-clock.mjs';
-export const TEMPORAL_ENGINE='sampled-price/1';
+export const TEMPORAL_ENGINE='sampled-price/2';
 const MAX_SAMPLES=512;
 export function temporalObservation(condition,base,previous,{at,armedAt}={}){
  const now=Date.parse(at),p=previous?.engine===TEMPORAL_ENGINE?previous:null;
@@ -20,7 +20,7 @@ export function temporalObservation(condition,base,previous,{at,armedAt}={}){
   if(last&&last.price===sample.price&&last.provider===sample.provider&&last.providerTimezone===sample.providerTimezone&&last.session===sample.session)return reply('false','同一时点未出现新的价格采样，不推进穿越或计时',{...p,checkedAt:at});
   return reply('unknown','同一时点的价格或来源发生修订，等待下一新样本',cleared);
  }
- const continuous=last&&sample.session===last.session&&sample.provider===last.provider&&sample.providerTimezone===last.providerTimezone&&stamp-Date.parse(last.dataAt)<=limit&&now-Date.parse(p.checkedAt)<=limit;
+ const continuous=last&&sample.session===last.session&&sample.provider===last.provider&&sample.providerTimezone===last.providerTimezone&&stamp-Date.parse(last.dataAt)<=limit&&now-Date.parse(last.observedAt)<=limit;
  const memory={...cleared,watermark:sample.dataAt,last:sample};
  if(condition.mode==='cross'){
   memory.samples=continuous?[last,sample]:[sample];
