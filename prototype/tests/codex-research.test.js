@@ -104,3 +104,18 @@ test('CLI saves immutable input and candidate, refuses existing output, and pres
   assert.deepEqual((await readdir(out)).sort(),['candidate.json','input.json']);
  }finally{f.store.close();await cli.cleanup();}
 });
+
+// Regression from a real local Codex diagnosis: structured references were valid,
+// but a material hash inside the prose lost several characters.
+test('inline citation typos are rejected across prose fields while valid old references remain compatible',()=>{
+ const f=fixture();try{
+  const source=f.packet.input.evidence[0].id,bad=source.slice(0,-8)+source.slice(-4);
+  for(const text of [`[${source}]`,`依据 ${source}；仍待核对。`]){
+   const d=draft(f.packet);d.sections[0].paragraphs=[text];assert.deepEqual(validateCodexDraft(d,f.packet),d);
+  }
+  for(const mutate of [d=>d.sections[0].paragraphs=[`[${bad}]`],d=>d.sections[0].title=`事实 [${bad}]`,d=>d.missingEvidence=[`核查 ${bad}`],d=>{d.sections[0].paragraphs=[`[${source}]`];d.sections[0].sourceIds=[];},d=>d.sections[0].paragraphs=['[news:missing:v2]']]){
+   const d=draft(f.packet);mutate(d);assert.throws(()=>validateCodexDraft(d,f.packet),e=>e.code==='output');
+  }
+  const d=draft(f.packet);d.missingEvidence=[`核查 ${source}`];assert.deepEqual(validateCodexDraft(d,f.packet),d);
+ }finally{f.store.close();}
+});

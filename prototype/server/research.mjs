@@ -56,14 +56,14 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
  };
  const list=()=>db.prepare('SELECT payload FROM research_topics').all().map(r=>{const topic=withAvailability(JSON.parse(r.payload));const prior=db.prepare('SELECT payload FROM research_versions WHERE topic_id=? AND version<? ORDER BY version DESC LIMIT 1').get(topic.id,topic.version);return {...topic,coverage:evidenceCoverage(topic),changeSummary:researchDelta(topic,prior?JSON.parse(prior.payload):null)};}).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||(a.type==='cluster'?0:1)-(b.type==='cluster'?0:1)||a.id.localeCompare(b.id));
- const linkMaterial=(id,data,input,method)=>{
+ const linkMaterial=(id,data,input,method,beforeWrite=()=>{})=>{
   const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，材料未关联；请刷新后重试');
   if(!enums.stance.includes(data.stance)||!enums.family.includes(data.family)||!topic.chain.some(s=>s.id===data.step))throw new Error('材料作用、类别或因果环节无效');
   const interpretation=assertText(data.interpretation,'材料与本事件的关系',1200),prepared=materials.prepare(id,input,method),m=prepared.material;
   if(topic.evidence.some(e=>e.materialId===m.id))return topic;
   if(topic.evidence.length>=150)throw new Error('一个主题最多保存 150 条证据');
   topic.evidence.push({id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,datePrecision:m.datePrecision,firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:clock(),originKey:m.url?new URL(m.url).hostname:m.sourceName,verification:'unverified',contentScope:m.scope,stance:data.stance,family:data.family,step:data.step,interpretation});
-  return commit(topic,'补充研究材料：阅读范围与不可变正文快照已保存；内容尚待核验',data.version,()=>{prepared.persist();materials.attempt(id,{state:'saved',url:m.url,materialId:m.id,method});});
+  return commit(topic,'补充研究材料：阅读范围与不可变正文快照已保存；内容尚待核验',data.version,()=>{beforeWrite();prepared.persist();materials.attempt(id,{state:'saved',url:m.url,materialId:m.id,method});});
  };
  return {
   process,get,list,screenings,
@@ -106,14 +106,14 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    });
   },
   saveMaterial(id,data){return linkMaterial(id,data,{...data,scope:data.scope==='extracted-text'?null:data.scope},'manual');},
-  async readMaterial(id,data){
+  async readMaterial(id,data,beforeWrite=()=>{}){
    const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再读取');
    if(!enums.stance.includes(data.stance)||!enums.family.includes(data.family)||!topic.chain.some(s=>s.id===data.step))throw new Error('材料作用、类别或因果环节无效');
    assertText(data.interpretation,'材料与本事件的关系',1200);const url=publicSourceUrl(assertText(data.url,'来源链接',2000)).href;
    if(sourceJobs.has(id))throw new Error('本事件的来源正在读取，请等待结果');
    if(sourceJobs.size>=2)throw new Error('已有两份来源正在读取，请稍后重试');
    sourceJobs.add(id);
-   try{return linkMaterial(id,data,await sourceReader(url),'public-web');}
+   try{return linkMaterial(id,data,await sourceReader(url),'public-web',beforeWrite);}
    catch(error){materials.attempt(id,{state:'failed',url,method:'public-web',error:String(error.message).slice(0,300)});throw error;}
    finally{sourceJobs.delete(id);}
   },
@@ -132,13 +132,24 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    const items=rows.slice(0,size).map(r=>({...store.newsById(r.id),triage:r.triage?JSON.parse(r.triage):{bucket:'pending',category:'等待初筛',companies:[]},processedAt:r.processed_at||null}));
    return {items,total,screeningSamples:screenings.stats(),ceiling:upper,nextCursor:rows.length>size?rows[size-1].cursor:null,rulesVersion:RULES_VERSION,order:'首次入库倒序；筛选使用当前修订，新入库记录在重新检索时纳入'};
   },
-  createFromNews(data){
+  createFromNews(data,{revisionOf=undefined,beforeWrite=()=>{},requireNew=false}={}){
    const n=store.newsById(data.newsId);
    if(!n||n.revision!==data.newsRevision)throw new Error('新闻版本已变化或不存在，请重新打开后创建');
-   const id='news-candidate-'+hash(n.id).slice(0,24),existing=db.prepare('SELECT 1 FROM research_topics WHERE id=?').get(id);
-   if(existing)return get(id);
+   if(revisionOf===undefined){
+    const prior=db.prepare("SELECT payload FROM research_topics WHERE json_extract(payload,'$.sourceNewsId')=? ORDER BY json_extract(payload,'$.sourceNewsRevision') DESC,id").all(n.id).map(r=>JSON.parse(r.payload)),same=prior.find(t=>t.sourceNewsRevision===n.revision);
+    if(same){if(requireNew)throw Error('此新闻版本已有研究');return get(same.id);}
+    const earlier=prior.find(t=>t.sourceNewsRevision<n.revision);revisionOf=earlier?{topicId:earlier.id,topicVersion:earlier.version}:null;
+   }
+   const previous=revisionOf?get(revisionOf.topicId):null;
+   if(previous&&(previous.version!==revisionOf.topicVersion||previous.sourceNewsId!==n.id||!Number.isSafeInteger(previous.sourceNewsRevision)||previous.sourceNewsRevision>=n.revision))throw Error('上一来源研究版本不匹配');
+   const sourceRevisionOf=previous?{topicId:previous.id,topicVersion:previous.version,newsRevision:previous.sourceNewsRevision}:null;
+   const id='news-candidate-'+hash(previous?`${n.id}:revision:${n.revision}`:n.id).slice(0,24),existing=db.prepare('SELECT 1 FROM research_topics WHERE id=?').get(id);
+   if(existing){if(requireNew)throw Error('此新闻版本已有研究');return get(id);}
    const at=clock(),triage=classifyHeadline(n);
-   return commit({id,title:n.title.slice(0,140),summary:'标题候选，未阅读全文。需核验事件阶段、业务量级、公司关系和反证。',type:'event',label:triage.category,categoryId:triage.matchedRules[0]||'general',origin:'news-candidate',status:'active',createdAt:at,firstSeen:at,eventPublishedAt:n.publishedAt,sourceNewsId:n.id,sourceNewsRevision:n.revision,headlineStage:triage.stage,messageStatus:triage.messageStatus,chain:defaultChain(),evidence:[{...newsEvidence(n,at),stance:'unverified',family:'other',step:'fact',interpretation:'从新闻建立候选，未证实且未形成交易判断'}],companies:triage.companies.map(c=>({...c,note:'仅标题提及的实体候选；业务关系与影响方向待核验',url:n.url})),hypothesis:{logic:'核验来源后评估增量和公司影响；标题本身不构成买点。',trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'阅读来源，核对事件阶段和主体；补充相对业务规模、历史与反向线索。'},'新闻候选草稿：仅观察，已知实体候选进入关注；没有生成交易');
+   return commit({id,title:n.title.slice(0,140),summary:'标题候选，未阅读全文。需核验事件阶段、业务量级、公司关系和反证。',type:'event',label:triage.category,categoryId:triage.matchedRules[0]||'general',origin:'news-candidate',status:'active',createdAt:at,firstSeen:at,eventPublishedAt:n.publishedAt,sourceNewsId:n.id,sourceNewsRevision:n.revision,...(sourceRevisionOf?{sourceRevisionOf}:{}),headlineStage:triage.stage,messageStatus:triage.messageStatus,chain:defaultChain(),evidence:[{...newsEvidence(n,at),stance:'unverified',family:'other',step:'fact',interpretation:'从新闻建立候选，未证实且未形成交易判断'}],companies:triage.companies.map(c=>({...c,note:'仅标题提及的实体候选；业务关系与影响方向待核验',url:n.url})),hypothesis:{logic:'核验来源后评估增量和公司影响；标题本身不构成买点。',trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'阅读来源，核对事件阶段和主体；补充相对业务规模、历史与反向线索。'},sourceRevisionOf?'来源修订建立独立观察候选：原研究及历史保留':'新闻候选草稿：仅观察，已知实体候选进入关注；没有生成交易',undefined,()=>{
+    if(store.newsById(n.id)?.revision!==n.revision||previous&&get(previous.id).version!==previous.version)throw Error('新闻或上一研究已变化');
+    beforeWrite(id);
+   });
   },
   importBrief(data){
    const topic=validateResearchBrief(data,clock()),old=db.prepare('SELECT payload FROM research_topics WHERE id=?').get(topic.id);

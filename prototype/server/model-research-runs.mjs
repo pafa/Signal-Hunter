@@ -1,8 +1,8 @@
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {randomUUID} from 'node:crypto';
-import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest} from './codex-research.mjs';
+import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest,rejectedOutputDiagnostic} from './codex-research.mjs';
 
-function validateCandidate(result,packet,{model,topicId}){
+export function validateCandidate(result,packet,{model,topicId}){
  validatePacket(packet);
  validateCodexDraft({sections:result?.sections,missingEvidence:result?.missingEvidence},packet);
  if(result.status!=='candidate'||result.reviewStatus!=='unreviewed'||packet.input.topicId!==topicId||result.trace?.inputHash!==packet.inputHash||result.trace?.model!==model||result.trace?.topicVersion!==packet.input.topicVersion||result.trace?.topicId!==topicId||typeof result.rawOutput!=='string'||digest(result.rawOutput)!==result.trace.outputHash)throw new CodexResearchError('output');
@@ -10,7 +10,7 @@ function validateCandidate(result,packet,{model,topicId}){
  if(digest(raw)!==digest({sections:result.sections,missingEvidence:result.missingEvidence}))throw new CodexResearchError('output');
 }
 
-export function openModelResearchRuns(store,research,{enabled=false,config={},runner=generateCodexDraft,now=()=>Date.now()}={}){
+export function openModelResearchRuns(store,research,{enabled=false,config={},runner=generateCodexDraft,now=()=>Date.now(),onStart=()=>{}}={}){
  const db=store.db,jobs=new Map();let closed=false;initializeModelLease(db);
  db.exec(`CREATE TABLE IF NOT EXISTS model_research_runs(id TEXT PRIMARY KEY,topic_id TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,expires_at INTEGER NOT NULL,payload TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS model_research_topic ON model_research_runs(topic_id,created_at);`);
@@ -28,7 +28,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
   status(){return {enabled:enabled&&!closed,provider:'local-codex-cli',model:config.model||null,effort:config.effort||'high'};},
   list(topicId){research.get(topicId);return db.prepare('SELECT payload,expires_at FROM model_research_runs WHERE topic_id=? ORDER BY rowid DESC LIMIT 50').all(topicId).map(row=>summary(expiredView(JSON.parse(row.payload),row.expires_at)));},
   get(topicId,id){const run=read(id);if(run.topicId!==topicId)throw new Error('模型研判不属于此研究');return run;},
-  start(topicId,{version}={}){
+  start(topicId,{version}={},beforeCommit=()=>{}){
    if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw new Error('恢复副本需先完成核对确认');
    if(!enabled||closed)throw new Error('当前未启用本机 Codex 研判');
    if(!config.binary||!config.model)throw new Error('请先配置本机 Codex 路径与模型');
@@ -39,7 +39,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
    db.exec('BEGIN IMMEDIATE');try{
     recover();if(db.prepare("SELECT 1 FROM model_research_runs WHERE status='running'").get())throw new Error('已有模型研判正在运行，请等待或取消后再试');
     claimModelLease(db,run.id,now(),timeoutMs+30000);
-    db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));db.exec('COMMIT');
+    db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));onStart(run);beforeCommit(run);db.exec('COMMIT');
    }catch(error){db.exec('ROLLBACK');throw error;}
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(result=>{
@@ -49,7 +49,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
     write({...run,status:'candidate',finishedAt:new Date(now()).toISOString(),candidate:result});
    }).catch(error=>{
     const failure=error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型调用失败；原研究保留，可检查配置后重试'};
-    write({...run,status:failure.code==='cancelled'?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure});
+    write({...run,status:failure.code==='cancelled'?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure,outputDiagnostic:rejectedOutputDiagnostic(error,packet.inputHash)});
    }).finally(()=>{jobs.delete(run.id);releaseModelLease(db,run.id);});
    // HTTP starts return before completion. Observe storage failures even when nobody calls wait().
    // The initial input record remains available for interrupted-run recovery; do not log raw SQL.

@@ -132,3 +132,20 @@ test('background storage failure is observed, retains initial input and never ch
   await Promise.resolve();assert.deepEqual(messages,['模型研判记录保存失败；候选未确认落库，请检查本机存储。']);assert.equal(f.research.get(f.topic.id).version,1);assert.equal(f.runs.get(f.topic.id,started.id).packet.input.topicVersion,1);assert.equal(f.runs.get(f.topic.id,started.id).candidate,undefined);
  }finally{console.error=original;await f.close();}
 });
+
+test('provider and stored legacy candidates cannot bypass inline citation validation',async()=>{
+ const corrupt=r=>{r.sections[0].paragraphs=['正文引用 [material:missing]'];r.rawOutput=JSON.stringify({sections:r.sections,missingEvidence:r.missingEvidence});r.trace.outputHash=digest(r.rawOutput);r.trace.promptVersion='codex-research-4';return r;};
+ const f=setup(async packet=>corrupt(result(packet)));try{
+  const start=f.runs.start(f.topic.id,{version:1}),run=await f.runs.wait(start.id);
+  assert.equal(run.status,'failed');assert.equal(run.failure.code,'output');assert.equal(f.research.get(f.topic.id).version,1);
+ }finally{await f.close();}
+ const g=setup();try{
+  const start=g.runs.start(g.topic.id,{version:1});await g.runs.wait(start.id);
+  const run=g.runs.get(g.topic.id,start.id);corrupt(run.candidate);
+  const payload=JSON.stringify(run);g.store.db.prepare('UPDATE model_research_runs SET payload=? WHERE id=?').run(payload,start.id);
+  const topic=g.research.get(g.topic.id),history=g.research.history(g.topic.id),book=g.paper.snapshot();
+  assert.throws(()=>g.runs.adopt(g.topic.id,start.id,{version:1}),e=>e.code==='output');
+  assert.deepEqual(g.research.get(g.topic.id),topic);assert.deepEqual(g.research.history(g.topic.id),history);assert.deepEqual(g.paper.snapshot(),book);
+  assert.equal(g.store.db.prepare('SELECT payload FROM model_research_runs WHERE id=?').get(start.id).payload,payload);
+ }finally{await g.close();}
+});

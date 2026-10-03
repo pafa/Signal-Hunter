@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
-import {digest,CodexResearchError} from './codex-research.mjs';
+import {digest,CodexResearchError,rejectedOutputDiagnostic} from './codex-research.mjs';
 import {COMPANY_ENTITIES_VERSION,companyEntitiesPacket,validateCompanyEntities,generateCompanyEntities} from './company-entities.mjs';
 
 function validateSavedCandidate({packet,candidate,model,topicId}){
@@ -41,7 +41,7 @@ export function openCompanyEntityRuns(store,research,{enabled=false,config={},ru
     if(controller.signal.aborted)throw new CodexResearchError('cancelled');
     validateSavedCandidate({...run,candidate});
     write({...run,status:'candidate',finishedAt:new Date(now()).toISOString(),candidate});
-   }).catch(error=>{write({...run,status:controller.signal.aborted?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure:error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型身份识别失败；原材料保留，请检查本机配置'}});}).finally(()=>{jobs.delete(run.id);releaseModelLease(db,run.id);});
+   }).catch(error=>{write({...run,status:controller.signal.aborted?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),outputDiagnostic:rejectedOutputDiagnostic(error,packet.inputHash),failure:error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型身份识别失败；原材料保留，请检查本机配置'}});}).finally(()=>{jobs.delete(run.id);releaseModelLease(db,run.id);});
    void done.catch(()=>console.error('材料身份识别记录保存失败；冻结输入保留，请检查本机存储。'));
    jobs.set(run.id,{controller,done});return summary(run);
   },

@@ -2,7 +2,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {collectEvaluationSources} from './evaluation-baseline.mjs';
 import {evaluationTime} from '../shared/evaluation.mjs';
-import {evaluationErrors,evaluationVerdicts} from '../shared/evaluation-review.mjs';
+import {evaluationErrors,validateEvaluationLabel} from '../shared/evaluation-review.mjs';
 import {evaluateBatch} from './evaluation-metrics.mjs';
 const hash=x=>createHash('sha256').update(typeof x==='string'?x:JSON.stringify(x)).digest('hex');
 const fail=i=>{throw new Error(evaluationErrors[i]);};
@@ -47,9 +47,8 @@ export function openEvaluationReview(store,{clock=()=>new Date().toISOString()}=
    return {id:randomUUID(),version:0,title:data.title.trim(),state:'annotating',frozenAt:at,...scope,ruleArchive,sources,sourceHash:hash(sources),inputHash:hash(scope),configuration:{positiveBucket:'review',cohort:'all-saved-revisions-in-half-open-decision-window',clusterRepresentative:'earliest-decision-then-sample-id',kind:'retrospective-diagnostic'}};
   });},
   annotate(id,data){return mutate(id,data,'annotate',(b,at)=>{
-   const l=data.label;if(!l||!b.samples.some(s=>s.id===l.sampleId)||!Object.hasOwn(evaluationVerdicts,l.verdict)||!['unseen-attested','already-seen'].includes(l.exposure)||!text(l.reviewer,100)||!text(l.reason)||typeof l.clusterId!=='string'||l.clusterId.length>100||l.clusterId.trim()&&!/^[a-zA-Z0-9_-]+$/.test(l.clusterId.trim()))fail(6);
-   const fields={};for(const k of ['novelty','scale','mechanism']){if(typeof l[k]!=='string'||l[k].length>1200||l.verdict==='major'&&!l[k].trim())fail(6);fields[k]=l[k].trim();}
-   const label={...fields,sampleId:l.sampleId,verdict:l.verdict,clusterId:l.clusterId.trim()||null,reviewer:l.reviewer.trim(),reason:l.reason.trim(),exposure:l.exposure,at,version:b.version+1,presentation:'rule-output-hidden',forwardEligible:false};
+   const l=data.label;if(!l||!b.samples.some(s=>s.id===l.sampleId))fail(6);
+   const label={...validateEvaluationLabel(l),sampleId:l.sampleId,at,version:b.version+1,presentation:'rule-output-hidden',forwardEligible:false};
    db.prepare('INSERT INTO evaluation_labels VALUES(?,?,?,?)').run(id,label.sampleId,label.version,JSON.stringify(label));return b;
   });},
   seal(id,data){return mutate(id,data,'seal',(b,at)=>{

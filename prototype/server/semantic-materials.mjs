@@ -1,16 +1,13 @@
-import {digest} from './codex-research.mjs';
-import {materialInput} from './research-materials.mjs';
+import {immutableMaterialSnapshot} from './research-materials.mjs';
 import {semanticErrors} from '../shared/semantic-labels.mjs';
 const fail=()=>{throw new Error(semanticErrors[9]);};
 const exists=db=>!!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='research_materials'").get();
 export const comparisonSummary=record=>{const {body,...summary}=record;return record.kind==='event'?{...summary,title:record.eventFocus.title,sourceTitle:record.sourceTitle||record.title}:summary;};
 export function materialComparisonSnapshot(db,ref){
  if(!exists(db))fail();
- const row=db.prepare('SELECT payload,document_id,revision FROM research_materials WHERE id=?').get(ref.id);
- if(!row)fail();
  try{
-  const m=JSON.parse(row.payload),clean=materialInput(m,m.availableAt),latest=db.prepare('SELECT MAX(revision) n FROM research_materials WHERE document_id=?').get(row.document_id).n;
-  if(m.id!==ref.id||m.documentId!==row.document_id||m.revision!==ref.revision||row.revision!==ref.revision||latest!==ref.revision||!Number.isFinite(Date.parse(m.availableAt))||Object.keys(clean).some(k=>JSON.stringify(clean[k])!==JSON.stringify(m[k]))||digest(clean)!==m.contentHash||digest(`${m.documentId}:${m.contentHash}`)!==m.id)fail();
+  const m=immutableMaterialSnapshot(db,ref),latest=db.prepare('SELECT MAX(revision) n FROM research_materials WHERE document_id=?').get(m.documentId).n;
+  if(latest!==ref.revision)fail();
   return {kind:'material',id:m.id,documentId:m.documentId,revision:m.revision,title:m.title,url:m.url,publisher:m.sourceName,publishedAt:m.publishedAt,...(m.publicationDateEvidence?{publicationDateEvidence:m.publicationDateEvidence}:{}),...(m.extractionEvidence?{extractionEvidence:m.extractionEvidence}:{}),datePrecision:m.datePrecision,availableAt:m.availableAt,receivedAt:m.receivedAt,contentScope:m.scope,contentHash:m.contentHash,body:m.body,method:m.method,readerVersion:m.readerVersion,verification:m.verification};
  }catch{fail();}
 }

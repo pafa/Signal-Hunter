@@ -20,6 +20,13 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const url=new URL(req.url,'http://127.0.0.1:4179');
     if(!url.pathname.startsWith('/api/')&&staticHandler){staticHandler(req,res);return;}
     if(service.instance?.id&&(req.headers['x-signal-instance']||['POST','PATCH','DELETE'].includes(req.method))&&req.headers['x-signal-instance']!==service.instance.id){reply(409,{error:'数据集已切换或尚未核对，请刷新页面后再继续'});return;}
+    if(req.method==='GET'&&url.pathname==='/api/forward-windows'){reply(200,service.forwardWindows.list());return;}
+    if(req.method==='GET'&&/^\/api\/forward-windows\/[-a-f0-9]{36}$/.test(url.pathname)){reply(200,service.forwardWindows.get(url.pathname.split('/')[3]));return;}
+    if(req.method==='GET'&&url.pathname==='/api/forward-evaluations'){reply(200,{...service.forwardEvaluations.list(),records:service.forwardEvaluations.records()});return;}
+    const forwardReviewMatch=/^\/api\/forward-evaluations\/records\/([-a-f0-9]{36})\/(review|review-inputs|label|outcome)$/.exec(url.pathname);
+    if(req.method==='GET'&&forwardReviewMatch&&['review','review-inputs'].includes(forwardReviewMatch[2])){reply(200,service.forwardReviews[forwardReviewMatch[2]==='review'?'detail':'inputs'](forwardReviewMatch[1]));return;}
+    const forwardMatch=/^\/api\/forward-evaluations\/(baselines|records)\/([-a-f0-9]{36})$/.exec(url.pathname);
+    if(req.method==='GET'&&forwardMatch){reply(200,service.forwardEvaluations[forwardMatch[1]==='baselines'?'baseline':'get'](forwardMatch[2]));return;}
     if(req.method==='GET'&&url.pathname==='/api/evaluations'){reply(200,service.evaluations.list());return;}
     const evaluationMatch=/^\/api\/evaluations\/([-a-f0-9]{36})(?:\/(report|export))?$/.exec(url.pathname);
     if(req.method==='GET'&&evaluationMatch){reply(200,service.evaluations[evaluationMatch[2]||'detail'](evaluationMatch[1]));return;}
@@ -50,6 +57,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/health'){reply(200,service.health());return;}
     if(req.method==='GET'&&url.pathname==='/api/paper/history'){reply(200,service.paper.history());return;}
     if(req.method==='GET'&&url.pathname==='/api/bars'){const symbol=url.searchParams.get('symbol');if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅查看关注标的');const quote=store.quote(symbol);const rows=quote?store.db.prepare('SELECT provider_time AS time,close FROM quote_bars WHERE symbol=? AND provider=? AND timezone=? ORDER BY provider_time DESC LIMIT 6000').all(symbol,quote.provider||'legacy',quote.providerTimezone||'unverified'):[];reply(200,rows.reverse());return;}
+    if(req.method==='GET'&&url.pathname==='/api/research-pipeline'){reply(200,service.researchPipeline.snapshot());return;}
     if(req.method==='GET'&&url.pathname==='/api/data'){reply(200,service.snapshot());return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/screening$/.test(url.pathname)){reply(200,service.research.screenings.packet(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.research.newsItem(url.pathname.split('/')[3]));return;}
@@ -71,8 +79,16 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&/^\/api\/research-pipeline\/events\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retryEvent(url.pathname.split('/')[4]);reply(200,updatedSnapshot());return;}
+    if(req.method==='POST'&&/^\/api\/research-pipeline\/relations\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retryRelation(url.pathname.split('/')[4]);reply(200,updatedSnapshot());return;}
+    if(req.method==='PATCH'&&url.pathname==='/api/research-pipeline'){service.researchPipeline.configure(data);reply(200,updatedSnapshot());return;}
+    if(req.method==='POST'&&/^\/api\/research-pipeline\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retry(url.pathname.split('/')[3]);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/reference-fx/refresh'){reply(200,await service.referenceFx.refresh(data));return;}
     if(req.method==='POST'&&url.pathname==='/api/security-directory/refresh'){reply(202,service.securityDirectory.refresh(data));return;}
+    if(req.method==='POST'&&url.pathname==='/api/forward-windows'){reply(201,service.forwardWindows.freeze(data));return;}
+    if(req.method==='POST'&&forwardReviewMatch&&['label','outcome'].includes(forwardReviewMatch[2])){reply(200,service.forwardReviews.write(forwardReviewMatch[1],forwardReviewMatch[2],data));return;}
+    if(req.method==='POST'&&url.pathname==='/api/forward-evaluations/pause'){reply(200,service.forwardEvaluations.pause(data));return;}
+    if(req.method==='POST'&&url.pathname==='/api/forward-evaluations'){reply(201,service.forwardEvaluations.freeze(data));return;}
     if(req.method==='POST'&&url.pathname.startsWith('/api/evaluations')){
       const m=/^\/api\/evaluations(?:\/([-a-f0-9]{36})\/(annotate|seal))?$/.exec(url.pathname);
       if(!m)throw new Error('评估批次参数无效');
