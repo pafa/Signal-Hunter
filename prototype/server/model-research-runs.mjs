@@ -2,7 +2,7 @@ import {initializeModelLease,claimModelLease,releaseModelLease} from './model-le
 import {randomUUID} from 'node:crypto';
 import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest,rejectedOutputDiagnostic} from './codex-research.mjs';
 
-function validateCandidate(result,packet,{model,topicId}){
+export function validateCandidate(result,packet,{model,topicId}){
  validatePacket(packet);
  validateCodexDraft({sections:result?.sections,missingEvidence:result?.missingEvidence},packet);
  if(result.status!=='candidate'||result.reviewStatus!=='unreviewed'||packet.input.topicId!==topicId||result.trace?.inputHash!==packet.inputHash||result.trace?.model!==model||result.trace?.topicVersion!==packet.input.topicVersion||result.trace?.topicId!==topicId||typeof result.rawOutput!=='string'||digest(result.rawOutput)!==result.trace.outputHash)throw new CodexResearchError('output');
@@ -10,7 +10,7 @@ function validateCandidate(result,packet,{model,topicId}){
  if(digest(raw)!==digest({sections:result.sections,missingEvidence:result.missingEvidence}))throw new CodexResearchError('output');
 }
 
-export function openModelResearchRuns(store,research,{enabled=false,config={},runner=generateCodexDraft,now=()=>Date.now()}={}){
+export function openModelResearchRuns(store,research,{enabled=false,config={},runner=generateCodexDraft,now=()=>Date.now(),onStart=()=>{}}={}){
  const db=store.db,jobs=new Map();let closed=false;initializeModelLease(db);
  db.exec(`CREATE TABLE IF NOT EXISTS model_research_runs(id TEXT PRIMARY KEY,topic_id TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,expires_at INTEGER NOT NULL,payload TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS model_research_topic ON model_research_runs(topic_id,created_at);`);
@@ -39,7 +39,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
    db.exec('BEGIN IMMEDIATE');try{
     recover();if(db.prepare("SELECT 1 FROM model_research_runs WHERE status='running'").get())throw new Error('已有模型研判正在运行，请等待或取消后再试');
     claimModelLease(db,run.id,now(),timeoutMs+30000);
-    db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));beforeCommit(run);db.exec('COMMIT');
+    db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));onStart(run);beforeCommit(run);db.exec('COMMIT');
    }catch(error){db.exec('ROLLBACK');throw error;}
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(result=>{

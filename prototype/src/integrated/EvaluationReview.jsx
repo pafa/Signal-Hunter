@@ -4,6 +4,7 @@ import {request,time} from '../major/api';
 import {evaluationVerdicts} from '../../shared/evaluation-review.mjs';
 import {CLAIM_KINDS,OUTCOMES} from '../../shared/claims.mjs';
 import './evaluation-review.css';
+import ForwardEvaluations from './ForwardEvaluations';
 const pct=v=>v===null?'不可计算':`${(v*100).toFixed(1)}%`,score=v=>v===null?'不可计算':v.toFixed(4);
 const localDate=date=>new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
 const read=key=>{try{return JSON.parse(sessionStorage.getItem(key))||{};}catch{return {};}};
@@ -37,6 +38,7 @@ function Report({report,samples,onExport,busy}){
 }
 export default function EvaluationReview({data,onClose}){
  const dataset=data?.runtime?.instance?.id||'unknown',key=`signal.evaluation-create:${dataset}`;
+ const [forwardOpen,setForwardOpen]=useState(false);
  const [catalog,setCatalog]=useState(null),[batch,setBatch]=useState(null),[sampleId,setSampleId]=useState(''),[draft,setDraft]=useState(()=>({title:'',start:localDate(new Date(Date.now()-7*86400000)),end:localDate(new Date()),...read(key)})),[busy,setBusy]=useState(false),[error,setError]=useState(''),[dirty,setDirty]=useState(false),[confirm,setConfirm]=useState(false);
  useEffect(()=>{let live=true;request('/api/evaluations').then(r=>{if(live)setCatalog(r);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[]);
  useEffect(()=>{try{sessionStorage.setItem(key,JSON.stringify(draft));}catch{}},[key,draft]);
@@ -48,6 +50,7 @@ export default function EvaluationReview({data,onClose}){
  const sample=batch?.samples.find(s=>s.id===sampleId),change=(k,v)=>setDraft(d=>({...d,[k]:v}));
  return <Modal title="研究评估 · 冻结样本与人工标注" onClose={onClose}><section className="evaluation-review" aria-label="研究评估">
   <p>完整冻结时间窗中的全部初筛层级，先标注、后揭示规则结果。新闻数量不等于独立事件数；当前用于诊断改进，不自动调参或批准交易。</p>{error&&<p role="alert" className="m-warning">{error}</p>}
+  <details onToggle={e=>{if(e.currentTarget.open)setForwardOpen(true);}}><summary>前向调用档案 · 基线与版本</summary>{forwardOpen&&<ForwardEvaluations/>}</details>
   <details open={!batch}><summary>建立新的评估批次</summary><form className="m-form" onSubmit={create}><div className="evaluation-form-grid"><label>批次名称<input required maxLength={100} value={draft.title} onChange={e=>change('title',e.target.value)}/></label><label>冻结的初筛规则<select required value={draft.rulesHash||catalog?.rules[0]?.hash||''} onChange={e=>change('rulesHash',e.target.value)}>{catalog?.rules.map(r=><option key={r.hash} value={r.hash}>{r.hash.slice(0,12)} · {time(r.activated_at)}</option>)}</select></label><label>判断窗口起点（本机时间）<input type="datetime-local" required value={draft.start} onChange={e=>change('start',e.target.value)}/></label><label>窗口终点（不含，本机时间）<input type="datetime-local" required value={draft.end} onChange={e=>change('end',e.target.value)}/></label></div><p>冻结后不追加新新闻，也不按结果挑选样本。最多 5000 条，超过时需缩短窗口，不能静默截取。</p><Button primary type="submit" disabled={busy||!catalog?.rules.length}>冻结整批样本</Button></form></details>
   <div className="evaluation-actions" aria-label="评估批次列表">{catalog?.batches.map(b=><Button key={b.id} disabled={busy} primary={batch?.id===b.id} onClick={()=>choose(b.id)}>{b.title} · {b.reviewed}/{b.total} · {b.state==='sealed'?'已封存':'标注中'}</Button>)}</div>
   {batch&&<><h3>{batch.title}</h3><p>{time(batch.start)} ≤ 判断时间 &lt; {time(batch.end)} · 冻结 {time(batch.frozenAt)} · v{batch.version}<br/>输入指纹 {batch.inputHash}</p>
