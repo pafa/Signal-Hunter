@@ -1,3 +1,4 @@
+import {openEvaluationReview} from './evaluation-review.mjs';
 import {strategyProfiles} from '../shared/strategy-profiles.mjs';
 import {openMarketSimulation} from './market-simulation.mjs';
 import {openSemanticEvents} from './semantic-events.mjs';
@@ -23,6 +24,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const clock=()=>new Date(now()).toISOString();
   const research=openResearch(store,{clock,seed:mode!=='research',...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:{})});
   const paper=openPaper(store,research,{clock,seed:mode!=='research'});
+  const evaluations=openEvaluationReview(store,{clock});
   const marketSimulations=Object.fromEntries(Object.entries(strategyProfiles).map(([accountId,profile])=>[accountId,openMarketSimulation(store,research,{accountId,profile,enabled:!offline,clock,...(marketInputs?{getInputs:()=>marketInputs(accountId)}:{})})]));
   const marketSimulation=marketSimulations.aggressive;
   const modelResearch=openModelResearchRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(modelRunner?{runner:modelRunner}:{}),now});
@@ -39,7 +41,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   if(offline)initializeDemoData(store);
   const service={
     mode,instance,
-    research,paper,observations,modelResearch,semanticEvents,marketSimulation,marketSimulations,
+    research,paper,observations,modelResearch,semanticEvents,evaluations,marketSimulation,marketSimulations,
     processEvents(){try{const changed=continuity.process(research.list());if(changed||store.checks().events?.state==='error')store.status('events',{state:'ok',receivedAt:clock()});return {ok:true,changed};}catch(error){store.status('events',{state:'error',attemptedAt:clock(),error:errorText(error)});return {error:errorText(error)};}},
     eventContinuity(params={}){return {...continuity.snapshot({...params,positions:paper.snapshot().positions,watchlist:store.watchlist()}),health:store.checks().events||{state:'pending'}};},
     eventDetail(id){return continuity.detail(id);},
