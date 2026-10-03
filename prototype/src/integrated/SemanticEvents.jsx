@@ -6,6 +6,7 @@ import {semanticKinds as kinds,semanticRunLabel,semanticScopeLabels} from '../..
 import './semantic-events.css';
 import SemanticMaterialLibrary from './SemanticMaterialLibrary';
 import SemanticBatches from './SemanticBatches';
+import EventClusters from './EventClusters';
 const actions={accept:'采纳此判断',reject:'不采纳',withdraw:'撤销采纳'};
 export function ComparisonResult({run}){
  const c=run.candidate?.comparison,hasMaterial=['left','right'].some(side=>run.packet.input[side].kind==='material');
@@ -20,16 +21,17 @@ export function ComparisonResult({run}){
  </>;
 }
 export default function SemanticEvents({initialPair=null,onBack}){
- const [batches,setBatches]=useState(false);
+ const [batches,setBatches]=useState(false),[clusters,setClusters]=useState(false);
  const [pair,setPair]=useState(initialPair||{left:null,right:null}),[picker,setPicker]=useState(null),[data,setData]=useState(null),[selected,setSelected]=useState(''),[detail,setDetail]=useState(null),[refresh,setRefresh]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[notes,setNotes]=useState({});
  useEffect(()=>{let live=true,timer;request('/api/semantic-events').then(result=>{if(!live)return;setData(result);setSelected(id=>id||result.runs[0]?.id||'');if(result.runs.some(r=>r.status==='running'))timer=setTimeout(()=>setRefresh(n=>n+1),2000);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;clearTimeout(timer);};},[refresh]);
  useEffect(()=>{let live=true;setDetail(null);if(selected)request(`/api/semantic-events/${selected}`).then(r=>{if(live)setDetail(r);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[selected,refresh]);
  async function action(path,body,select=false){setBusy(true);setError('');try{const r=await request(path,'POST',body);if(select)setSelected(r.id);setRefresh(n=>n+1);}catch(e){setError(e.message);}finally{setBusy(false);}}
  function start(){action('/api/semantic-events',Object.fromEntries(['left','right'].map(side=>[side,{id:pair[side].id,revision:pair[side].revision,...(pair[side].kind==='material'?{kind:'material'}:{})}])),true);}
  const ready=pair.left&&pair.right&&`${pair.left.kind||'news'}:${pair.left.id}`!==`${pair.right.kind||'news'}:${pair.right.id}`,run=detail?.id===selected?detail:null;
+ if(clusters)return <EventClusters onBack={()=>setClusters(false)} onResult={id=>{setClusters(false);setSelected(id);setRefresh(n=>n+1);}}/>;
  if(batches)return <SemanticBatches onBack={()=>setBatches(false)} onResult={id=>{setBatches(false);setSelected(id);setRefresh(n=>n+1);}}/>;
  return <section className="semantic-events" aria-label="事件语义比较">
-  <div className="event-actions"><Button onClick={onBack}>返回规则召回</Button><Button disabled={busy} onClick={()=>setRefresh(n=>n+1)}>刷新比较记录</Button><Button onClick={()=>setBatches(true)}>持久比较批次</Button></div>
+  <div className="event-actions"><Button onClick={onBack}>返回规则召回</Button><Button disabled={busy} onClick={()=>setRefresh(n=>n+1)}>刷新比较记录</Button><Button onClick={()=>setBatches(true)}>持久比较批次</Button><Button onClick={()=>setClusters(true)}>事件簇记录</Button></div>
   <p>从完整新闻库或已保存材料选择两侧，也可比较刚才的召回线索。Codex 判断仅作候选，冻结各侧阅读范围、输入版本与每次人工决定。采纳不改写研究，也不生成交易。</p>
   {error&&<p role="alert" className="m-warning">{error}</p>}
   <div className="event-pair">{['left','right'].map(side=><article key={side}><small>{side==='left'?'左侧':'右侧'}输入</small><h4>{pair[side]?.title||'尚未选择'}</h4>{pair[side]&&<p>{semanticScopeLabels[pair[side].contentScope]||'仅标题'} · v{pair[side].revision}</p>}<Button disabled={busy} onClick={()=>setPicker({side,kind:'news'})}>选择{side==='left'?'左侧':'右侧'}新闻</Button><Button disabled={busy} onClick={()=>setPicker({side,kind:'material'})}>选择{side==='left'?'左侧':'右侧'}材料</Button></article>)}</div>
