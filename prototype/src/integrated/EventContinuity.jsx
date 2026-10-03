@@ -1,3 +1,4 @@
+import SemanticEvents from './SemanticEvents';
 import React,{useEffect,useState} from 'react';
 import {Button,Modal} from '../major/Primitives';
 import {request,time} from '../major/api';
@@ -6,6 +7,7 @@ import './event-continuity.css';
 import {eventLinkKinds as kinds,eventLinkStates as states,priorityLabels} from '../../shared/event-labels.mjs';
 
 export default function EventContinuity({onClose,onNews,onTopic,mutate,busy}){
+ const [semantic,setSemantic]=useState(false);
  const [filter,setFilter]=useState('pending'),[q,setQ]=useState(''),[search,setSearch]=useState(''),[offset,setOffset]=useState(0),[refresh,setRefresh]=useState(0),[data,setData]=useState(null),[selected,setSelected]=useState(''),[detail,setDetail]=useState(null),[notes,setNotes]=useState({}),[error,setError]=useState(''),[loading,setLoading]=useState(false);
  useEffect(()=>{let live=true;setLoading(true);setError('');request(`/api/events?${new URLSearchParams({state:filter,q:search,offset,limit:30})}`).then(r=>{if(live){setData(r);setSelected(id=>r.items.some(i=>i.id===id)?id:r.items[0]?.id||'');}}).catch(e=>{if(live)setError(e.message);}).finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[filter,search,offset,refresh]);
  useEffect(()=>{let live=true;setDetail(null);if(selected)request(`/api/events/${selected}`).then(r=>{if(live)setDetail(r);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[selected,refresh]);
@@ -13,7 +15,9 @@ export default function EventContinuity({onClose,onNews,onTopic,mutate,busy}){
  const setNote=value=>setNotes(previous=>({...previous,[selected]:value}));
  const row=data?.items.find(c=>c.id===selected),item=detail&&row?{...row,...detail}:null;
  async function decide(state){if(!item)return;const result=await mutate(`/api/events/${item.id}`,'POST',{state,note,version:item.decisionVersion});if(result)setRefresh(n=>n+1);}
+ if(semantic)return <Modal title="Codex 事件语义比较" onClose={onClose}><SemanticEvents initialPair={item?.type==='news'?{left:item.left,right:item.right}:null} onBack={()=>setSemantic(false)}/></Modal>;
  return <Modal title="事件追踪 · 增量与历史召回" onClose={onClose}><section className="event-continuity" aria-label="事件追踪">
+ <Button onClick={()=>setSemantic(true)}>Codex 语义比较</Button>
  <p className="m-note">自动发现重复、进展和反向变化；核对后可保留关联或排除，随时撤销。关联用于组织线索，证据作用仍在研判时指定。</p>
  <form className="event-search" onSubmit={e=>{e.preventDefault();setSearch(q);setOffset(0);setRefresh(n=>n+1);}}><label>检索事件或公司<input value={q} maxLength={120} onChange={e=>setQ(e.target.value)} placeholder="标题关键词 / 股票代码"/></label><label>线索状态<select aria-label="线索状态" value={filter} onChange={e=>{setFilter(e.target.value);setOffset(0);}}>{Object.entries(states).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><Button type="submit" disabled={loading}>检索 / 刷新</Button></form>
  {data?.health?.state==='error'&&<p className="m-warning" role="alert">事件索引更新失败：{data.health.error}。保留上次候选；后台会重试，新闻与持仓仍可查看。</p>}

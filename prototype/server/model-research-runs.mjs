@@ -1,8 +1,9 @@
+import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {randomUUID} from 'node:crypto';
 import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest} from './codex-research.mjs';
 
 export function openModelResearchRuns(store,research,{enabled=false,config={},runner=generateCodexDraft,now=()=>Date.now()}={}){
- const db=store.db,jobs=new Map();let closed=false;
+ const db=store.db,jobs=new Map();let closed=false;initializeModelLease(db);
  db.exec(`CREATE TABLE IF NOT EXISTS model_research_runs(id TEXT PRIMARY KEY,topic_id TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,expires_at INTEGER NOT NULL,payload TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS model_research_topic ON model_research_runs(topic_id,created_at);`);
  const expiredView=(run,expiresAt)=>run.status==='running'&&expiresAt<now()?{...run,status:'interrupted',failure:{code:'interrupted',message:'上次调用未完成；保留输入，可手动重新生成'}}:run;
@@ -27,6 +28,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
    const run={id:randomUUID(),topicId,status:'running',packet,model:config.model,effort:config.effort||'high',createdAt:new Date(now()).toISOString()};
    db.exec('BEGIN IMMEDIATE');try{
     recover();if(db.prepare("SELECT 1 FROM model_research_runs WHERE status='running'").get())throw new Error('已有模型研判正在运行，请等待或取消后再试');
+    claimModelLease(db,run.id,now(),timeoutMs+30000);
     db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));db.exec('COMMIT');
    }catch(error){db.exec('ROLLBACK');throw error;}
    const controller=new AbortController();
@@ -41,7 +43,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
    }).catch(error=>{
     const failure=error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型调用失败；原研究保留，可检查配置后重试'};
     write({...run,status:failure.code==='cancelled'?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure});
-   }).finally(()=>jobs.delete(run.id));
+   }).finally(()=>{jobs.delete(run.id);releaseModelLease(db,run.id);});
    // HTTP starts return before completion. Observe storage failures even when nobody calls wait().
    // The initial input record remains available for interrupted-run recovery; do not log raw SQL.
    void done.catch(()=>console.error('模型研判记录保存失败；候选未确认落库，请检查本机存储。'));

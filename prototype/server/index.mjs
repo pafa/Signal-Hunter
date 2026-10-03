@@ -20,6 +20,8 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const url=new URL(req.url,'http://127.0.0.1:4179');
     if(!url.pathname.startsWith('/api/')&&staticHandler){staticHandler(req,res);return;}
     if(service.instance?.id&&(req.headers['x-signal-instance']||['POST','PATCH','DELETE'].includes(req.method))&&req.headers['x-signal-instance']!==service.instance.id){reply(409,{error:'数据集已切换或尚未核对，请刷新页面后再继续'});return;}
+    if(req.method==='GET'&&url.pathname==='/api/semantic-events'){reply(200,service.semanticEvents.list());return;}
+    if(req.method==='GET'&&/^\/api\/semantic-events\/[-a-z0-9]{36}$/.test(url.pathname)){reply(200,service.semanticEvents.get(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/events'){const params=Object.fromEntries(url.searchParams);for(const key of ['offset','limit'])if(key in params)params[key]=Number(params[key]);reply(200,service.eventContinuity(params));return;}
     if(req.method==='GET'&&/^\/api\/events\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.eventDetail(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/observations\/[a-f0-9]{64}\/receipts$/.test(url.pathname)){reply(200,service.observations.receipts(url.pathname.split('/')[3]));return;}
@@ -46,6 +48,12 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&url.pathname==='/api/semantic-events'){reply(202,service.semanticEvents.start(data));return;}
+    if(req.method==='POST'&&/^\/api\/semantic-events\/[-a-z0-9]{36}\/(cancel|decision)$/.test(url.pathname)){
+      const parts=url.pathname.split('/');
+      if(parts[4]==='cancel'){if(Object.keys(data).length)throw new Error('语义比较参数无效');reply(200,service.semanticEvents.cancel(parts[3]));}
+      else reply(200,service.semanticEvents.decide(parts[3],data));return;
+    }
     if(req.method==='POST'&&/^\/api\/research\/[^/]+\/model-runs$/.test(url.pathname)){
       if(Object.keys(data).some(k=>k!=='version'))throw new Error('模型调用仅接受研究版本；模型配置由本机服务管理');
       reply(202,service.modelResearch.start(url.pathname.split('/')[3],data));return;
