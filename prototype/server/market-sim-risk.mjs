@@ -1,0 +1,100 @@
+import {instrument} from '../shared/securities.mjs';
+import {marketConfigFields,marketErrors} from '../shared/market-simulation.mjs';
+export const marketFail=i=>{throw new Error(marketErrors[i]);};
+const max=BigInt(Number.MAX_SAFE_INTEGER);
+function safe(n){if(n>max||n< -max)marketFail(12);return Number(n);}
+export function decimal(value){
+ const s=String(value);if(!/^(0|[1-9]\d{0,10})(\.\d{1,6})?$/.test(s))marketFail(12);
+ const [whole,fraction='']=s.split('.');return BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0'));
+}
+const rounded=(a,b)=>(a+b/2n)/b;
+// All account amounts are integer USD cents. Price and FX multiplication uses decimal integers.
+export function amount(qty,price,fx='1'){if(!Number.isSafeInteger(qty)||qty<0)marketFail(12);return safe(rounded(BigInt(qty)*decimal(price)*decimal(fx),10000000000n));}
+export const cents=value=>amount(1,value);
+export const fee=(gross,bps)=>safe(rounded(BigInt(gross)*decimal(bps),10000000000n));
+export const sum=values=>safe(values.reduce((n,v)=>n+BigInt(v),0n));
+export function validateConfig(data){
+ if(!data||Object.keys(data).sort().join(',')!==Object.keys({...marketConfigFields,allowOvernight:0}).sort().join(','))marketFail(3);
+ for(const k of Object.keys(marketConfigFields)){const n=data[k];if(typeof n!=='number'||!Number.isFinite(n)||n<0||n>(k.endsWith('Pct')?100:k.endsWith('Bps')?1000:k==='maxHoldDays'?365:k==='maxOrderMinutes'?10080:3600))marketFail(3);decimal(n);if(!k.endsWith('Pct')&&!k.endsWith('Bps')&&(!Number.isSafeInteger(n)||n<1))marketFail(3);}
+ if(data.issuerCapPct<=0||data.themeCapPct<=0||typeof data.allowOvernight!=='boolean')marketFail(3);
+ return structuredClone(data);
+}
+function instant(s){
+ if(typeof s!=='string')return false;
+ const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|([+-])(\d{2}):(\d{2}))$/.exec(s);
+ if(!m||!Number.isFinite(Date.parse(s)))return false;
+ const [,year,month,day,hour,minute,second]=m,days=new Date(Date.UTC(Number(year),Number(month),0)).getUTCDate();
+ return Number(month)>=1&&Number(month)<=12&&Number(day)>=1&&Number(day)<=days&&Number(hour)<24&&Number(minute)<60&&Number(second)<60&&(!m[9]||Number(m[9])<=23&&Number(m[10])<60);
+}
+export const isInstant=instant;
+export function quoteIssues(symbol,q,config,at,{execution=false,allowLimitUp=false}={}){
+ const issues=[],now=Date.parse(at),spec=instrument(symbol),bad=reason=>issues.push(`${symbol}：${reason}`);
+ if(!q){bad('缺少可核验市场输入');return issues;}
+ if(q.symbol!==symbol||q.currency!==spec.currency||q.kind!=='market-simulation-input'||q.verified!==true||!q.source||!q.rulesVersion||!q.id||!q.issuerId)bad('证券身份、来源或规则未核验');
+ for(const k of ['asOf','receivedAt','validUntil'])if(!instant(q[k]))bad('行情时间缺失');
+ if(Date.parse(q.asOf)>Date.parse(q.receivedAt)||Date.parse(q.receivedAt)>now||now-Date.parse(q.asOf)>config.quoteMaxAgeSeconds*1000||now>Date.parse(q.validUntil))bad('行情过期或含未来数据');
+ try{if(decimal(q.bid)<=0n||decimal(q.ask)<decimal(q.bid)||decimal(q.mark)<=0n)bad('报价无效');}catch{bad('报价精度无效');}
+ const f=q.fx;
+ if(!f?.id||!f.source||!instant(f.asOf)||!instant(f.receivedAt)||!instant(f.validUntil)||Date.parse(f.asOf)>Date.parse(f.receivedAt)||Date.parse(f.receivedAt)>now||Date.parse(f.validUntil)<now)bad('FX缺失、过期或含未来数据');
+ try{if(decimal(f?.usdPerUnit)<=0n||spec.currency==='USD'&&decimal(f.usdPerUnit)!==1000000n)bad('FX币种口径无效');}catch{bad('FX精度无效');}
+ if(execution){
+  if(q.tradable!==true||q.halted!==false||(q.priceLimitState!=='normal'&&!(allowLimitUp&&q.priceLimitState==='limit-up')))bad('休市、停牌、涨跌停或交易状态未知');
+  if(!instant(q.sessionOpen)||!instant(q.sessionClose)||now<Date.parse(q.sessionOpen)||now>=Date.parse(q.sessionClose))bad('不在已核验交易时段');
+  if(!instant(q.sellableAt)||!instant(q.settlesAt)||Date.parse(q.sellableAt)<Date.parse(q.asOf)||Date.parse(q.settlesAt)<Date.parse(q.asOf))bad('可卖时间或结算时间未核验');
+  for(const k of ['buyLot','sellLot','minBuyQty','availableBuy','availableSell'])if(!Number.isSafeInteger(q[k])||q[k]<(k.startsWith('available')?0:1))bad('数量单位或可用流动性未核验');
+  try{if(decimal(q.tickSize)<=0n)bad('最小报价单位无效');}catch{bad('最小报价单位无效');}
+ }
+ return [...new Set(issues)];
+}
+export const working=o=>['approved','partial'].includes(o.status);
+export function valuation(book,quotes,at){
+ const missing=[],positions=book.lots.map(l=>{
+  const q=quotes[l.symbol],issues=quoteIssues(l.symbol,q,book.config,at);missing.push(...issues);
+  let value=null;try{if(!issues.length)value=amount(l.qty,q.mark,q.fx.usdPerUnit);}catch{missing.push(`${l.symbol}：估值金额无效`);}
+  return {...l,valueCents:value,unrealizedCents:value===null?null:value-l.costCents,overdue:Date.parse(l.holdUntil)<=Date.parse(at)};
+ });
+ const pendingCash=sum(book.unsettled.map(s=>s.amountCents)),nav=missing.length?null:sum([book.cashCents,pendingCash,...positions.map(p=>p.valueCents)]);
+ const reserved=sum(book.orders.filter(o=>working(o)&&o.side==='buy').map(o=>o.budgetCents-o.spentCents));
+ return {positions,settledCashCents:book.cashCents,unsettledCashCents:pendingCash,reservedCents:reserved,availableCashCents:book.cashCents-reserved,navCents:nav,pnlCents:nav===null?null:nav-book.initialCents,realizedCents:book.realizedCents,feesCents:book.feesCents,missing:[...new Set(missing)]};
+}
+export function assessOrder(book,order,quotes,at){
+ const reasons=[],q=quotes[order.symbol],v=valuation(book,quotes,at);
+ reasons.push(...quoteIssues(order.symbol,q,book.config,at,{execution:true,allowLimitUp:order.side==='buy'&&book.profile?.entry==='cn-main-board-limit-up'}));
+ if(Date.parse(order.expiresAt)<=Date.parse(at))reasons.push('订单已过期');
+ if(order.side==='buy'&&Date.parse(order.holdUntil)<=Date.parse(at))reasons.push('持有期限已到');
+ if(reasons.length)return {eligible:false,reasons:[...new Set(reasons)],valuation:v};
+ const outstanding=book.orders.filter(o=>working(o)&&o.id!==order.id),qty=order.qty-order.filledQty;
+ if(decimal(order.limitPrice)%decimal(q.tickSize)!==0n)reasons.push('限价不符合已核验报价单位');
+ if(order.side==='sell'){
+  const lots=book.lots.filter(l=>l.symbol===order.symbol&&l.topicId===order.topicId&&Date.parse(l.sellableAt)<=Date.parse(at));
+  const reserved=outstanding.filter(o=>o.side==='sell'&&o.symbol===order.symbol&&o.topicId===order.topicId).reduce((n,o)=>n+o.qty-o.filledQty,0);
+  const available=lots.reduce((n,l)=>n+l.qty,0)-reserved;
+  if(qty>available)reasons.push('超过扣除已批卖单后的可卖数量');
+  if(qty%q.sellLot!==0)reasons.push('卖出数量不符合已核验单位，碎股交易另行核验');
+ }else{
+  if(order.qty<q.minBuyQty||qty%q.buyLot!==0)reasons.push('买入数量不符合已核验申报单位');
+  if(!book.config.allowOvernight&&Date.parse(order.holdUntil)>Date.parse(q.sessionClose))reasons.push('持有期限超过当前交易时段');
+  if(Date.parse(order.holdUntil)-Date.parse(at)>book.config.maxHoldDays*86400000)reasons.push('超过最长持有期限');
+  const buys=[...outstanding.filter(o=>o.side==='buy'),order],projected=[...v.positions],costs=[];
+  reasons.push(...v.missing);
+  for(const o of buys){
+   const bq=quotes[o.symbol],issues=quoteIssues(o.symbol,bq,book.config,at);if(issues.length){reasons.push(...issues);continue;}
+   const remaining=o.qty-o.filledQty,gross=amount(remaining,o.limitPrice,bq.fx.usdPerUnit),charge=fee(gross,book.config.feeBps),cost=gross+charge;
+   if(cost>o.budgetCents-o.spentCents)reasons.push(`${o.symbol}：限价与费用超过剩余USD预算`);
+   costs.push(cost);projected.push({symbol:o.symbol,topicId:o.topicId,valueCents:amount(remaining,bq.mark,bq.fx.usdPerUnit)});
+  }
+  if(!reasons.length){
+   const used=sum(costs),remainingCash=book.cashCents-used;
+   const futureNav=sum([remainingCash,v.unsettledCashCents,...projected.map(p=>p.valueCents)]);
+   if(remainingCash<0||book.cashCents-sum(buys.map(o=>o.budgetCents-o.spentCents))<0)reasons.push('可用现金不足以覆盖订单预算');
+   if(futureNav<=0)reasons.push('预计净值无效');
+   else{
+    if(remainingCash/futureNav*100<book.config.cashFloorPct)reasons.push('低于现金底线');
+    const issuerValue=sum(projected.filter(p=>quotes[p.symbol]?.issuerId===q.issuerId).map(p=>p.valueCents)),themeValue=sum(projected.filter(p=>p.topicId===order.topicId).map(p=>p.valueCents));
+    if(issuerValue/futureNav*100>book.config.issuerCapPct)reasons.push('超过跨市场合并发行人上限');
+    if(themeValue/futureNav*100>book.config.themeCapPct)reasons.push('超过主题仓位上限');
+   }
+  }
+ }
+ return {eligible:!reasons.length,reasons:[...new Set(reasons)],valuation:v};
+}
