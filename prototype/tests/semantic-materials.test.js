@@ -61,3 +61,28 @@ test('HTTP selects material created through research without reading remote cont
  try{let topic=service.research.create({title:'合成研究',summary:'材料对照测试'});for(const name of ['甲','乙'])topic=service.research.saveMaterial(topic.id,{...source(name,`${name}正文`),version:topic.version,stance:'unverified',family:'corporate',step:topic.chain[0].id,interpretation:'核对事件对象'});const before=service.research.get(topic.id),library=await call('GET','/api/semantic-events/materials?limit=1');assert.equal(library.status,200);assert.equal(library.result.total,2);assert.equal(library.result.items[0].body,undefined);const refs=service.research.materialList(topic.id).materials.map(ref),s=await call('POST','/api/semantic-events',{left:refs[0],right:refs[1]});assert.equal(s.status,202);await service.semanticEvents.wait(s.result.id);const detail=await call('GET',`/api/semantic-events/${s.result.id}`);assert.equal(detail.result.packet.input.left.body,'甲正文');assert.deepEqual(service.research.get(topic.id),before);assert.equal((await call('GET','/api/semantic-events/materials?limit=1000')).status,400);
  }finally{await service.close();store.close();}
 });
+test('material and mixed pairs preserve another accepted candidate and distinguish rejection from obsolete material errors over HTTP',async()=>{
+ for(const mixed of [false,true]){
+  const f=fixture(),service=createService(f.store,{mode:'research',modelConfig:config,semanticRunner:async p=>candidate(p)});try{
+   f.store.ingest([{id:'n1',title:'合成标题',url:'https://example.invalid/n1',publisher:'测试',publishedAt:at}],at);
+   const input={left:f.input.left,right:mixed?{id:'n1',revision:1}:f.input.right};
+   const old=f.runs.start(input);await f.runs.wait(old.id);
+   const current=f.runs.start({left:input.right,right:input.left});await f.runs.wait(current.id);
+   f.runs.decide(current.id,{version:0,action:'accept',note:'核对当前候选'});
+   const before=JSON.stringify(f.runs.get(current.id)),rows=JSON.stringify(f.store.db.prepare('SELECT * FROM research_materials ORDER BY id').all());
+   const handler=createHandler(f.store,service);
+   const call=async(url,data)=>{let status,body;await handler({method:'POST',url,headers:{host:'127.0.0.1:4179','content-type':'application/json'},async *[Symbol.asyncIterator](){yield JSON.stringify(data);}},{writeHead:v=>status=v,end:v=>body=JSON.parse(v)});return {status,body};};
+   const rejected=await call(`/api/semantic-events/${old.id}/decision`,{version:1,action:'reject',note:'仅拒绝旧候选'});
+   assert.equal(rejected.status,400);assert.match(rejected.body.error,/已采纳另一份候选/);assert.doesNotMatch(rejected.body.error,/材料已修订/);
+   assert.equal(JSON.stringify(f.runs.get(current.id)),before);assert.equal(JSON.stringify(f.store.db.prepare('SELECT * FROM research_materials ORDER BY id').all()),rows);
+   f.save(source('收购','虚构甲公司终止收购乙公司。'));
+   const obsolete=await call('/api/semantic-events',input);
+   assert.equal(obsolete.status,400);assert.match(obsolete.body.error,/材料已修订、缺失或快照校验失败/);assert.doesNotMatch(obsolete.body.error,/已采纳另一份候选/);
+   const changed=f.runs.get(current.id);assert.equal(changed.stale,true);assert.equal(changed.active,false);assert.equal(changed.history.length,1);
+   assert.deepEqual(changed.packet,JSON.parse(before).packet);assert.deepEqual(changed.candidate,JSON.parse(before).candidate);
+   f.runs.decide(current.id,{version:1,action:'withdraw',note:'明确撤销旧版本采纳'});
+   const allowed=await call(`/api/semantic-events/${old.id}/decision`,{version:2,action:'reject',note:'撤销后拒绝旧候选'});
+   assert.equal(allowed.status,200);assert.equal(allowed.body.history.length,3);assert.equal(allowed.body.decision.action,'reject');
+  }finally{await service.close();await f.close();}
+ }
+});
