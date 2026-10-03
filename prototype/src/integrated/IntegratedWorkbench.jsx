@@ -1,20 +1,22 @@
 import {priorityLabels} from '../../shared/event-labels.mjs';
-import NewsLibrary from '../major/NewsLibrary';
+import {createDeferredView} from '../DeferredView';
+const NewsLibrary=createDeferredView(()=>import('../major/NewsLibrary'),{title:'完整新闻库'});
 import React,{useEffect,useRef,useState} from 'react';
 import DatasetIdentity from './DatasetIdentity';
-const EvaluationReview=React.lazy(()=>import('./EvaluationReview'));
-const MarketSimulation=React.lazy(()=>import('./MarketSimulation'));
-const ObservationInbox=React.lazy(()=>import('./ObservationInbox'));
-import DataDesk from '../terminal/DataDesk';
+const EvaluationReview=createDeferredView(()=>import('./EvaluationReview'),{title:'研究评估',mode:'dialog'});
+const MarketSimulation=createDeferredView(()=>import('./MarketSimulation'),{title:'市场模拟',mode:'dialog'});
+const ObservationInbox=createDeferredView(()=>import('./ObservationInbox'),{title:'观察待办',mode:'dialog'});
+const DataDesk=createDeferredView(()=>import('../terminal/DataDesk'),{title:'数据源',mode:'dialog'});
 import '../terminal/terminal.css';
 import {Button,Modal,ErrorContext} from '../major/Primitives';
 import {request,time} from '../major/api';
 import {NewTopic,AddEvidence,CompanyForm,Rulebook,VerifyEvidence} from '../major/ResearchForms';
-import TopicDetail from '../major/TopicDetail';
-import NewsInspector from '../major/NewsInspector';
+const TopicDetail=createDeferredView(()=>import('../major/TopicDetail'),{title:'研究、证据与历史追踪'});
+const NewsInspector=createDeferredView(()=>import('../major/NewsInspector'),{title:'事件增量核验'});
 import '../major/major.css';
+import '../major/research-materials.css';
 import MarketPanel from './MarketPanel';
-import CompanyDossier from './CompanyDossier';
+const CompanyDossier=createDeferredView(()=>import('./CompanyDossier'),{title:'公司研究',mode:'dialog'});
 import {readResearchContext,researchContexts} from './research-context';
 import EventBrief from './EventBrief';
 import {eventProfile,eventGroups} from './event-view';
@@ -27,7 +29,7 @@ import './v8.css';
 import './event-continuity.css';
 import {orderedTopics} from './decision-model';
 import {HealthStrip,Operations} from './Operations';
-const EventContinuity=React.lazy(()=>import('./EventContinuity'));
+const EventContinuity=createDeferredView(()=>import('./EventContinuity'),{title:'事件追踪',mode:'dialog'});
 export default function IntegratedWorkbench(){
  const [data,setData]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[selected,setSelected]=useState(()=>new URLSearchParams(window.location.search).get('topic')||''),[stock,setStock]=useState(()=>readResearchContext(new URLSearchParams(window.location.search).get('topic')).symbol),[dialog,setDialog]=useState(null),[tab,setTab]=useState('evidence'),[filter,setFilter]=useState('review'),[archived,setArchived]=useState(false),[eventScope,setEventScope]=useState('all'),[search,setSearch]=useState(''),[eventType,setEventType]=useState('all'),[focus,setFocus]=useState('research'),[recent,setRecent]=useState(()=>researchContexts().map(r=>r.id).reverse());
  const active=useRef(true),sequence=useRef(0),inFlight=useRef(false),readFlight=useRef(false);
@@ -60,16 +62,16 @@ export default function IntegratedWorkbench(){
  <footer className="i-footer"><span>v0.11 · 公司关系可纠错 · 初筛留样 · 本人批准演练</span><span>{data?.autoWatch?.deferred?.length?`关注待处理 ${data.autoWatch.deferred.length} · `:''}{busy?'保存中':data?'本机存储已连接':'连接中'} · {watch.length}/40 重点标的</span></footer>
  {notice&&<div className="m-toast" role="status">{notice}<button aria-label="关闭提示" onClick={()=>setNotice('')}>×</button></div>}
  {dialog?.type==='dossier'&&data&&<CompanyDossier key={dialog.symbol} symbol={dialog.symbol} topicId={topic?.id} data={data} onClose={close} onCompany={openCompany} onTopic={id=>{const t=topics.find(t=>t.id===id);if(t){choose(t);close();}}} onEdit={(id,symbol)=>{const t=topics.find(t=>t.id===id);if(t){choose(t);open({type:'company',symbol});}}} onPropose={(symbol,id)=>proposal(symbol,'buy',topics.find(t=>t.id===id))}/> }
- {dialog?.type==='evaluation'&&data&&<React.Suspense fallback={<p role="status">正在读取研究评估…</p>}><EvaluationReview data={data} onClose={close}/></React.Suspense>}
- {dialog?.type==='market-simulation'&&data&&<React.Suspense fallback={<p role="status">正在读取市场模拟…</p>}><MarketSimulation data={data} onClose={close}/></React.Suspense>}
- {dialog?.type==='observations'&&<React.Suspense fallback={<p role="status">正在读取观察待办…</p>}><ObservationInbox data={data} initialTopicId={topic?.id} busy={busy} mutate={mutate} onClose={close} onTopic={id=>{const t=topics.find(t=>t.id===id);if(t){choose(t);close();}}}/></React.Suspense>}
+ {dialog?.type==='evaluation'&&data&&<EvaluationReview data={data} onClose={close}/>}
+ {dialog?.type==='market-simulation'&&data&&<MarketSimulation data={data} onClose={close}/>}
+ {dialog?.type==='observations'&&<ObservationInbox data={data} initialTopicId={topic?.id} busy={busy} mutate={mutate} onClose={close} onTopic={id=>{const t=topics.find(t=>t.id===id);if(t){choose(t);close();}}}/>}
  {dialog?.type==='operations'&&data&&<Operations data={data} onClose={close} busy={busy} onControl={(name,payload)=>mutate(`/api/operations/${name}`,'POST',payload)}/>}
  {dialog?.type==='data'&&<DataDesk onClose={()=>{close();void load();}}/>}{dialog?.type==='rules'&&<Rulebook onClose={close}/>}
  {dialog?.type==='new'&&<NewTopic onClose={close} busy={busy} onCreate={async p=>{const r=await mutate('/api/research','POST',p);if(r){setSelected(r.createdTopicId);close();}}}/>}
  {dialog?.type==='evidence'&&topic&&<AddEvidence topic={topic} onClose={close} busy={busy} mutate={mutate}/>}{dialog?.type==='company'&&topic&&<CompanyForm topic={topic} onClose={close} busy={busy} mutate={mutate} watch={watch} deferred={data?.autoWatch?.deferred||[]} initialSymbol={dialog.symbol||''}/>}
  {dialog?.type==='verify'&&topic&&<VerifyEvidence topic={topic} evidence={dialog.evidence} onClose={close} busy={busy} mutate={mutate}/>}
  {dialog?.type==='detail'&&topic&&<Modal title="研究、证据与历史追踪" onClose={close}><TopicDetail topic={topic} topics={topics} busy={busy} mutate={mutate} tab={tab} setTab={setTab} onEvidence={()=>open({type:'evidence'})} onVerify={e=>open({type:'verify',evidence:e})}/></Modal>}
- {dialog?.type==='event-continuity'&&<React.Suspense fallback={<div role="status">正在打开事件追踪…</div>}><EventContinuity busy={busy} mutate={mutate} onClose={close} onTopic={id=>{const t=topics.find(t=>t.id===id);if(t){choose(t);close();}}} onNews={async id=>{try{const news=await request(`/api/news/${id}`);open({type:'news',newsId:id,news});}catch(e){setError(e.message);}}}/></React.Suspense>}
+ {dialog?.type==='event-continuity'&&<EventContinuity busy={busy} mutate={mutate} onClose={close} onTopic={id=>{const t=topics.find(t=>t.id===id);if(t){choose(t);close();}}} onNews={async id=>{try{const news=await request(`/api/news/${id}`);open({type:'news',newsId:id,news});}catch(e){setError(e.message);}}}/>}
  {dialog?.type==='news-library'&&<Modal title="完整新闻库与漏筛复核" onClose={close}><NewsLibrary onOpen={news=>open({type:'news',newsId:news.id,news})}/></Modal>}
  {dialog?.type==='news'&&<Modal title="事件增量核验" onClose={close}><NewsInspector news={dialog.news||inbox.find(n=>n.id===dialog.newsId)} topics={topics} busy={busy} mutate={mutate} onTarget={id=>{const t=topics.find(t=>t.id===id);if(t)choose(t);}} onCreated={id=>{setSelected(id);setStock('');setArchived(false);setEventScope('all');setEventType('all');setSearch('');close();}}/></Modal>}
  {dialog?.type==='proposal'&&book&&dtopic&&<Proposal book={book} topic={dtopic} workflow={data.workflow?.find(w=>w.topicId===dtopic.id)} symbol={dialog.symbol} side={dialog.side} onClose={close} mutate={mutate} busy={busy}/>}
