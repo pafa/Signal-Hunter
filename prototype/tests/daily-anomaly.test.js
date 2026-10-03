@@ -77,3 +77,18 @@ test('upstream duplicate dates remain visible after parser deduplication and blo
  const parsed=parseDaily(p,'AAPL.US',anomalyAt);assert.equal(parsed.points.length,1);assert.deepEqual(parsed.duplicateDates,['2026-10-02']);
  const q=anomalyQuote();q.duplicateDates=parsed.duplicateDates;assert.equal(evaluate(condition(),q).state,'unknown');q.duplicateDates=['2026-08-03'];assert.equal(evaluate(condition(),q).state,'true');
 });
+
+test('malformed upstream corporate actions must fail instead of becoming an empty action list',()=>{
+ const q=anomalyQuote(),payload=events=>({chart:{result:[{meta:{symbol:'AAPL',currency:'USD'},timestamp:q.points.map(p=>Date.parse(p.at)/1000),indicators:{quote:[{close:q.points.map(p=>p.close),volume:q.points.map(p=>p.volume)}]},events}]}});
+ for(const events of [{splits:{bad:{date:'unknown'}}},{dividends:{bad:{date:null}}},{splits:{bad:null}},{splits:[]},{splits:'invalid'},null,[]])assert.throws(()=>parseDaily(payload(events),'AAPL.US',anomalyAt),/公司行动/);
+ const parsed=parseDaily(payload({splits:{valid:{date:Date.parse('2026-09-30T13:30Z')/1000,splitRatio:'2:1'}}}),'AAPL.US',anomalyAt);
+ assert.equal(parsed.actionsParsed,true);for(const metric of ['return','volume'])assert.equal(evaluate(condition({metric}),parsed).state,'unknown');
+});
+
+test('legacy daily caches require action parsing provenance before new statistical evaluation',()=>{
+ const f=persistent();try{
+  f.create();f.sample();const frozen=JSON.stringify(f.inbox.snapshot().items),q=anomalyQuote();delete q.actionsParsed;
+  for(const metric of ['return','volume'])assert.equal(evaluate(condition({metric}),q).state,'unknown');
+  assert.equal(f.sample(q).added,0);assert.equal(JSON.stringify(f.inbox.snapshot().items),frozen);
+ }finally{f.store.close();}
+});
