@@ -2,6 +2,7 @@ import React,{useEffect,useRef,useState} from 'react';
 import {Button} from './Primitives';
 import {request,time} from './api';
 import ResearchDossier from './ResearchDossier';
+import MaterialityReview from './MaterialityReview';
 import './model-research.css';
 
 const states={running:'生成中',candidate:'待复核候选',adopted:'已采纳为草稿',failed:'生成失败',cancelled:'已取消',interrupted:'运行中断'};
@@ -42,6 +43,7 @@ export default function ModelResearch({topic,busy,mutate}){
     {stale&&detail.status==='candidate'&&<p className="m-warning">当前研究已更新到 v{topic.version}，这份候选基于旧版本，不能直接采纳；请重新生成。</p>}
     <ResearchDossier topic={{...detail.packet.input,version:detail.packet.input.topicVersion,dossier:{sections:candidate.sections,reviewStatus:'draft',preparedBy:`Codex · ${candidate.trace.model} · 未经本人复核`,preparedAt:candidate.trace.finishedAt,basedOnResearchVersion:detail.packet.input.topicVersion}}}/>
     {candidate.missingEvidence.length>0&&<div className="model-missing"><h4>还需要核验</h4><ul>{candidate.missingEvidence.map((item,i)=><li key={i}>{item}</li>)}</ul></div>}
+    <MaterialityReview review={{...detail.packet.input.materialityReview,topicVersion:detail.packet.input.topicVersion,checks:candidate.materialityReviews}} evidence={detail.packet.input.evidence}/>
     <details className="model-trace"><summary>本次生成依据</summary><p>模型 {candidate.trace.model} · {candidate.trace.effort} · {candidate.trace.cliVersion}<br/>材料指纹 {candidate.trace.inputHash}<br/>提示词版本 {candidate.trace.promptVersion} · 生成于 {time(candidate.trace.finishedAt)}</p></details>
     {detail.status==='candidate'&&<div className="model-research-actions"><p className="m-note">采纳后保存为新的研判草稿，原版本保留在历史中；你仍可编辑并完成核对。</p><Button primary disabled={busy||working||stale} onClick={()=>act('adopt')}>采纳为研判草稿</Button></div>}
    </>}

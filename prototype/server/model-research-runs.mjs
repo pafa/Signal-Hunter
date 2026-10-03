@@ -4,10 +4,11 @@ import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,
 
 export function validateCandidate(result,packet,{model,topicId}){
  validatePacket(packet);
- validateCodexDraft({sections:result?.sections,missingEvidence:result?.missingEvidence},packet);
+ const output={sections:result?.sections,missingEvidence:result?.missingEvidence,...(result?.materialityReviews===undefined?{}:{materialityReviews:result.materialityReviews})};
+ validateCodexDraft(output,packet);
  if(result.status!=='candidate'||result.reviewStatus!=='unreviewed'||packet.input.topicId!==topicId||result.trace?.inputHash!==packet.inputHash||result.trace?.model!==model||result.trace?.topicVersion!==packet.input.topicVersion||result.trace?.topicId!==topicId||typeof result.rawOutput!=='string'||digest(result.rawOutput)!==result.trace.outputHash)throw new CodexResearchError('output');
  let raw;try{raw=validateCodexDraft(JSON.parse(result.rawOutput),packet);}catch{throw new CodexResearchError('output');}
- if(digest(raw)!==digest({sections:result.sections,missingEvidence:result.missingEvidence}))throw new CodexResearchError('output');
+ if(digest(raw)!==digest(output))throw new CodexResearchError('output');
 }
 
 export function openModelResearchRuns(store,research,{enabled=false,config={},runner=generateCodexDraft,now=()=>Date.now(),onStart=()=>{}}={}){

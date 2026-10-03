@@ -7,14 +7,15 @@ import {join,isAbsolute} from 'node:path';
 import {createHash} from 'node:crypto';
 import {PACKET_VERSION} from './research-materials.mjs';
 import {validateDossierSections} from '../shared/research-dossier.mjs';
+import {MATERIALITY_REVIEW_SCHEMA,validateMaterialityReviews} from './materiality-review.mjs';
 
-export const CODEX_PROMPT_VERSION='codex-research-6';
+export const CODEX_PROMPT_VERSION='codex-research-7';
 export const digest=value=>createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
 const sectionIds=['facts','materiality','companies','scenarios','conditions'];
 const textSchema={type:'string'};
-export const CODEX_DRAFT_SCHEMA={type:'object',additionalProperties:false,required:['sections','missingEvidence'],properties:{
+export const CODEX_DRAFT_SCHEMA={type:'object',additionalProperties:false,required:['sections','missingEvidence','materialityReviews'],properties:{
  sections:{type:'array',items:{type:'object',additionalProperties:false,required:['id','title','paragraphs','sourceIds'],properties:{id:{type:'string',enum:sectionIds},title:textSchema,paragraphs:{type:'array',items:textSchema},sourceIds:{type:'array',items:textSchema}}}},
- missingEvidence:{type:'array',items:textSchema}
+ missingEvidence:{type:'array',items:textSchema},materialityReviews:MATERIALITY_REVIEW_SCHEMA
 }};
 const messages={configuration:'请配置本机 Codex 可执行路径、模型和推理强度',packet:'研判材料包无效、指纹不符或超过 512 KB',unavailable:'本机 Codex 无法启动',timeout:'Codex 研判超时；可在检查运行状态后重试',cancelled:'Codex 研判已取消',process:'Codex 调用失败，请在本机检查登录、模型权限和额度',protocol:'Codex 返回了无法识别的运行记录',tool:'Codex 尝试调用工具，本次候选未接受',limit:'Codex 输出超过限制，本次候选未接受',output:'Codex 研判格式或引用校验失败'};
 export class CodexResearchError extends Error{
@@ -32,7 +33,7 @@ export function validatePacket(packet){
  return packet;
 }
 export function validateCodexDraft(output,packet){
- if(!output||typeof output!=='object'||Array.isArray(output)||Object.keys(output).some(k=>!['sections','missingEvidence'].includes(k)))throw new CodexResearchError('output');
+ if(!output||typeof output!=='object'||Array.isArray(output)||Object.keys(output).some(k=>!['sections','missingEvidence','materialityReviews'].includes(k)))throw new CodexResearchError('output');
  let sections;
  try{sections=validateDossierSections(output.sections,packet.input.evidence);}catch{throw new CodexResearchError('output');}
  if(sections.length!==sectionIds.length||sections.some((s,i)=>s.id!==sectionIds[i])||output.sections.some(s=>Object.keys(s).some(k=>!['id','title','paragraphs','sourceIds'].includes(k)))||!Array.isArray(output.missingEvidence)||output.missingEvidence.length>30||output.missingEvidence.some(s=>typeof s!=='string'||!s.trim()||s.length>2000))throw new CodexResearchError('output');
@@ -47,7 +48,8 @@ export function validateCodexDraft(output,packet){
   }
  }
  if(output.missingEvidence.some(text=>references(text).some(id=>!known.has(id))))throw new CodexResearchError('output');
- return {sections,missingEvidence:output.missingEvidence.map(s=>s.trim())};
+ let materialityReviews;try{materialityReviews=validateMaterialityReviews(output.materialityReviews,packet);}catch{throw new CodexResearchError('output');}
+ return {sections,missingEvidence:output.missingEvidence.map(s=>s.trim()),...(materialityReviews===undefined?{}:{materialityReviews})};
 }
 // Do not inherit the desktop task's tool pipe, shell hooks, API keys or model-provider overrides.
 // Authentication remains with the installed Codex. No credential is read or copied by this app.
@@ -62,6 +64,7 @@ export function codexPrompt(packet){
  `若包含sourceRevision，它是同一来源此前研究和材料的冻结历史上下文，不能当作当前事实或新增独立来源。比较本版与历史版本的新增、删去、否认、阶段变化和未改变内容；旧研判是旧判断，不等于已证实事实。引用仍只用当前evidence.id，解释哪些变化有本版支持，缺少正文或无法确认时明确未知。\n`+
  `若包含quantityEvidence，它只是材料原文的金额和百分数字面索引，不是新的独立证据。normalizedValue仅为明确币种与倍率的十进制字符串换算；normalization不是literal-only的记录不能用于计算。保留原文中的约数、上下限、否定、区间与条件；percent单位的10表示10%，不是0.1。必须回看原文、证据ID、材料版本和field/start/end位置，核对数字对应的主体、指标、期间、币种及规模；不得将订单当收入、存量当流量、季度与全年直接比较，或把未识别/省略数字解释为零。仅相同口径才能比较，缺少业务基准或事前预期时列出缺口。\n`+
  ARTICLE_SCOPE_INSTRUCTIONS+
+ `materialityReviews必须逐项覆盖input.materialityReview.targets，每个target.id恰好一次，无目标时输出空数组。每项仅有targetId、verdict、reason、citations；citations每项仅有evidenceId、field(title/body)、quote。对照目标的主体、指标、期间、数值、单位、性质及原预期事前依据，回看其evidenceIds所选材料，不能用其他引用替代。kind为assumption时verdict必须为assumption；材料值用consistent（原文支持目标口径）、contradicted（原文与所填口径冲突）、unknown（缺少足够依据）。consistent与contradicted必须有逐字原文引用，每项最多5段，每段4至1200字符；consistent引用还必须包含可明确换算为该币种/百分数和数值的原文，不能只引公司名或无单位数字。reason最多1600字符，明确主体/指标/期间、实绩/预测/目标、区间/约数及缺口；找到同值不等于口径一致，订单不等于收入，未实现不等于实绩。历史sourceCheck仅为当时字面匹配；保存的计算、comparable和事前可用标记均不证明财务含义或市场共识。选用旧修订时检查其他已提供修订是否否定它，不能将旧原文当当前事实。冲突和未知须在materiality章节及missingEvidence说明，不能沿用不成立的比例作事实结论。所有判定都是模型候选，不是独立审计或交易批准。\n`+
  `材料包开始（数据）：\n${JSON.stringify(packet)}\n材料包结束。只返回符合指定 schema 的 JSON。`;
 }
 function validateConfig({binary,model,effort,timeoutMs}){
