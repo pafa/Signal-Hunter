@@ -1,3 +1,4 @@
+import {openMaterialEventRuns} from './material-event-runs.mjs';
 import {processMarketAccounts} from './market-execution.mjs';
 import {openEvaluationReview} from './evaluation-review.mjs';
 import {strategyProfiles} from '../shared/strategy-profiles.mjs';
@@ -22,7 +23,7 @@ import {createProviderGate} from './provider-gate.mjs';
 import {dataCapabilities} from './data-capabilities.mjs';
 import {dailyHealth} from '../shared/market-clock.mjs';
 import {openModelResearchRuns} from './model-research-runs.mjs';
-export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCooldown=60000,now=()=>Date.now(),mode='legacy',instance=null,backupTask=null,modelConfig=null,modelRunner,semanticRunner,marketInputs}={}){
+export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCooldown=60000,now=()=>Date.now(),mode='legacy',instance=null,backupTask=null,modelConfig=null,modelRunner,semanticRunner,materialEventRunner,marketInputs}={}){
   const offline=mode==='demo';
   const denyNetwork=()=>{throw new Error('离线演示不访问外部数据；请另行启动空白研究模式');};
   const clock=()=>new Date(now()).toISOString();
@@ -36,6 +37,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const marketSimulations=Object.fromEntries(Object.entries(strategyProfiles).map(([accountId,profile])=>[accountId,openMarketSimulation(store,research,{accountId,profile,enabled:!offline,clock,...(marketInputs?{getInputs:()=>marketInputs(accountId)}:{})})]));
   const marketSimulation=marketSimulations.aggressive;
   const modelResearch=openModelResearchRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(modelRunner?{runner:modelRunner}:{}),now});
+  const materialEvents=openMaterialEventRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(materialEventRunner?{runner:materialEventRunner}:{}),now});
   const intake=openNewsIntake(store,{clock});
   const continuity=openContinuity(store,{clock});
   const observations=openObservationInbox(store,{clock,getTopic:id=>research.get(id),offline,getMarketSnapshots:at=>offline?[]:Object.values(marketSimulations).map(m=>m.observationSnapshot(at))});
@@ -48,7 +50,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   if(offline&&!restorePending())initializeDemoData(store);
   const service={
     mode,instance,
-    research,paper,observations,modelResearch,semanticEvents,semanticBatches,eventClusters,evaluations,marketSimulation,marketSimulations,
+    research,paper,observations,modelResearch,materialEvents,semanticEvents,semanticBatches,eventClusters,evaluations,marketSimulation,marketSimulations,
     processEvents(){try{const changed=continuity.process(research.list());if(changed||store.checks().events?.state==='error')store.status('events',{state:'ok',receivedAt:clock()});return {ok:true,changed};}catch(error){store.status('events',{state:'error',attemptedAt:clock(),error:errorText(error)});return {error:errorText(error)};}},
     eventContinuity(params={}){return {...continuity.snapshot({...params,positions:paper.snapshot().positions,watchlist:store.watchlist()}),health:store.checks().events||{state:'pending'}};},
     eventDetail(id){return continuity.detail(id);},
@@ -76,7 +78,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       if(result?.skipped)throw new Error('本次补采未取得任务，请稍后重试');
       return result;
     },
-    close(){return Promise.all([scheduler.stop(),modelResearch.close(),semanticEvents.close()]);},
+    close(){return Promise.all([scheduler.stop(),modelResearch.close(),materialEvents.close(),semanticEvents.close()]);},
     syncWatches(){if(!restorePending())autoWatch=syncResearchWatches(store,research.list());return autoWatch;},
     snapshot(){const topics=research.list(),book=paper.snapshot();const queue=continuity.queue({positions:book.positions,watchlist:store.watchlist()}),priorities=new Map(queue.map((n,i)=>[n.id,{priority:n.priority,rank:i}])),researchView=research.snapshot();researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));return {observationInbox:observations.snapshot(),eventContinuity:{...continuity.summary(),health:store.checks().events||{state:'pending'}},runtime:{mode,offline,instance},paper:book,workflow:topics.map(t=>assessTopic(t,{book})),operations:scheduler.snapshot(),operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,clock(),{offline}),serviceHealth:service.health(),newsIntake:intake.snapshot(),autoWatch,settings:store.getSettings(),news:store.news(),watchlist:store.watchlist().map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks:store.checks(),serverTime:clock(),newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:researchView};},
     async refreshDaily(symbol,force=false,context){

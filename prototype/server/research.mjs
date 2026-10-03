@@ -164,6 +164,11 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   create(data){const at=clock(),title=assertText(data.title,'主题标题',140),summary=assertText(data.summary,'研究假设');
    return commit({id:randomUUID(),title,summary,type:'cluster',label:'自建主题',origin:'user',status:'active',createdAt:at,chain:[{id:'fact',title:'事实变化',question:'什么证据能证实变化？'},{id:'mechanism',title:'影响机制',question:'变化如何传到目标公司的业务？'},{id:'earnings',title:'财务兑现',question:'如何改变预期与盈利？'}],evidence:[],companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'添加支持、反对或待核实线索，建立可证伪的因果链。'},'用户创建主题');
   },
+  createFromMaterialEvent(snapshot,basis,beforeWrite){
+   const m=materials.get(snapshot.id),at=clock(),title=assertText(basis.event.title,'事项标题',140),summary='待核对事项：'+title;
+   const topic={id:randomUUID(),title,summary,type:'event',label:'材料拆分 · 待核对',origin:'material-event-review',status:'active',createdAt:at,chain:defaultChain(),eventExtraction:structuredClone(basis),companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'核对原文事项边界、主体身份及反证；共享材料不构成独立佐证。',evidence:[{id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,datePrecision:m.datePrecision,firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:at,originKey:m.url?new URL(m.url).hostname:m.sourceName,verification:'unverified',contentScope:m.scope,stance:'unverified',family:'other',step:'fact',interpretation:basis.reviewNote}]};
+   return commit(topic,'本人选择材料拆分事项建立研究；共享原材料，未完成研判或创建交易',undefined,()=>beforeWrite(topic));
+  },
   update(id,data){const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
    const allowed=['version','status','hypothesis','assessment','nextEvidence','dossier'];if(Object.keys(data).some(k=>!allowed.includes(k)))throw new Error('不支持的研究修改');
    if(data.nextEvidence!==undefined)topic.nextEvidence=assertText(data.nextEvidence,'下一步观察点');
