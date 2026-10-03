@@ -1,0 +1,166 @@
+{
+  "schema": "publication-date-evaluation-1",
+  "readerVersion": "public-article-2",
+  "baseCommit": "dbbb1813b6b1f16358c5a643d8860f571b1597fa",
+  "kind": "Three actual public-page fetches and isolated persistence replay; not a model-quality or forward evaluation",
+  "cases": [
+    {
+      "id": "armProposal",
+      "url": "https://nvidianews.nvidia.com/news/nvidia-to-acquire-arm-for-40-billion-creating-worlds-premier-computing-company-for-the-age-of-ai",
+      "oldMaterialId": "ebe892d746991a33f793ea0342427799b78028372096222bc3502edd44d859a6",
+      "newMaterialId": "12a9cd71c7a42ab8ea7a94327783f37e78a23822968abdca6f49ca55734db3d8",
+      "revision": 2,
+      "oldPublishedAt": null,
+      "publishedAt": "2020-09-13",
+      "evidence": {
+        "schema": "publication-date-1",
+        "status": "known",
+        "candidates": [
+          {
+            "source": "element:publication-label",
+            "raw": "September 13, 2020"
+          }
+        ],
+        "truncated": false
+      },
+      "bodyHash": "5ddf6fc8f04155e7d72597b35fe96b185300c27b7094304a23705af58fe0203a",
+      "availableAt": "2026-10-02T21:43:57.554Z",
+      "fetchStartedAt": "2026-10-02T21:43:55.800Z",
+      "fetchReceivedAt": "2026-10-02T21:43:57.554Z",
+      "extractedBodyChars": 6994,
+      "artifactSha256": "db19c40b1b4a9bff3daf8dec43d9f2d4a403cc673864e261c5b7a45b9685c6fa"
+    },
+    {
+      "id": "armTermination",
+      "url": "https://nvidianews.nvidia.com/news/nvidia-and-softbank-group-announce-termination-of-nvidias-acquisition-of-arm-limited",
+      "oldMaterialId": "4fbf595eae157f1331d4724ac3d19e1633ccea674144407ec2c6b9cba744b3ed",
+      "newMaterialId": "07bcca6df337c0f660a12f07ae05064f9a9d155ba2b4faa54fe91abbe278c425",
+      "revision": 2,
+      "oldPublishedAt": null,
+      "publishedAt": "2022-02-07",
+      "evidence": {
+        "schema": "publication-date-1",
+        "status": "known",
+        "candidates": [
+          {
+            "source": "element:publication-label",
+            "raw": "February 7, 2022"
+          }
+        ],
+        "truncated": false
+      },
+      "bodyHash": "47a983d21f25c590e38a0a43f4757e3c21f2aadbd9b778a57af4b865c3896d32",
+      "availableAt": "2026-10-02T21:43:57.645Z",
+      "fetchStartedAt": "2026-10-02T21:43:55.803Z",
+      "fetchReceivedAt": "2026-10-02T21:43:57.645Z",
+      "extractedBodyChars": 13602,
+      "artifactSha256": "c8227bb2839b22405fa1cdafcaaf1ff4cab7db95a6fbed51d85962609c44bbdd"
+    },
+    {
+      "id": "nuanceCompletion",
+      "url": "https://news.microsoft.com/source/2022/03/04/microsoft-completes-acquisition-of-nuance-ushering-in-new-era-of-outcomes-based-ai/",
+      "oldMaterialId": "c2b4d4cc5c2e9c93d28cdd71cc33490d7e8e65370e6d37c8db7a4eb23c3a7106",
+      "newMaterialId": "eb95061829ca4eb3059f4f9df952dbac8d6f511dbbd83181374e7f547c1ede52",
+      "revision": 2,
+      "oldPublishedAt": "2022-03-04T08:00:00.000Z",
+      "publishedAt": null,
+      "evidence": {
+        "schema": "publication-date-1",
+        "status": "invalid",
+        "candidates": [
+          {
+            "source": "meta:article:published_time",
+            "raw": "2022-03-04T08:00:00+00:00"
+          },
+          {
+            "source": "jsonld:datePublished",
+            "raw": "2022-03-04T08:00:00+00:00"
+          },
+          {
+            "source": "jsonld:datePublished",
+            "raw": "2022-03-04T00:00:00"
+          }
+        ],
+        "truncated": false
+      },
+      "bodyHash": "04bbcba436e8833b0aaa6c980c53c76e2a4d7b7c40d4927422b430bcfcafbbee",
+      "availableAt": "2026-10-02T21:43:57.982Z",
+      "fetchStartedAt": "2026-10-02T21:43:55.803Z",
+      "fetchReceivedAt": "2026-10-02T21:43:57.982Z",
+      "extractedBodyChars": 3915,
+      "artifactSha256": "894d3967f01349a50073844e946c4c16600a2e7aafabdbd75fd086704e6d5eb9"
+    }
+  ],
+  "preservedLegacy": {
+    "materials": "d5a26211e614cc18c470bc7b11036f8c3a5ea8e3836b4c7dce5203d97dc8f402",
+    "modelRuns": 11,
+    "runs": "f06f999a267737fffae885e19b6a567302a06f6947ccdd065af9b6b15a0aea1f"
+  },
+  "restart": {
+    "semantic_runs": {
+      "rows": 11,
+      "hash": "f06f999a267737fffae885e19b6a567302a06f6947ccdd065af9b6b15a0aea1f"
+    },
+    "semantic_decisions": {
+      "rows": 0,
+      "hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "research_materials": {
+      "rows": 9,
+      "hash": "98a0266c65694671fe297464bfd28667aff2509873fcde55e67d7ef706d1715c"
+    },
+    "research_topics": {
+      "rows": 1,
+      "hash": "b883c2623ef42e4c74514f02d9f39a77efaa447d73cbe4d385043de6c510d765"
+    },
+    "research_versions": {
+      "rows": 7,
+      "hash": "f0395f36b892ae41c5336c82a4da3332122fd011b4300b2d2c096b7e76445855"
+    },
+    "research_source_attempts": {
+      "rows": 6,
+      "hash": "c2a63ce4fba099420222c453fff190e1550e987a7f97ff6d72429c0aaa0d636c"
+    },
+    "paper_books": {
+      "rows": 1,
+      "hash": "5bbb2c86e32e764d446b68392a6542602766c27b56fd880e8e934e4ec36bd2f2"
+    },
+    "paper_versions": {
+      "rows": 1,
+      "hash": "51359cd70fea69e5deeb192556ccf20e6652e7811293b36fb96fd8683fde3510"
+    }
+  },
+  "verification": {
+    "testsPassed": 517,
+    "modelCalls": 0,
+    "desktop": [
+      1440,
+      1000
+    ],
+    "narrow": [
+      390,
+      844
+    ],
+    "dialogWidths": [
+      [
+        778,
+        778
+      ],
+      [
+        376,
+        376
+      ]
+    ],
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "originalWeekTopics": 8
+  },
+  "limits": [
+    "Only three selected historical English pages; no general extraction coverage claim",
+    "Microsoft new date deliberately unknown because one explicit field lacks timezone; previous date unchanged",
+    "Raw extracted text retained locally; complete HTTP response/HTML not archived by this reader",
+    "CSS parsing warning observed for Microsoft; body extraction succeeded",
+    "Legacy linking and version-persistence exercise replay saved extraction results; not additional network fetches",
+    "No production migration, daemon activation, source purchase or real trading"
+  ]
+}
