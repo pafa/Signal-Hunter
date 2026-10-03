@@ -4,7 +4,7 @@ import {Button} from '../major/Primitives';
 import {instrument} from '../../shared/securities.mjs';
 import {request,time} from '../major/api';
 import './observation-rules.css';
-const kinds={'minute-anomaly':'分钟价格变化异常','daily-anomaly':'日线统计异常',at:'指定复核时间',price:'价格达到阈值','research-change':'研究出现新版本',counterevidence:'出现新的反向线索'};
+const kinds={'minute-anomaly':'分钟统计异常','daily-anomaly':'日线统计异常',at:'指定复核时间',price:'价格达到阈值','research-change':'研究出现新版本',counterevidence:'出现新的反向线索'};
 const temporalLabel=c=>c.mode==='cross'?' · 相邻采样穿越':c.mode==='held'?` · 采样持续${c.holdSeconds}秒`:'';
 const describe=c=>['daily-anomaly','minute-anomaly'].includes(c.type)?statisticalLabel(c):c.type==='price'?`${c.symbol} ${c.interval==='1d'?'日线收盘':'分钟柱收盘'} ${c.operator==='gte'?'≥':'≤'} ${c.value} ${c.currency}${temporalLabel(c)}${c.mode?` · 最大采样间隔${c.maxGapSeconds}秒`:""}`:c.type==='at'?`复核时间 ${time(c.at)}`:kinds[c.type];
 const defaults=type=>['daily-anomaly','minute-anomaly'].includes(type)?{type,symbol:'',metric:'return',windowSize:20,zThreshold:3,direction:'both'}:type==='price'?{type,symbol:'',interval:'1d',operator:'gte',value:''}:type==='at'?{type,at:''}:{type};
