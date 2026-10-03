@@ -4,7 +4,7 @@
 
 第三方 npm 依赖由 package-lock.json 锁定，安装时应保留每个包自带的 LICENSE/NOTICE。发布包不内置 node_modules，构建会保留上游打包工具生成的许可信息；如另行分发二进制或打包产物，需单独核对相应义务。
 
-下列清单按锁文件元数据生成，包含可选平台包；不是逐文件法律审计。直接依赖 React、React DOM、Vite、jsdom 和 fast-xml-parser 为 MIT，Readability 为 Apache-2.0。传递依赖还包含 MPL-2.0 等许可证，不能将第三方代码整体改标为 MIT。
+下列清单按锁文件元数据生成，包含可选平台包；不是逐文件法律审计。直接依赖 React、React DOM、Vite、jsdom、fast-xml-parser 和 yauzl 为 MIT，Readability 为 Apache-2.0。传递依赖还包含 MPL-2.0 等许可证，不能将第三方代码整体改标为 MIT。
 
 新闻、行情、证券名称、第三方商标与链接目标内容不由本项目 MIT 授权。旧版研究种子仅为回溯线索，默认演示使用原创虚构内容；原始新闻缓存、私人附件、截图及研究数据库不随包分发。
 
@@ -74,6 +74,7 @@
 | nanoid | 3.3.19 | MIT |
 | parse5 | 8.0.1 | MIT |
 | path-expression-matcher | 1.6.2 | MIT |
+| pend | 1.2.0 | MIT |
 | picocolors | 1.1.1 | ISC |
 | picomatch | 4.0.7 | MIT |
 | postcss | 8.5.28 | MIT |
@@ -100,3 +101,4 @@
 | xml-name-validator | 5.0.0 | Apache-2.0 |
 | xml-naming | 0.3.0 | MIT |
 | xmlchars | 2.2.0 | MIT |
+| yauzl | 3.4.0 | MIT |

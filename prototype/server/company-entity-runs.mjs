@@ -53,7 +53,7 @@ export function openCompanyEntityRuns(store,research,{enabled=false,config={},ru
    const decision={version:data.version+1,action:data.action,note:data.note.trim(),symbol:data.symbol,at:new Date(now()).toISOString(),requestHash,inputHash:r.packet.inputHash};
    const save=()=>db.prepare('INSERT INTO company_entity_decisions VALUES(?,?,?,?)').run(id,data.mentionIndex,decision.version,JSON.stringify(decision));
    if(data.action==='link'){
-    check();const m=r.packet.input.material,identity=r.packet.input.directory.find(c=>c.symbol===data.symbol),basis={runId:id,mentionIndex:data.mentionIndex,mention,identity,inputHash:r.packet.inputHash,materialId:m.id,materialRevision:m.revision,directoryVersion:r.packet.input.directoryVersion,trace:r.candidate.trace,reviewNote:decision.note};
+    check();const m=r.packet.input.material,identity=r.packet.input.directory.find(c=>c.symbol===data.symbol),basis={runId:id,mentionIndex:data.mentionIndex,mention,identity,inputHash:r.packet.inputHash,materialId:m.id,materialRevision:m.revision,directoryVersion:identity.directoryVersion||r.packet.input.directoryVersion,trace:r.candidate.trace,reviewNote:decision.note};
     research.addCompany(topicId,{version:data.topicVersion,symbol:data.symbol,kind:'mentioned',relationStatus:'pending',direction:'unclear',note:decision.note,url:m.url,evidenceIds:['material:'+m.id],identityReviewed:false},()=>{check();decision.researchVersion=data.topicVersion+1;save();},basis);
    }else{db.exec('BEGIN IMMEDIATE');try{check();save();db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}}
    return api.get(topicId,id);

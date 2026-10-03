@@ -2,7 +2,7 @@ import {digest} from './codex-research.mjs';
 import {materialComparisonSnapshot,comparisonSummary} from './semantic-materials.mjs';
 import {validateMaterialEvents} from './material-events.mjs';
 import {semanticErrors} from '../shared/semantic-labels.mjs';
-const fail=()=>{throw new Error(semanticErrors[10]);};
+const fail=()=>{throw new Error(semanticErrors[11]);};
 // A reviewed occurrence has its own identity; sharing a document does not share an event.
 // Scope v1 is immutable. Editing a research note does not revise the occurrence.
 // Archival, changed material or lost provenance makes it unavailable, preserving history.
@@ -37,6 +37,6 @@ export function comparisonEvents(db,params={}){
  const where="json_extract(payload,'$.origin')='material-event-review' AND json_extract(payload,'$.status')='active' AND instr(lower(json_extract(payload,'$.title')),lower(?))>0";
  const total=db.prepare(`SELECT count(*) n FROM research_topics WHERE ${where}`).get(q.trim()).n;
  const rows=db.prepare(`SELECT id,payload FROM research_topics WHERE ${where} ORDER BY rowid DESC LIMIT ? OFFSET ?`).all(q.trim(),limit,offset);
- const items=rows.map(row=>{const t=JSON.parse(row.payload);try{return {...comparisonSummary(eventComparisonSnapshot(db,{id:t.id,revision:1})),selectable:true};}catch{return {kind:'event',id:t.id,revision:1,title:t.title,selectable:false,unavailableReason:semanticErrors[10]};}});
+ const items=rows.map(row=>{const t=JSON.parse(row.payload);try{return {...comparisonSummary(eventComparisonSnapshot(db,{id:t.id,revision:1})),selectable:true};}catch{return {kind:'event',id:t.id,revision:1,title:t.title,selectable:false,unavailableReason:semanticErrors[11]};}});
  return {items,total,offset,limit};
 }

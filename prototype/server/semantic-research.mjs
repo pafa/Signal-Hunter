@@ -3,7 +3,7 @@ import {comparisonSummary} from './semantic-materials.mjs';
 import {semanticErrors} from '../shared/semantic-labels.mjs';
 const positive=new Set(['repeat','followup','reversal','related','analogy']);
 const other=side=>side==='left'?'right':'left';
-const fail=()=>{throw new Error(semanticErrors[9]);};
+const fail=()=>{throw new Error(semanticErrors[10]);};
 function evidenceIds(topic,record){
  return (topic.evidence||[]).filter(e=>{
   if(record.kind==='event')return topic.id===record.id&&record.revision===1&&digest(topic.eventExtraction)===digest(record.eventProvenance)&&e.materialId===record.materialId&&e.materialRevision===record.materialRevision;
