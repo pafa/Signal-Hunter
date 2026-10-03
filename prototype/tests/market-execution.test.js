@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {spawnSync} from 'node:child_process';
 import {scheduledMarketFixture} from './fixtures/scheduled-market.mjs';
 import {processMarketAccounts} from '../server/market-execution.mjs';
 import {openStore} from '../server/store.mjs';
@@ -69,4 +70,38 @@ test('automatic processing settles an approved sale exactly once even after exec
  f.set({settlement:'2026-10-03T14:00:00.000Z'});f.propose('steady',{side:'sell',limitPrice:'99'});f.set({at:'2026-10-02T14:00:20.000Z'});await f.service.tick();assert.equal(book(f).fills.length,2);assert.equal(book(f).lots.length,0);const pending=book(f).unsettledCashCents,cash=book(f).cashCents;assert(pending>0);
  f.set({at:'2026-10-03T14:00:00.000Z',missing:true});await f.service.tick();assert.equal(book(f).cashCents,cash+pending);assert.equal(book(f).unsettledCashCents,0);const version=book(f).version;await f.service.runOperation('execution');assert.equal(book(f).version,version);assert.equal(book(f).fills.length,2);
  }finally{await f.close();}
+});
+test('abrupt process exit between pool commits preserves the first fill and recovers the unfinished cycle after lease expiry',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'signal-execution-exit-')),path=join(dir,'test.sqlite');let f;
+ try{
+  const child=spawnSync(process.execPath,['--input-type=module','-e',`
+   import {scheduledMarketFixture} from ${JSON.stringify(new URL('./fixtures/scheduled-market.mjs',import.meta.url).href)};
+   const f=scheduledMarketFixture(process.argv[1]);
+   f.propose('aggressive');f.propose('steady');f.service.controlOperation('execution','resume');
+   f.set({at:'2026-10-02T14:00:10.000Z',availableBuy:40});
+   const sim=f.service.marketSimulations.aggressive,processPool=sim.process.bind(sim);
+   sim.process=options=>{processPool(options);process.exit(73);};
+   await f.service.tick();
+   process.exit(74);
+  `,path],{encoding:'utf8',timeout:15000});
+  assert.equal(child.status,73,child.stderr);assert.equal(child.error,undefined);
+  f=scheduledMarketFixture(path);
+  const first=book(f,'aggressive'),frozenFill=JSON.stringify(first.fills),frozenEvent=JSON.stringify(f.service.marketSimulations.aggressive.event(first.version));
+  assert.equal(first.fills.length,1);assert.equal(first.orders[0].filledQty,40);assert.equal(book(f).fills.length,0);
+  const interrupted=f.store.db.prepare("SELECT * FROM operation_runs WHERE name='execution'").get();
+  assert.equal(interrupted.outcome,'running');assert.equal(interrupted.completed_at,null);
+  assert.equal(f.service.marketSimulations.aggressive.event(first.version).detail.runToken,interrupted.token);
+  f.set({at:'2026-10-02T14:00:20.000Z'});await f.service.tick();
+  assert.equal(book(f,'aggressive').version,first.version);assert.equal(book(f).fills.length,0);
+  f.set({at:'2026-10-02T14:01:40.000Z',missing:true});await f.service.tick();
+  assert.equal(JSON.stringify(book(f,'aggressive').fills),frozenFill);assert.equal(book(f).fills.length,0);
+  assert.equal(f.store.db.prepare('SELECT outcome FROM operation_runs WHERE token=?').get(interrupted.token).outcome,'interrupted');
+  f.set({at:'2026-10-02T14:01:50.000Z',missing:false});await f.service.tick();
+  assert.equal(book(f,'aggressive').orders[0].filledQty,100);assert.equal(book(f).orders[0].filledQty,100);
+  assert.deepEqual(book(f,'aggressive').fills.map(fill=>fill.qty),[40,60]);assert.deepEqual(book(f).fills.map(fill=>fill.qty),[100]);
+  assert.equal(JSON.stringify(book(f,'aggressive').fills.slice(0,1)),frozenFill);
+  assert.equal(JSON.stringify(f.service.marketSimulations.aggressive.event(first.version)),frozenEvent);
+  const latest=f.service.marketSimulations.steady.event(book(f).version);assert.notEqual(latest.detail.runToken,interrupted.token);
+  await f.service.runOperation('execution');assert.equal(book(f,'aggressive').fills.length,2);assert.equal(book(f).fills.length,1);
+ }finally{if(f)await f.close();rmSync(dir,{recursive:true,force:true});}
 });

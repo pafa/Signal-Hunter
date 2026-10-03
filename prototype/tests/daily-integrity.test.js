@@ -8,6 +8,7 @@ import {dailyHealth} from '../shared/market-clock.mjs';
 import {diagnoseMarketData} from '../server/market-diagnostics.mjs';
 import {openStore} from '../server/store.mjs';
 import {createService} from '../server/service.mjs';
+import {evaluateObservation,validateObservationDefinition} from '../server/observation-rules.mjs';
 const receivedAt='2026-10-02T18:00:00.000Z';
 const payload=(close=null)=>({chart:{result:[{meta:{symbol:'0700.HK',currency:'HKD',exchangeTimezoneName:'Asia/Hong_Kong',dataGranularity:'1d',regularMarketPrice:999},timestamp:['2026-09-30T01:30:00Z','2026-10-02T01:30:00Z'].map(t=>Date.parse(t)/1000),indicators:{quote:[{close:[100,close],volume:[1000,2000]}]}}]}});
 const parsed=close=>parseDaily(payload(close),'00700.HK',receivedAt);
@@ -49,4 +50,23 @@ test('service archives regression, blocks healthy-source claim, then accepts sam
 test('first incomplete response remains visible with explicit upstream gap',async()=>{
  const s=openStore(':memory:'),service=createService(s,{mode:'research',now:()=>Date.parse(receivedAt),fetcher:async()=>Response.json(payload())});
  try{s.addWatch('00700.HK');assert.equal((await service.refreshDaily('00700.HK')).ok,true);const cap=service.snapshot().dataCapabilities[0];assert.equal(cap.daily.status,'lagging');assert.match(cap.daily.label,/收盘价缺失/);assert.equal(cap.daily.diagnostics.dailyCoverage.expectedBarStatus,'close-missing');}finally{await service.close();s.close();}
+});
+
+test('corporate action parse failures retain the active cache and block observations until a valid retry',async()=>{
+ const s=openStore(':memory:');let at=Date.parse(receivedAt),bad=true;
+ const service=createService(s,{mode:'research',now:()=>at,fetcher:async()=>{const p=payload(120);if(bad)p.chart.result[0].events={splits:{broken:{date:'unknown',splitRatio:'2:1'}}};return Response.json(p);}});
+ try{
+  s.addWatch('00700.HK');s.saveDaily(parsed(110));s.status('daily:00700.HK',{state:'ok',receivedAt});
+  const topic={status:'active',companies:[{symbol:'00700.HK'}]},rule={definition:validateObservationDefinition({label:'Synthetic cached threshold',join:'all',conditions:[{type:'price',symbol:'00700.HK',interval:'1d',operator:'gte',value:100}]},topic)};
+  const check=()=>evaluateObservation(rule,topic,{at:new Date(at).toISOString(),quote:()=>s.daily('00700.HK'),check:()=>s.checks()['daily:00700.HK']});
+  assert.equal(check().state,'true');
+  const cache=JSON.stringify(s.daily('00700.HK')),snapshots=JSON.stringify(s.db.prepare('SELECT * FROM daily_snapshots ORDER BY rowid').all());
+  const failure=await service.refreshDaily('00700.HK',true);assert.match(failure.error,/公司行动日期/);
+  assert.equal(JSON.stringify(s.daily('00700.HK')),cache);assert.equal(JSON.stringify(s.db.prepare('SELECT * FROM daily_snapshots ORDER BY rowid').all()),snapshots);
+  assert.equal(s.checks()['daily:00700.HK'].state,'error');assert.equal(s.checks()['daily:00700.HK'].receivedAt,receivedAt);
+  assert.equal(check().state,'unknown');assert.match(check().results[0].reason,/来源失败/);
+  bad=false;at+=900001;assert.equal((await service.refreshDaily('00700.HK')).ok,true);
+  assert.equal(s.daily('00700.HK').actionsParsed,true);assert.equal(s.daily('00700.HK').points.at(-1).close,120);
+  assert.equal(check().state,'true');assert.equal(s.db.prepare('SELECT count(*) n FROM daily_snapshots').get().n,2);
+ }finally{await service.close();s.close();}
 });
