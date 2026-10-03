@@ -72,15 +72,16 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
  const summary=run=>{const v=view(run);return {id:v.id,status:v.status,createdAt:v.createdAt,left:comparisonSummary(v.packet.input.left),right:comparisonSummary(v.packet.input.right),relation:v.candidate?.comparison.relation,stale:v.stale,active:v.active,decision:v.decision};};
  const api={
   materials(params){return comparisonMaterials(db,params);},
-  list(){return {enabled:enabled&&!closed,model:config.model||null,runs:db.prepare('SELECT payload,expires_at FROM semantic_runs ORDER BY rowid DESC LIMIT 50').all().map(r=>summary(expired(JSON.parse(r.payload),r.expires_at)))};},
+  status(){return {enabled:enabled&&!closed,model:config.model||null};},
+  list(){return {...api.status(),runs:db.prepare('SELECT payload,expires_at FROM semantic_runs ORDER BY rowid DESC LIMIT 50').all().map(r=>summary(expired(JSON.parse(r.payload),r.expires_at)))};},
   get(id){return view(read(id));},
-  start(input){
+  start(input,beforePersist=()=>{}){
    if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw new Error('恢复副本需先完成核对确认');
    if(!enabled||closed)throw new Error('当前未启用本机 Codex 研判');
    if(!config.binary||!config.model)throw new Error('请先配置本机 Codex 路径与模型');
    const packet=comparisonPacket(store,input),timeoutMs=config.timeoutMs??180000;if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>600000)throw new Error('模型超时配置无效');
    const run={id:randomUUID(),pairKey:digest(['left','right'].map(side=>{const r=packet.input[side];return packet.schema===SEMANTIC_VERSION?r.id:r.kind==='material'?`material:${r.documentId}`:`news:${r.id}`;}).sort()),status:'running',packet,model:config.model,createdAt:new Date(now()).toISOString()};
-   db.exec('BEGIN IMMEDIATE');try{recover();claimModelLease(db,run.id,now(),timeoutMs+30000);db.prepare('INSERT INTO semantic_runs VALUES(?,?,?,?,?)').run(run.id,run.pairKey,run.status,now()+timeoutMs+30000,JSON.stringify(run));db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+   db.exec('BEGIN IMMEDIATE');try{recover();claimModelLease(db,run.id,now(),timeoutMs+30000);db.prepare('INSERT INTO semantic_runs VALUES(?,?,?,?,?)').run(run.id,run.pairKey,run.status,now()+timeoutMs+30000,JSON.stringify(run));beforePersist(run);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(candidate=>{
     if(controller.signal.aborted)throw new CodexResearchError('cancelled');

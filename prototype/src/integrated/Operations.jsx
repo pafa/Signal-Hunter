@@ -19,7 +19,7 @@ function SourceDetails({data}){
 }
 
 export function Operations({data,onClose,onControl,busy}){
- const labels={execution:'自动模拟执行',news:'新闻采集',daily:'日线采集',minutes:'分钟采集',observations:'观察与持仓检查',backup:'本地备份'};
+ const labels={semantic:'Codex 比较批次',execution:'自动模拟执行',news:'新闻采集',daily:'日线采集',minutes:'分钟采集',observations:'观察与持仓检查',backup:'本地备份'};
  const stateText=s=>s.paused?'已暂停':s.recovering?'等待恢复':s.running?'执行中':s.blocked?'失败待处理':s.outcome==='partial'?'部分失败':s.outcome==='error'?'等待重试':s.outcome==='ok'?'已完成':s.outcome==='skipped'?'无需更新':'等待运行';
  return <Modal title="运行控制与数据状态" onClose={onClose}>
  <p className="m-note">{data.runtime.mode} · 服务启动 {time(data.serviceHealth?.startedAt)} · 任务与控制状态保存到本机。暂停保留已保存结果；此处不能批准订单。自动模拟执行启用后只处理已获本人批准的模拟订单，不连接真实交易。</p>
@@ -28,6 +28,7 @@ export function Operations({data,onClose,onControl,busy}){
  <b>{labels[name]||name}</b><strong>{stateText(s)}</strong>
  <small>最近完成 {time(s.completedAt)}</small><small>最近成功 {time(s.lastSuccessAt)}</small>
  {name==='execution'&&<small>默认暂停；启用后每10秒检查两个模拟池。仅处理本人已批准订单；暂停只停止自动检查，手动检查仍可用。</small>}
+ {name==='semantic'&&<small>默认暂停；只推进本人建立的比较批次，每10秒至多启动一项。暂停停止后续调用，当前模型调用仍保存结果；失败需在批次中显式重试。</small>}
  <small>{s.paused?'恢复后继续':s.blocked?'连续失败达到上限，请检查后重试':s.running?'完成后安排下次检查':s.nextRunAt?`下次检查 ${time(s.nextRunAt)}`:'等待调度'}</small>
  {s.error&&<small className="m-warning">{safeErrorText(s.error)}</small>}
  <div className="ops-buttons"><Button disabled={busy} onClick={()=>onControl(name,{action:s.paused?'resume':'pause'})}>{s.paused?'恢复':'暂停'}</Button><Button disabled={busy||s.paused||s.running||data.runtime.offline&&name!=='backup'} onClick={()=>onControl(name,{action:'retry'})}>重新检查</Button></div>

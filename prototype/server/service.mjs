@@ -3,6 +3,7 @@ import {openEvaluationReview} from './evaluation-review.mjs';
 import {strategyProfiles} from '../shared/strategy-profiles.mjs';
 import {openMarketSimulation} from './market-simulation.mjs';
 import {openSemanticEvents} from './semantic-events.mjs';
+import {openSemanticBatches} from './semantic-batches.mjs';
 import {marketFailure} from './market-diagnostics.mjs';
 import {openObservationInbox} from './observation-inbox.mjs';
 import {demoResearchSeeds,initializeDemoData} from './demo.mjs';
@@ -26,6 +27,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const clock=()=>new Date(now()).toISOString();
   const restorePending=()=>store.db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1';
   const semanticEvents=openSemanticEvents(store,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(semanticRunner?{runner:semanticRunner}:{}),now});
+  const semanticBatches=openSemanticBatches(store,semanticEvents,{enabled:!offline&&!!modelConfig,config:modelConfig||{},now});
   const research=openResearch(store,{clock,semanticEvents,seed:mode!=='research'&&!restorePending(),...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:{})});
   const paper=openPaper(store,research,{clock,seed:mode!=='research'&&!restorePending()});
   const evaluations=openEvaluationReview(store,{clock});
@@ -44,7 +46,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   if(offline&&!restorePending())initializeDemoData(store);
   const service={
     mode,instance,
-    research,paper,observations,modelResearch,semanticEvents,evaluations,marketSimulation,marketSimulations,
+    research,paper,observations,modelResearch,semanticEvents,semanticBatches,evaluations,marketSimulation,marketSimulations,
     processEvents(){try{const changed=continuity.process(research.list());if(changed||store.checks().events?.state==='error')store.status('events',{state:'ok',receivedAt:clock()});return {ok:true,changed};}catch(error){store.status('events',{state:'error',attemptedAt:clock(),error:errorText(error)});return {error:errorText(error)};}},
     eventContinuity(params={}){return {...continuity.snapshot({...params,positions:paper.snapshot().positions,watchlist:store.watchlist()}),health:store.checks().events||{state:'pending'}};},
     eventDetail(id){return continuity.detail(id);},
@@ -124,6 +126,6 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   };
   const providerFetch=createProviderGate(store,{fetcher,now});
   const scopedFetcher=context=>(url,options={})=>providerFetch(url,{...options,signal:context?.signal?AbortSignal.any([context.signal,...(options.signal?[options.signal]:[])]):options.signal},context);
-  const scheduler=createPersistentScheduler(store.db,{execution:context=>offline?{skipped:'offline'}:processMarketAccounts(marketSimulations,context),observations:context=>{context.assertActive();return observations.process(research.list(),paper.snapshot());},news:context=>offline?{skipped:'offline'}:service.refreshNews(context),daily:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),3,w=>service.refreshDaily(w.symbol,!!context.input?.manual,context)),minutes:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),2,w=>service.refreshQuote(w.symbol,context)),...(backupTask?{backup:backupTask}:{})},{now,initiallyPaused:['execution'],intervals:{execution:10000,observations:10000,news:newsCooldown,daily:60000,minutes:quoteCooldown,backup:3600000}});
+  const scheduler=createPersistentScheduler(store.db,{semantic:context=>offline?{skipped:'offline'}:semanticBatches.step(context),execution:context=>offline?{skipped:'offline'}:processMarketAccounts(marketSimulations,context),observations:context=>{context.assertActive();return observations.process(research.list(),paper.snapshot());},news:context=>offline?{skipped:'offline'}:service.refreshNews(context),daily:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),3,w=>service.refreshDaily(w.symbol,!!context.input?.manual,context)),minutes:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),2,w=>service.refreshQuote(w.symbol,context)),...(backupTask?{backup:backupTask}:{})},{now,initiallyPaused:['execution','semantic'],intervals:{semantic:10000,execution:10000,observations:10000,news:newsCooldown,daily:60000,minutes:quoteCooldown,backup:3600000}});
   return service;
 }
