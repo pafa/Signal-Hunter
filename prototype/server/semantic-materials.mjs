@@ -1,7 +1,7 @@
 import {digest} from './codex-research.mjs';
 import {materialInput} from './research-materials.mjs';
 import {semanticErrors} from '../shared/semantic-labels.mjs';
-const fail=()=>{throw new Error(semanticErrors[8]);};
+const fail=()=>{throw new Error(semanticErrors[9]);};
 const exists=db=>!!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='research_materials'").get();
 export const comparisonSummary=record=>{const {body,...summary}=record;return record.kind==='event'?{...summary,title:record.eventFocus.title,sourceTitle:record.sourceTitle||record.title}:summary;};
 export function materialComparisonSnapshot(db,ref){
