@@ -11,6 +11,43 @@ function fixture({runner=async p=>candidate(p),path=':memory:',mode='research'}=
  return {store,service,r,topic,material,runs:service.materialEvents,input:{version:topic.version,materialId:material.id,revision:material.revision,requestId:'test-request-00000001'},async close(){await service.close();store.close();}};
 }
 const decide=(index,version,action,note='人工合成测试核对')=>({eventIndex:index,version,action,note});
+test('stored decomposition mismatches cannot create research and remain available for diagnosis',async()=>{
+ for(const mutate of [r=>r.candidate.decomposition.events[0].title='Changed stored candidate',r=>r.candidate.rawOutput='broken JSON',r=>r.candidate.trace.outputHash='wrong',r=>r.candidate.trace.model='other-model',r=>r.candidate.reviewStatus='complete',r=>r.packet.input.material.title='Changed frozen input']){
+  const f=fixture();try{
+   const a=f.runs.start(f.topic.id,f.input);await f.runs.wait(a.id);
+   const saved=JSON.parse(f.store.db.prepare('SELECT payload FROM material_event_runs WHERE id=?').get(a.id).payload);mutate(saved);
+   const frozen=JSON.stringify(saved);f.store.db.prepare('UPDATE material_event_runs SET payload=? WHERE id=?').run(frozen,a.id);
+   const topics=f.r.list(),history=f.r.history(f.topic.id),materials=f.store.db.prepare('SELECT * FROM research_materials').all(),book=f.service.paper.snapshot();
+   assert.throws(()=>f.runs.decide(f.topic.id,a.id,decide(0,0,'create')));
+   assert.equal(f.runs.get(f.topic.id,a.id).stale,true);assert.deepEqual(f.r.list(),topics);assert.deepEqual(f.r.history(f.topic.id),history);
+   assert.deepEqual(f.store.db.prepare('SELECT * FROM research_materials').all(),materials);assert.deepEqual(f.service.paper.snapshot(),book);
+   assert.equal(f.store.db.prepare('SELECT count(*) n FROM material_event_decisions').get().n,0);
+   assert.equal(f.store.db.prepare('SELECT payload FROM material_event_runs WHERE id=?').get(a.id).payload,frozen);
+  }finally{await f.close();}
+ }
+});
+test('decomposition confirmation checks the same stored run inside the research transaction',async()=>{
+ const f=fixture();try{
+  const a=f.runs.start(f.topic.id,f.input);await f.runs.wait(a.id);const before=f.r.list(),create=f.r.createFromMaterialEvent.bind(f.r);
+  f.r.createFromMaterialEvent=(...args)=>{const r=JSON.parse(f.store.db.prepare('SELECT payload FROM material_event_runs WHERE id=?').get(a.id).payload);r.candidate.decomposition.scopeNote='Changed after preview';f.store.db.prepare('UPDATE material_event_runs SET payload=? WHERE id=?').run(JSON.stringify(r),a.id);return create(...args);};
+  assert.throws(()=>f.runs.decide(f.topic.id,a.id,decide(0,0,'create')));assert.deepEqual(f.r.list(),before);assert.equal(f.runs.get(f.topic.id,a.id).reviews[0].length,0);
+ }finally{await f.close();}
+});
+test('intact legacy decomposition without time roles survives changed model configuration without rewriting output',async()=>{
+ const f=fixture();let reopened;try{
+  const a=f.runs.start(f.topic.id,f.input);await f.runs.wait(a.id);const r=JSON.parse(f.store.db.prepare('SELECT payload FROM material_event_runs WHERE id=?').get(a.id).payload);
+  const currentPacket=structuredClone(r.packet);r.packet.schema='material-events-1';for(const event of r.candidate.decomposition.events)delete event.timeRole;
+  assert.throws(()=>validateMaterialEvents(r.candidate.decomposition,currentPacket,{allowLegacy:true}),e=>e.code==='output');
+  const invalid=structuredClone(r.candidate.decomposition);invalid.events[0].quote='Invented legacy quote';
+  assert.throws(()=>validateMaterialEvents(invalid,r.packet,{allowLegacy:true}),e=>e.code==='output');
+  r.candidate.rawOutput=JSON.stringify(r.candidate.decomposition);r.candidate.trace.outputHash=digest(r.candidate.rawOutput);const frozen=JSON.stringify(r);
+  f.store.db.prepare('UPDATE material_event_runs SET payload=? WHERE id=?').run(frozen,a.id);
+  reopened=openMaterialEventRuns(f.store,f.r,{enabled:true,config:{...config,model:'new-model'}});
+  assert.equal(reopened.get(f.topic.id,a.id).stale,false);const result=reopened.decide(f.topic.id,a.id,decide(0,0,'create'));
+  const topic=f.r.get(result.reviews[0][0].topicId);assert.equal(topic.eventExtraction.event.timeRole,undefined);assert.equal(topic.eventExtraction.modelTrace.model,config.model);
+  assert.equal(f.store.db.prepare('SELECT payload FROM material_event_runs WHERE id=?').get(a.id).payload,frozen);
+ }finally{if(reopened)await reopened.close();await f.close();}
+});
 test('material event inputs freeze the full current linked version and reject unrelated, archived or malformed requests',async()=>{
  const f=fixture();try{const {requestId,...ref}=f.input,p=materialEventsPacket(f.store,f.r,f.topic.id,ref);assert.equal(p.input.material.body,body);assert.equal(p.inputHash,digest(p.input));assert.match(materialEventsPrompt(p),/不能按句子、段落或编号机械拆分/);assert.match(materialEventsPrompt(p),/附件/);
  for(const data of [{...ref,revision:2},{...ref,version:1},{...ref,materialId:'absent'},{...ref,extra:true}])assert.throws(()=>materialEventsPacket(f.store,f.r,f.topic.id,data));

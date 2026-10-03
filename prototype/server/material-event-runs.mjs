@@ -1,7 +1,14 @@
 import {randomUUID} from 'node:crypto';
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {digest,CodexResearchError} from './codex-research.mjs';
-import {materialEventsPacket,validateMaterialEvents,generateMaterialEvents} from './material-events.mjs';
+import {MATERIAL_EVENTS_VERSION,materialEventsPacket,validateMaterialEvents,generateMaterialEvents} from './material-events.mjs';
+
+function validateSavedCandidate({packet,candidate,model,topicId}){
+ if(!['material-events-1',MATERIAL_EVENTS_VERSION].includes(packet?.schema)||packet.input?.topicId!==topicId||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
+ if(candidate?.status!=='candidate'||candidate.reviewStatus!=='unreviewed'||candidate.trace?.inputHash!==packet.inputHash||candidate.trace?.model!==model||typeof candidate.rawOutput!=='string'||digest(candidate.rawOutput)!==candidate.trace.outputHash)throw new CodexResearchError('output');
+ let raw;try{raw=validateMaterialEvents(JSON.parse(candidate.rawOutput),packet,{allowLegacy:true});}catch{throw new CodexResearchError('output');}
+ if(digest(raw)!==digest(candidate.decomposition))throw new CodexResearchError('output');
+}
 
 export function openMaterialEventRuns(store,research,{enabled=false,config={},runner=generateMaterialEvents,now=()=>Date.now()}={}){
  const db=store.db,jobs=new Map();let closed=false;initializeModelLease(db);
@@ -13,7 +20,7 @@ export function openMaterialEventRuns(store,research,{enabled=false,config={},ru
  const read=id=>{const row=db.prepare('SELECT * FROM material_event_runs WHERE id=?').get(id);if(!row)throw new Error('材料拆分记录不存在');return expired(JSON.parse(row.payload),row.expires_at);};
  const write=r=>db.prepare('UPDATE material_event_runs SET status=?,payload=? WHERE id=?').run(r.status,JSON.stringify(r),r.id);
  const history=(id,index)=>db.prepare('SELECT payload FROM material_event_decisions WHERE run_id=? AND event_index=? ORDER BY version DESC').all(id,index).map(r=>JSON.parse(r.payload));
- const stale=r=>{try{return materialEventsPacket(store,research,r.topicId,r.request).inputHash!==r.packet.inputHash;}catch{return true;}};
+ const stale=r=>{try{if(r.status==='candidate')validateSavedCandidate(r);return materialEventsPacket(store,research,r.topicId,r.request).inputHash!==r.packet.inputHash;}catch{return true;}};
  const summary=r=>({id:r.id,topicId:r.topicId,status:r.status,createdAt:r.createdAt,materialId:r.packet.input.material.id,materialTitle:r.packet.input.material.title,materialRevision:r.packet.input.material.revision,stale:stale(r)});
  const recover=()=>{for(const row of db.prepare("SELECT payload,expires_at FROM material_event_runs WHERE status='running' AND expires_at<?").all(now()))write(expired(JSON.parse(row.payload),row.expires_at));};
  if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value!=='1')recover();
@@ -32,9 +39,7 @@ export function openMaterialEventRuns(store,research,{enabled=false,config={},ru
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(candidate=>{
     if(controller.signal.aborted)throw new CodexResearchError('cancelled');
-    const clean=validateMaterialEvents(candidate?.decomposition,packet);
-    if(candidate.status!=='candidate'||candidate.reviewStatus!=='unreviewed'||candidate.trace?.inputHash!==packet.inputHash||candidate.trace?.model!==config.model||typeof candidate.rawOutput!=='string'||digest(candidate.rawOutput)!==candidate.trace.outputHash)throw new CodexResearchError('output');
-    let raw;try{raw=validateMaterialEvents(JSON.parse(candidate.rawOutput),packet);}catch{throw new CodexResearchError('output');}if(digest(raw)!==digest(clean))throw new CodexResearchError('output');
+    validateSavedCandidate({...run,candidate});
     write({...run,status:'candidate',finishedAt:new Date(now()).toISOString(),candidate});
    }).catch(error=>{write({...run,status:controller.signal.aborted?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure:error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型拆分失败；原材料保留，请检查本机配置'}});}).finally(()=>{jobs.delete(run.id);releaseModelLease(db,run.id);});
    void done.catch(()=>console.error('材料拆分记录保存失败；冻结输入保留，请检查本机存储。'));
@@ -44,10 +49,12 @@ export function openMaterialEventRuns(store,research,{enabled=false,config={},ru
   cancel(topicId,id){guard();api.get(topicId,id);const job=jobs.get(id);if(!job)throw new Error('此调用不在本实例运行');job.controller.abort();return {id,status:'cancelling'};},
   decide(topicId,id,data){
    guard();if(!data||Object.keys(data).sort().join(',')!=='action,eventIndex,note,version'||!['create','reject','reopen'].includes(data.action)||!Number.isSafeInteger(data.eventIndex)||data.eventIndex<0||!Number.isSafeInteger(data.version)||data.version<0||typeof data.note!=='string'||!data.note.trim()||data.note.length>1200)throw new Error('拆分核对参数无效');
-   const r=api.get(topicId,id),event=r.candidate?.decomposition.events[data.eventIndex];if(r.status!=='candidate'||!event)throw new Error('没有可核对的事件候选');
+   const r=read(id);if(r.topicId!==topicId)throw new Error('拆分记录不属于此研究');
+   const event=r.candidate?.decomposition?.events[data.eventIndex];if(r.status!=='candidate'||!event)throw new Error('没有可核对的事件候选');
+   validateSavedCandidate(r);const frozenHash=digest(r);
    const latest=history(id,data.eventIndex)[0],requestHash=digest({eventIndex:data.eventIndex,version:data.version,action:data.action,note:data.note});
    if(latest?.requestHash===requestHash)return api.get(topicId,id);
-   const check=()=>{guard();const current=history(id,data.eventIndex)[0];if((current?.version||0)!==data.version||current?.action==='create')throw new Error('核对记录已变化；已创建的研究请在研究页处理');if(data.action==='create'&&(stale(r)||current?.action==='reject'))throw new Error('材料或研究已变化，或此候选已排除；请刷新核对');if(data.action==='reopen'&&current?.action!=='reject')throw new Error('只有已排除候选可以重新核对');};
+   const check=()=>{guard();if(digest(read(id))!==frozenHash)throw new CodexResearchError('output');const current=history(id,data.eventIndex)[0];if((current?.version||0)!==data.version||current?.action==='create')throw new Error('核对记录已变化；已创建的研究请在研究页处理');if(data.action==='create'&&(stale(r)||current?.action==='reject'))throw new Error('材料或研究已变化，或此候选已排除；请刷新核对');if(data.action==='reopen'&&current?.action!=='reject')throw new Error('只有已排除候选可以重新核对');};
    const decision={version:data.version+1,action:data.action,note:data.note.trim(),at:new Date(now()).toISOString(),requestHash,inputHash:r.packet.inputHash};
    const save=()=>db.prepare('INSERT INTO material_event_decisions VALUES(?,?,?,?)').run(id,data.eventIndex,decision.version,JSON.stringify(decision));
    if(data.action==='create'){

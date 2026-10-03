@@ -18,14 +18,15 @@ export function materialEventsPacket(store,research,topicId,data){
  if(Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
  return packet;
 }
-export function validateMaterialEvents(output,packet){
+export function validateMaterialEvents(output,packet,{allowLegacy=false}={}){
  const bad=()=>{throw new CodexResearchError('output');},valid=(v,max)=>typeof v==='string'&&!!v.trim()&&v.length<=max;
  if(!output||Array.isArray(output)||Object.keys(output).sort().join(',')!=='events,missingEvidence,scopeNote'||!valid(output.scopeNote,2000)||!Array.isArray(output.events)||output.events.length>12||!Array.isArray(output.missingEvidence)||output.missingEvidence.length>20||output.missingEvidence.some(v=>!valid(v,1000)))bad();
  const seen=new Set();
  for(const e of output.events){
-  if(!e||Object.keys(e).sort().join(',')!==[...fields,'quoteField','timeEvidence','timeRole'].sort().join(',')||fields.some(k=>!valid(e[k],k==='title'?140:1000))||!['title','body'].includes(e.quoteField)||!packet.input.material[e.quoteField]?.includes(e.quote)||!timeRoles.includes(e.timeRole))bad();
+  const legacy=allowLegacy&&packet.schema==='material-events-1'&&!Object.hasOwn(e||{},'timeRole');
+  if(!e||Object.keys(e).sort().join(',')!==[...fields,'quoteField','timeEvidence',...(legacy?[]:['timeRole'])].sort().join(',')||fields.some(k=>!valid(e[k],k==='title'?140:1000))||!['title','body'].includes(e.quoteField)||!packet.input.material[e.quoteField]?.includes(e.quote)||!legacy&&!timeRoles.includes(e.timeRole))bad();
   validateTimeEvidence(e,packet.input.material);
-  if((e.timeEvidence.basis==='unknown')!==(e.timeRole==='unknown'))bad();
+  if(!legacy&&(e.timeEvidence.basis==='unknown')!==(e.timeRole==='unknown'))bad();
   const key=JSON.stringify([e.actor,e.action,e.object,e.stage,e.quoteField,e.quote]);if(seen.has(key))bad();seen.add(key);
  }
  return structuredClone(output);

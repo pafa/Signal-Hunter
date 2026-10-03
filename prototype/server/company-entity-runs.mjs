@@ -1,7 +1,14 @@
 import {randomUUID} from 'node:crypto';
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {digest,CodexResearchError} from './codex-research.mjs';
-import {companyEntitiesPacket,validateCompanyEntities,generateCompanyEntities} from './company-entities.mjs';
+import {COMPANY_ENTITIES_VERSION,companyEntitiesPacket,validateCompanyEntities,generateCompanyEntities} from './company-entities.mjs';
+
+function validateSavedCandidate({packet,candidate,model,topicId}){
+ if(packet?.schema!==COMPANY_ENTITIES_VERSION||packet.input?.topicId!==topicId||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
+ if(candidate?.status!=='candidate'||candidate.reviewStatus!=='unreviewed'||candidate.trace?.inputHash!==packet.inputHash||candidate.trace?.model!==model||typeof candidate.rawOutput!=='string'||digest(candidate.rawOutput)!==candidate.trace.outputHash)throw new CodexResearchError('output');
+ let raw;try{raw=validateCompanyEntities(JSON.parse(candidate.rawOutput),packet);}catch{throw new CodexResearchError('output');}
+ if(digest(raw)!==digest(candidate.resolution))throw new CodexResearchError('output');
+}
 
 export function openCompanyEntityRuns(store,research,{enabled=false,config={},runner=generateCompanyEntities,now=()=>Date.now()}={}){
  const db=store.db,jobs=new Map();let closed=false;initializeModelLease(db);
@@ -13,7 +20,7 @@ export function openCompanyEntityRuns(store,research,{enabled=false,config={},ru
  const read=id=>{const row=db.prepare('SELECT * FROM company_entity_runs WHERE id=?').get(id);if(!row)throw new Error('材料身份识别记录不存在');return expired(JSON.parse(row.payload),row.expires_at);};
  const write=r=>db.prepare('UPDATE company_entity_runs SET status=?,payload=? WHERE id=?').run(r.status,JSON.stringify(r),r.id);
  const history=(id,index)=>db.prepare('SELECT payload FROM company_entity_decisions WHERE run_id=? AND mention_index=? ORDER BY version DESC').all(id,index).map(r=>JSON.parse(r.payload));
- const stale=r=>{try{return companyEntitiesPacket(store,research,r.topicId,{...r.request,version:research.get(r.topicId).version}).inputHash!==r.packet.inputHash;}catch{return true;}};
+ const stale=r=>{try{if(r.status==='candidate')validateSavedCandidate(r);return companyEntitiesPacket(store,research,r.topicId,{...r.request,version:research.get(r.topicId).version}).inputHash!==r.packet.inputHash;}catch{return true;}};
  const summary=r=>({id:r.id,topicId:r.topicId,status:r.status,createdAt:r.createdAt,materialId:r.packet.input.material.id,materialTitle:r.packet.input.material.title,materialRevision:r.packet.input.material.revision,stale:stale(r)});
  const recover=()=>{for(const row of db.prepare("SELECT payload,expires_at FROM company_entity_runs WHERE status='running' AND expires_at<?").all(now()))write(expired(JSON.parse(row.payload),row.expires_at));};
  if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value!=='1')recover();
@@ -32,9 +39,7 @@ export function openCompanyEntityRuns(store,research,{enabled=false,config={},ru
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(candidate=>{
     if(controller.signal.aborted)throw new CodexResearchError('cancelled');
-    const clean=validateCompanyEntities(candidate?.resolution,packet);
-    if(candidate.status!=='candidate'||candidate.reviewStatus!=='unreviewed'||candidate.trace?.inputHash!==packet.inputHash||candidate.trace?.model!==config.model||typeof candidate.rawOutput!=='string'||digest(candidate.rawOutput)!==candidate.trace.outputHash)throw new CodexResearchError('output');
-    let raw;try{raw=validateCompanyEntities(JSON.parse(candidate.rawOutput),packet);}catch{throw new CodexResearchError('output');}if(digest(raw)!==digest(clean))throw new CodexResearchError('output');
+    validateSavedCandidate({...run,candidate});
     write({...run,status:'candidate',finishedAt:new Date(now()).toISOString(),candidate});
    }).catch(error=>{write({...run,status:controller.signal.aborted?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure:error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型身份识别失败；原材料保留，请检查本机配置'}});}).finally(()=>{jobs.delete(run.id);releaseModelLease(db,run.id);});
    void done.catch(()=>console.error('材料身份识别记录保存失败；冻结输入保留，请检查本机存储。'));
@@ -44,12 +49,13 @@ export function openCompanyEntityRuns(store,research,{enabled=false,config={},ru
   cancel(topicId,id){guard();api.get(topicId,id);const job=jobs.get(id);if(!job)throw new Error('此调用不在本实例运行');job.controller.abort();return {id,status:'cancelling'};},
   decide(topicId,id,data){
    guard();if(!data||Object.keys(data).sort().join(',')!=='action,mentionIndex,note,symbol,topicVersion,version'||!['link','reject','reopen'].includes(data.action)||!Number.isSafeInteger(data.mentionIndex)||data.mentionIndex<0||!Number.isSafeInteger(data.version)||data.version<0||!Number.isSafeInteger(data.topicVersion)||data.topicVersion<1||typeof data.symbol!=='string'||typeof data.note!=='string'||!data.note.trim()||data.note.length>1200)throw new Error('身份核对参数无效');
-   const r=api.get(topicId,id),mention=r.candidate?.resolution.mentions[data.mentionIndex];if(r.status!=='candidate'||!mention)throw new Error('没有可核对的身份候选');
+   const r=read(id);if(r.topicId!==topicId)throw new Error('身份识别记录不属于此研究');
+   const mention=r.candidate?.resolution?.mentions[data.mentionIndex];if(r.status!=='candidate'||!mention)throw new Error('没有可核对的身份候选');
    // Revalidate frozen output before a decision; a stored candidate is not trusted input.
-   if(r.packet.inputHash!==digest(r.packet.input)||digest(r.candidate.rawOutput)!==r.candidate.trace.outputHash||r.candidate.trace.inputHash!==r.packet.inputHash||digest(validateCompanyEntities(JSON.parse(r.candidate.rawOutput),r.packet))!==digest(r.candidate.resolution))throw new Error('身份候选快照校验失败');
+   validateSavedCandidate(r);const frozenHash=digest(r);
    const latest=history(id,data.mentionIndex)[0],requestHash=digest({mentionIndex:data.mentionIndex,version:data.version,action:data.action,note:data.note,symbol:data.symbol,topicVersion:data.topicVersion});
    if(latest?.requestHash===requestHash)return api.get(topicId,id);
-   const check=()=>{guard();const current=history(id,data.mentionIndex)[0],topic=research.get(topicId);if((current?.version||0)!==data.version||current?.action==='link')throw new Error('核对记录已变化；已关联证券请在公司关系中处理');if(data.action==='link'&&(stale(r)||current?.action==='reject'||topic.version!==data.topicVersion||!mention.symbols.includes(data.symbol)||!['candidate','ambiguous'].includes(mention.resolution)))throw new Error('材料、研究或身份候选已变化，请刷新核对');if(data.action!=='link'&&data.symbol)throw new Error('排除或重新核对不得指定证券');if(data.action==='reopen'&&current?.action!=='reject')throw new Error('只有已排除候选可以重新核对');};
+   const check=()=>{guard();if(digest(read(id))!==frozenHash)throw new CodexResearchError('output');const current=history(id,data.mentionIndex)[0],topic=research.get(topicId);if((current?.version||0)!==data.version||current?.action==='link')throw new Error('核对记录已变化；已关联证券请在公司关系中处理');if(data.action==='link'&&(stale(r)||current?.action==='reject'||topic.version!==data.topicVersion||!mention.symbols.includes(data.symbol)||!['candidate','ambiguous'].includes(mention.resolution)))throw new Error('材料、研究或身份候选已变化，请刷新核对');if(data.action!=='link'&&data.symbol)throw new Error('排除或重新核对不得指定证券');if(data.action==='reopen'&&current?.action!=='reject')throw new Error('只有已排除候选可以重新核对');};
    const decision={version:data.version+1,action:data.action,note:data.note.trim(),symbol:data.symbol,at:new Date(now()).toISOString(),requestHash,inputHash:r.packet.inputHash};
    const save=()=>db.prepare('INSERT INTO company_entity_decisions VALUES(?,?,?,?)').run(id,data.mentionIndex,decision.version,JSON.stringify(decision));
    if(data.action==='link'){

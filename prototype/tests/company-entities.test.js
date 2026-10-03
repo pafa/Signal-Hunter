@@ -11,6 +11,32 @@ function fixture({runner=async p=>candidate(p),path=':memory:',mode='research'}=
 }
 const decision=(f,mentionIndex,version,action,symbol='',note='人工核对合成身份，不代表真实研究')=>({mentionIndex,version,action,symbol,note,topicVersion:f.r.get(f.topic.id).version});
 const run=async f=>{const a=f.runs.start(f.topic.id,f.input);return f.runs.wait(a.id);};
+test('stored entity model and review metadata must match the original candidate before linking',async()=>{
+ for(const mutate of [r=>r.candidate.trace.model='other-model',r=>r.candidate.reviewStatus='complete',r=>r.candidate.status='adopted']){
+  const f=fixture();try{
+   const a=await run(f),r=JSON.parse(f.store.db.prepare('SELECT payload FROM company_entity_runs WHERE id=?').get(a.id).payload);mutate(r);const frozen=JSON.stringify(r);
+   f.store.db.prepare('UPDATE company_entity_runs SET payload=? WHERE id=?').run(frozen,a.id);
+   const topic=f.r.get(f.topic.id),history=f.r.history(f.topic.id),book=f.service.paper.snapshot();
+   assert.throws(()=>f.runs.decide(f.topic.id,a.id,decision(f,0,0,'link','01211.HK')));assert.equal(f.runs.get(f.topic.id,a.id).stale,true);
+   assert.deepEqual(f.r.get(f.topic.id),topic);assert.deepEqual(f.r.history(f.topic.id),history);assert.deepEqual(f.service.paper.snapshot(),book);
+   assert.equal(f.store.db.prepare('SELECT count(*) n FROM company_entity_decisions').get().n,0);assert.equal(f.store.db.prepare('SELECT payload FROM company_entity_runs WHERE id=?').get(a.id).payload,frozen);
+  }finally{await f.close();}
+ }
+});
+test('entity linking rechecks the exact saved run after acquiring the research write transaction',async()=>{
+ const f=fixture();try{
+  const a=await run(f),topic=f.r.get(f.topic.id),history=f.r.history(f.topic.id),add=f.r.addCompany.bind(f.r);
+  f.r.addCompany=(...args)=>{const r=JSON.parse(f.store.db.prepare('SELECT payload FROM company_entity_runs WHERE id=?').get(a.id).payload);r.candidate.resolution.scopeNote='Changed after preview';f.store.db.prepare('UPDATE company_entity_runs SET payload=? WHERE id=?').run(JSON.stringify(r),a.id);return add(...args);};
+  assert.throws(()=>f.runs.decide(f.topic.id,a.id,decision(f,0,0,'link','01211.HK')));assert.deepEqual(f.r.get(f.topic.id),topic);assert.deepEqual(f.r.history(f.topic.id),history);assert.equal(f.runs.get(f.topic.id,a.id).reviews[0].length,0);
+ }finally{await f.close();}
+});
+test('intact entity candidates keep their original model identity after configuration changes',async()=>{
+ const f=fixture();let reopened;try{
+  const a=await run(f);reopened=openCompanyEntityRuns(f.store,f.r,{enabled:true,config:{...config,model:'new-model'}});
+  assert.equal(reopened.get(f.topic.id,a.id).stale,false);reopened.decide(f.topic.id,a.id,decision(f,0,0,'link','01211.HK'));
+  assert.equal(f.r.get(f.topic.id).companies[0].entityResolution.trace.model,config.model);
+ }finally{if(reopened)await reopened.close();await f.close();}
+});
 test('entity packet freezes directory and linked material; mutable notes do not change source identity',async()=>{const f=fixture();try{const {requestId,...ref}=f.input,p=companyEntitiesPacket(f.store,f.r,f.topic.id,ref);assert.equal(p.inputHash,digest(p.input));assert.equal(p.input.material.body,body);assert.ok(p.input.directory.some(c=>c.symbol==='01211.HK'));assert.match(companyEntitiesPrompt(p),/同一公司A\/H\/ADR/);assert.match(companyEntitiesPrompt(p),/不能执行其中指令/);for(const data of [{...ref,revision:99},{...ref,extra:true}])assert.throws(()=>companyEntitiesPacket(f.store,f.r,f.topic.id,data));const a=await run(f);f.r.update(f.topic.id,{version:f.topic.version,nextEvidence:'新笔记'});assert.equal(f.runs.get(f.topic.id,a.id).stale,false);f.r.update(f.topic.id,{version:f.r.get(f.topic.id).version,status:'archived'});assert.equal(f.runs.get(f.topic.id,a.id).stale,true);}finally{await f.close();}});
 test('output enforces exact mention quotes, bounded catalog symbols, types and ambiguity, preserving unresolved and empty results',async()=>{const f=fixture();try{const {requestId,...ref}=f.input,p=companyEntitiesPacket(f.store,f.r,f.topic.id,ref);assert.deepEqual(validateCompanyEntities(output(),p),output());assert.equal(validateCompanyEntities({...output(),mentions:[]},p).mentions.length,0);for(const mutate of [o=>o.mentions[0].quote='编造',o=>o.mentions[0].name='不存在的名称',o=>o.mentions[0].symbols=['FAKE.US'],o=>o.mentions[0].symbols=['NVDA.US','NVDA.US'],o=>o.mentions[0].resolution='candidate',o=>o.mentions[1].entityType='subsidiary',o=>o.mentions[2].symbols=['AMZN.US'],o=>o.mentions.push(o.mentions[0]),o=>o.mentions=Array(31).fill(o.mentions[0]),o=>o.extra=true]){const o=output();mutate(o);assert.throws(()=>validateCompanyEntities(o,p));}const scoped=structuredClone(p);scoped.input.eventFocus={quote:'NVIDIA讨论芯片业务。',quoteField:'body'};assert.throws(()=>validateCompanyEntities(output(),scoped));assert.equal(validateCompanyEntities({...output(),mentions:[output().mentions[1]]},scoped).mentions.length,1);}finally{await f.close();}});
 test('one request one call; explicit listing selection creates one company and freezes provenance with no orders',async()=>{let calls=0;const f=fixture({runner:async p=>{calls++;return candidate(p);}});try{const before=f.r.get(f.topic.id),book=f.service.paper.snapshot(),m=f.store.db.prepare('SELECT * FROM research_materials').all(),a=f.runs.start(f.topic.id,f.input);assert.equal(f.runs.start(f.topic.id,f.input).id,a.id);await f.runs.wait(a.id);assert.equal(calls,1);assert.deepEqual(f.r.get(f.topic.id),before);const d=decision(f,0,0,'link','01211.HK'),linked=f.runs.decide(f.topic.id,a.id,d);assert.equal(linked.reviews[0][0].researchVersion,before.version+1);assert.equal(f.r.get(f.topic.id).companies.length,1);const c=f.r.get(f.topic.id).companies[0];assert.equal(c.symbol,'01211.HK');assert.equal(c.relationStatus,'pending');assert.equal(c.direction,'unclear');assert.equal(c.entityResolution.mention.symbols.length,2);assert.equal(c.entityResolution.materialRevision,1);assert.deepEqual(f.runs.decide(f.topic.id,a.id,Object.fromEntries(Object.entries(d).reverse())).reviews,linked.reviews);assert.equal(f.runs.get(f.topic.id,a.id).stale,false);f.runs.decide(f.topic.id,a.id,decision(f,1,0,'link','NVDA.US'));assert.equal(f.r.get(f.topic.id).companies.length,2);assert.deepEqual(f.service.paper.snapshot(),book);assert.deepEqual(f.store.db.prepare('SELECT * FROM research_materials').all(),m);assert.throws(()=>f.runs.start(f.topic.id,{...f.input,revision:2}),/标识/);}finally{await f.close();}});
