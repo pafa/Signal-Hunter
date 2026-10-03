@@ -4,7 +4,14 @@ import {semanticErrors} from '../shared/semantic-labels.mjs';
 const positive=new Set(['repeat','followup','reversal','related','analogy']);
 const other=side=>side==='left'?'right':'left';
 const fail=()=>{throw new Error(semanticErrors[9]);};
-const evidenceIds=(topic,record)=>(topic.evidence||[]).filter(e=>record.kind==='material'?e.materialId===record.id&&e.materialRevision===record.revision:e.newsId===record.id&&e.newsRevision===record.revision).map(e=>e.id).sort();
+function evidenceIds(topic,record){
+ return (topic.evidence||[]).filter(e=>{
+  if(record.kind==='event')return topic.id===record.id&&record.revision===1&&digest(topic.eventExtraction)===digest(record.eventProvenance)&&e.materialId===record.materialId&&e.materialRevision===record.materialRevision;
+  // Whole-document relationships cannot establish the identity of a selected occurrence.
+  if(topic.eventExtraction&&e.materialId)return false;
+  return record.kind==='material'?e.materialId===record.id&&e.materialRevision===record.revision:e.newsId===record.id&&e.newsRevision===record.revision;
+ }).map(e=>e.id).sort();
+}
 const usable=run=>run.active&&run.status==='candidate'&&positive.has(run.candidate?.comparison.relation);
 function basis(run,source,target,sourceSide){
  const sourceEvidenceIds=evidenceIds(source,run.packet.input[sourceSide]),targetEvidenceIds=evidenceIds(target,run.packet.input[other(sourceSide)]);
@@ -31,7 +38,7 @@ export function semanticResearchCandidates(store,semanticEvents,topic,topics,par
  if(!params||Object.keys(params).some(k=>k!=='semanticOffset'))throw new Error(semanticErrors[7]);
  const offset=Number(params.semanticOffset??0),limit=20;if(!Number.isSafeInteger(offset)||offset<0)throw new Error(semanticErrors[7]);
  const empty={items:[],total:0,offset,limit,acceptedPairs:0};if(!semanticEvents)return empty;
- const ids=[...new Set(topic.evidence.flatMap(e=>[e.materialId,e.newsId].filter(Boolean)))];if(!ids.length)return empty;
+ const ids=[...new Set([...(topic.eventExtraction?[topic.id]:[]),...topic.evidence.flatMap(e=>[e.materialId,e.newsId].filter(Boolean))])];if(!ids.length)return empty;
  // Read every relevant latest decision, including runs older than the comparison UI's latest 50.
  const rows=store.db.prepare(`SELECT r.id FROM semantic_runs r JOIN semantic_decisions d ON d.pair_key=r.pair_key AND d.run_id=r.id
  WHERE d.version=(SELECT MAX(version) FROM semantic_decisions WHERE pair_key=d.pair_key)
