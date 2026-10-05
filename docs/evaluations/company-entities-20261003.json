@@ -1,0 +1,245 @@
+{
+  "schema": "company-entities-diagnostic-1",
+  "date": "2026-10-03",
+  "planHash": "65f0d8d675505044a6a12f996023f06191157bfc85eb063533389ae96b7bdb8a",
+  "modelCalls": 3,
+  "distinctCases": 2,
+  "reference": "Assistant-prepared development expectations, not independent labels or accuracy",
+  "finalResults": [
+    {
+      "case": "synthetic-ambiguity",
+      "kind": "synthetic",
+      "sourceUrl": null,
+      "sourcePublishedAt": null,
+      "inputHash": "46025e5a40801343cc9283ab6d76e04344b9c68f5b58ca1107af1e7829110101",
+      "materialHash": "532848f8ac3a6a0b18a1f173023cead19e73e419d6154b75ac656b001cb18d2f",
+      "runId": "a4307f6e-1687-4f01-a786-370266d183d1",
+      "status": "candidate",
+      "mentionCount": 6,
+      "mentions": [
+        {
+          "name": "比亚迪",
+          "entityType": "company",
+          "resolution": "ambiguous",
+          "symbols": [
+            "002594.SZ",
+            "01211.HK"
+          ]
+        },
+        {
+          "name": "NVIDIA",
+          "entityType": "company",
+          "resolution": "candidate",
+          "symbols": [
+            "NVDA.US"
+          ]
+        },
+        {
+          "name": "AWS",
+          "entityType": "product",
+          "resolution": "not-company",
+          "symbols": []
+        },
+        {
+          "name": "苹果",
+          "entityType": "other",
+          "resolution": "not-company",
+          "symbols": []
+        },
+        {
+          "name": "meta-analysis",
+          "entityType": "other",
+          "resolution": "not-company",
+          "symbols": []
+        },
+        {
+          "name": "虚构星海研究社",
+          "entityType": "unclear",
+          "resolution": "unresolved",
+          "symbols": []
+        }
+      ],
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "company-entities-1",
+        "promptHash": "e1d4a25616facac6ec486ac5c3086148abb76b10998d369e73560ebeba3c8c55",
+        "schemaHash": "f45d281db1858d01c42521f9a06338d88cdd6116df8c9104a3448393b74b3d61",
+        "inputHash": "46025e5a40801343cc9283ab6d76e04344b9c68f5b58ca1107af1e7829110101",
+        "startedAt": "2026-10-03T01:07:31.609Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 13800,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 977,
+          "reasoning_output_tokens": 75
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "7164f368134f180bc87c1724ead7a5788ea188f70a06f15c3beb7268725e02e2",
+        "finishedAt": "2026-10-03T01:08:22.384Z",
+        "toolCallsObserved": 0
+      }
+    },
+    {
+      "case": "historical-official-announcement",
+      "kind": "historical-official",
+      "sourceUrl": "https://nvidianews.nvidia.com/news/nvidia-and-softbank-group-announce-termination-of-nvidias-acquisition-of-arm-limited",
+      "sourcePublishedAt": "2022-02-07",
+      "inputHash": "ee48dfa01e1928914e7fb58e0a820a870191512816c81fe811198988917960ed",
+      "materialHash": "7881aa8e901d9d4c917bc79f128c6e420ba3a5a5f7eeac4c1ebf56a7b389414e",
+      "runId": "e1bd1214-1224-4f58-afaf-f67f5f31d607",
+      "status": "candidate",
+      "mentionCount": 10,
+      "mentions": [
+        {
+          "name": "NVIDIA",
+          "entityType": "company",
+          "resolution": "candidate",
+          "symbols": [
+            "NVDA.US"
+          ]
+        },
+        {
+          "name": "SoftBank Group Corp.",
+          "entityType": "company",
+          "resolution": "unresolved",
+          "symbols": []
+        },
+        {
+          "name": "Arm",
+          "entityType": "company",
+          "resolution": "candidate",
+          "symbols": [
+            "ARM.US"
+          ]
+        },
+        {
+          "name": "Arm CPU",
+          "entityType": "product",
+          "resolution": "not-company",
+          "symbols": []
+        },
+        {
+          "name": "SoftBank Vision Fund 1",
+          "entityType": "other",
+          "resolution": "not-company",
+          "symbols": []
+        },
+        {
+          "name": "SoftBank Vision Funds",
+          "entityType": "other",
+          "resolution": "not-company",
+          "symbols": []
+        },
+        {
+          "name": "SoftBank Latin America Fund",
+          "entityType": "other",
+          "resolution": "not-company",
+          "symbols": []
+        },
+        {
+          "name": "SoftBank Latin America Fund II",
+          "entityType": "other",
+          "resolution": "not-company",
+          "symbols": []
+        },
+        {
+          "name": "SB Opportunity Fund",
+          "entityType": "other",
+          "resolution": "not-company",
+          "symbols": []
+        },
+        {
+          "name": "Arm Group",
+          "entityType": "unclear",
+          "resolution": "unresolved",
+          "symbols": []
+        }
+      ],
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "company-entities-1",
+        "promptHash": "73ae2def725c310a66c055640822f6a594619ccb5d158dde4268ac3cef1d9b6e",
+        "schemaHash": "f45d281db1858d01c42521f9a06338d88cdd6116df8c9104a3448393b74b3d61",
+        "inputHash": "ee48dfa01e1928914e7fb58e0a820a870191512816c81fe811198988917960ed",
+        "startedAt": "2026-10-03T01:11:36.554Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 16481,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2013,
+          "reasoning_output_tokens": 329
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "a0d6b0109899ecf896e5b8afece200792ccf0b8d4cdee2bd0ef3f1b8bca7c51c",
+        "finishedAt": "2026-10-03T01:13:07.119Z",
+        "toolCallsObserved": 0
+      }
+    }
+  ],
+  "retainedEarlierAttempt": {
+    "runId": "51322542-3450-452f-83b4-1a5b0ca1222b",
+    "status": "candidate",
+    "schemaHash": "02bd0ba09c4c8c3f9938d403a726cfa7c51c4dfdea34024374ba2ef7e8af3c7b",
+    "plannedSchemaHash": "f45d281db1858d01c42521f9a06338d88cdd6116df8c9104a3448393b74b3d61",
+    "issue": "Validation sorted shared required fields in place; corrected to copy before sorting. Earlier output retained; historical case rerun once against fixed frozen schema.",
+    "recheckRunId": "e1bd1214-1224-4f58-afaf-f67f5f31d607"
+  },
+  "limitations": [
+    "Finite existing directory; no current or historical listing validation",
+    "All outputs unadopted; no automatic watch or orders",
+    "Historical legal-entity continuity requires human verification; ARM.US is not proof of 2022 listing",
+    "Official raw article and full outputs retained privately only"
+  ],
+  "preservation": {
+    "research_materials": {
+      "rows": 21,
+      "allPreserved": true
+    },
+    "research_topics": {
+      "rows": 10,
+      "allPreserved": true
+    },
+    "research_versions": {
+      "rows": 31,
+      "allPreserved": true
+    },
+    "research_source_attempts": {
+      "rows": 21,
+      "allPreserved": true
+    },
+    "semantic_runs": {
+      "rows": 15,
+      "allPreserved": true
+    },
+    "semantic_decisions": {
+      "rows": 0,
+      "allPreserved": true
+    },
+    "material_event_runs": {
+      "rows": 4,
+      "allPreserved": true
+    },
+    "material_event_decisions": {
+      "rows": 4,
+      "allPreserved": true
+    },
+    "model_research_runs": {
+      "rows": 1,
+      "allPreserved": true
+    },
+    "paper_books": {
+      "rows": 1,
+      "allPreserved": true
+    },
+    "paper_versions": {
+      "rows": 1,
+      "allPreserved": true
+    }
+  }
+}

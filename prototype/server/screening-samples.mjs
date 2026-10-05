@@ -18,7 +18,7 @@ export function openScreeningSamples(db,{clock=()=>new Date().toISOString()}={})
  return {
   rulesHash,
   capture(news,triage,decisionAt){
-   const input={id:news.id,revision:news.revision,title:news.title,url:news.url,publisher:news.publisher,publishedAt:news.publishedAt,firstSeen:news.articleFirstSeen,availableAt:news.revisionFirstSeen};
+   const input={id:news.id,revision:news.revision,title:news.title,url:news.url,publisher:news.publisher,publishedAt:news.publishedAt,datePrecision:news.datePrecision||'instant',firstSeen:news.articleFirstSeen,availableAt:news.revisionFirstSeen};
    const id=digest(`${news.id}:${news.revision}:${rulesHash}`),seen=Date.parse(input.firstSeen),available=Date.parse(input.availableAt),decided=Date.parse(decisionAt);
    const prospective=Number.isFinite(seen)&&Number.isFinite(available)&&seen>=Date.parse(activatedAt)&&available>=seen&&decided>=available;
    const payload={id,input,inputHash:digest(JSON.stringify(input)),triage,rulesHash,activatedAt,decisionAt,origin:prospective?'prospective-intake':'historical-diagnostic',evaluationEligible:false,

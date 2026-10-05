@@ -1,7 +1,9 @@
+import {minuteCacheDecision} from './minute-history.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {hash,instrument} from './providers.mjs';
+import {OFFICIAL_NEWS_SOURCES} from '../shared/news-sources.mjs';
 
 export function openStore(path) {
   if(path!==':memory:') mkdirSync(dirname(path),{recursive:true});
@@ -14,22 +16,24 @@ export function openStore(path) {
     CREATE TABLE IF NOT EXISTS quotes(symbol TEXT PRIMARY KEY,payload TEXT NOT NULL,received_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS bars(symbol TEXT NOT NULL,provider_time TEXT NOT NULL,close REAL NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(symbol,provider_time));
     CREATE TABLE IF NOT EXISTS quote_bars(symbol TEXT NOT NULL,provider TEXT NOT NULL,timezone TEXT NOT NULL,provider_time TEXT NOT NULL,close REAL NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(symbol,provider,timezone,provider_time));
-    CREATE TABLE IF NOT EXISTS checks(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS checks(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS quote_snapshots(id INTEGER PRIMARY KEY,symbol TEXT NOT NULL,hash TEXT NOT NULL,payload TEXT NOT NULL,received_at TEXT NOT NULL,activated INTEGER NOT NULL,reason TEXT NOT NULL,UNIQUE(symbol,hash));`);
   db.exec(`CREATE TABLE IF NOT EXISTS daily_quotes(symbol TEXT PRIMARY KEY,payload TEXT NOT NULL,received_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS daily_snapshots(symbol TEXT NOT NULL,hash TEXT NOT NULL,payload TEXT NOT NULL,received_at TEXT NOT NULL,PRIMARY KEY(symbol,hash));`);
-  const getSettings=()=>({keywords:db.prepare("SELECT value FROM settings WHERE key='keywords'").get()?.value||'',newsDiscoveryEnabled:db.prepare("SELECT value FROM settings WHERE key='newsDiscoveryEnabled'").get()?.value!=='false',newsTrackingEnabled:db.prepare("SELECT value FROM settings WHERE key='newsTrackingEnabled'").get()?.value!=='false'});
+  const getSettings=()=>({keywords:db.prepare("SELECT value FROM settings WHERE key='keywords'").get()?.value||'',newsDiscoveryEnabled:db.prepare("SELECT value FROM settings WHERE key='newsDiscoveryEnabled'").get()?.value!=='false',newsTrackingEnabled:db.prepare("SELECT value FROM settings WHERE key='newsTrackingEnabled'").get()?.value!=='false',...Object.fromEntries(OFFICIAL_NEWS_SOURCES.map(s=>[s.setting,db.prepare('SELECT value FROM settings WHERE key=?').get(s.setting)?.value==='true']))});
   const setSettings=changes=>{
-    if(Object.keys(changes).some(key=>!['keywords','newsDiscoveryEnabled','newsTrackingEnabled'].includes(key)))throw new Error('不支持的订阅设置');
+    if(Object.keys(changes).some(key=>!['keywords','newsDiscoveryEnabled','newsTrackingEnabled',...OFFICIAL_NEWS_SOURCES.map(s=>s.setting)].includes(key)))throw new Error('不支持的订阅设置');
     if('keywords' in changes&&(typeof changes.keywords!=='string'||changes.keywords.length>120))throw new Error('关键词最多 120 字符');
-    for(const key of ['newsDiscoveryEnabled','newsTrackingEnabled'])if(key in changes&&typeof changes[key]!=='boolean')throw new Error('订阅开关需要布尔值');
+    for(const key of ['newsDiscoveryEnabled','newsTrackingEnabled',...OFFICIAL_NEWS_SOURCES.map(s=>s.setting)])if(key in changes&&typeof changes[key]!=='boolean')throw new Error('订阅开关需要布尔值');
     db.exec('BEGIN IMMEDIATE');try{for(const [key,value] of Object.entries(changes))db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').run(key,typeof value==='string'?value.trim():String(value));db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}return getSettings();
   };
-  const mapNews=row=>({...JSON.parse(row.payload),firstSeen:row.first_seen,articleFirstSeen:row.first_seen,revisionFirstSeen:db.prepare('SELECT received_at FROM revisions WHERE news_id=? AND version=?').get(row.id,row.revision)?.received_at||null,lastSeen:row.last_seen,revision:row.revision,selected:!!row.selected,read:!!row.read,note:row.note});
-  const newsRows=()=>db.prepare('SELECT * FROM news ORDER BY last_seen DESC LIMIT 500').all().map(mapNews).sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt));
+  const selectNews='SELECT n.*,r.received_at AS revision_first_seen FROM news n LEFT JOIN revisions r ON r.news_id=n.id AND r.version=n.revision';
+  const mapNews=row=>({...JSON.parse(row.payload),firstSeen:row.first_seen,articleFirstSeen:row.first_seen,revisionFirstSeen:row.revision_first_seen||null,lastSeen:row.last_seen,revision:row.revision,selected:!!row.selected,read:!!row.read,note:row.note});
+  const newsRows=()=>db.prepare(selectNews+' ORDER BY n.last_seen DESC LIMIT 500').all().map(mapNews).sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt));
   return {
     db,getSettings,setSettings,
     news:newsRows,
-    newsById(id){const row=db.prepare('SELECT * FROM news WHERE id=?').get(id);return row?mapNews(row):null;},
+    newsById(id){const row=db.prepare(selectNews+' WHERE n.id=?').get(id);return row?mapNews(row):null;},
     revisionAvailableAt(id,revision){return db.prepare('SELECT received_at FROM revisions WHERE news_id=? AND version=?').get(id,revision)?.received_at||null;},
     ingest(items,receivedAt=new Date().toISOString(),onCommit=null) {
       let added=0,updated=0;db.exec('BEGIN IMMEDIATE');
@@ -56,20 +60,29 @@ export function openStore(path) {
     removeWatch(symbol){db.prepare('DELETE FROM watches WHERE symbol=?').run(symbol);},
     quote(symbol){const row=db.prepare('SELECT * FROM quotes WHERE symbol=?').get(symbol);return row?{...JSON.parse(row.payload),receivedAt:row.received_at}:null;},
     daily(symbol){const row=db.prepare('SELECT payload FROM daily_quotes WHERE symbol=?').get(symbol);return row?JSON.parse(row.payload):null;},
-    saveDaily(quote){
+    saveDaily(quote,{activate=true}={}){
       if(quote.interval!=='1d'||!quote.points?.length)throw new Error('日线缓存格式无效');
       const payload=JSON.stringify(quote);db.exec('BEGIN IMMEDIATE');try{
-        db.prepare('INSERT OR REPLACE INTO daily_quotes VALUES(?,?,?)').run(quote.symbol,payload,quote.receivedAt);
+        if(activate)db.prepare('INSERT OR REPLACE INTO daily_quotes VALUES(?,?,?)').run(quote.symbol,payload,quote.receivedAt);
         db.prepare('INSERT OR IGNORE INTO daily_snapshots VALUES(?,?,?,?)').run(quote.symbol,hash(payload),payload,quote.receivedAt);db.exec('COMMIT');
       }catch(error){db.exec('ROLLBACK');throw error;}
     },
+    quoteHistory(symbol,limit=50){
+      if(!Number.isInteger(limit)||limit<1||limit>100)throw new Error('分钟历史查询最多100条');
+      return db.prepare('SELECT * FROM quote_snapshots WHERE symbol=? ORDER BY id DESC LIMIT ?').all(symbol,limit).map(r=>({id:r.id,hash:r.hash,...JSON.parse(r.payload),activated:!!r.activated,reason:r.reason,version:'minute-history/1'}));
+    },
     saveQuote(quote,at=new Date().toISOString()){
       db.exec('BEGIN IMMEDIATE');try{
+        const row=db.prepare('SELECT * FROM quotes WHERE symbol=?').get(quote.symbol),previous=row?JSON.parse(row.payload):null;
+        const archive=(value,receivedAt,decision)=>{const payload=JSON.stringify({quote:value,receivedAt}),digest=hash(payload);db.prepare('INSERT OR IGNORE INTO quote_snapshots(symbol,hash,payload,received_at,activated,reason) VALUES(?,?,?,?,?,?)').run(value.symbol,digest,payload,receivedAt,Number(decision.activated),decision.reason);return digest;};
+        if(previous)archive(previous,row.received_at,{activated:true,reason:'legacy-cache'});
+        const decision=minuteCacheDecision(previous,quote,at),snapshotHash=archive(quote,at,decision);
+        if(!decision.activated){db.exec('COMMIT');return {...decision,snapshotHash};}
         db.prepare('INSERT OR REPLACE INTO quotes VALUES(?,?,?)').run(quote.symbol,JSON.stringify(quote),at);
         const stmt=db.prepare('INSERT INTO bars VALUES(?,?,?,?,?) ON CONFLICT(symbol,provider_time) DO UPDATE SET close=excluded.close,last_seen=excluded.last_seen');
         const sourced=db.prepare('INSERT INTO quote_bars VALUES(?,?,?,?,?,?,?) ON CONFLICT(symbol,provider,timezone,provider_time) DO UPDATE SET close=excluded.close,last_seen=excluded.last_seen');
         for(const point of quote.points){if(quote.provider!=='yahoo-public-chart')stmt.run(quote.symbol,point.time,point.close,at,at);sourced.run(quote.symbol,quote.provider||'legacy',quote.providerTimezone||'unverified',point.time,point.close,at,at);}
-        db.exec('COMMIT');
+        db.exec('COMMIT');return {...decision,snapshotHash};
       }catch(error){db.exec('ROLLBACK');throw error;}
     },
     status(id,data){const previous=db.prepare('SELECT payload FROM checks WHERE id=?').get(id);const last=previous?JSON.parse(previous.payload):{};db.prepare('INSERT OR REPLACE INTO checks VALUES(?,?)').run(id,JSON.stringify({...data,receivedAt:data.receivedAt||last.receivedAt||null}));},

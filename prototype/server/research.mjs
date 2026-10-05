@@ -12,6 +12,7 @@ import {validateResearchBrief} from './research-brief.mjs';
 import {openMaterials} from './research-materials.mjs';
 import {readPublicArticle,publicSourceUrl} from './source-reader.mjs';
 import {RELATION_KINDS,relatedCandidates} from '../shared/research-links.mjs';
+import {semanticResearchCandidates,freezeSemanticBasis,semanticBasisStatus} from './semantic-research.mjs';
 
 const text=(value,max=2000)=>typeof value==='string'&&value.trim().length<=max?value.trim():null;
 const assertText=(value,name,max=2000)=>{const result=text(value,max);if(result===null||!result)throw new Error(`${name}不能为空且最多 ${max} 字符`);return result;};
@@ -20,7 +21,7 @@ const enums={stance:['supports','against','context','unverified'],family:['adopt
 const dateValid=value=>{try{return /^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(`${value}T00:00:00Z`).toISOString().slice(0,10)===value;}catch{return false;}};
 const defaultChain=()=>[{id:'fact',title:'事实变化',question:'相对原有信息改变了什么？'},{id:'mechanism',title:'影响机制',question:'变化如何传到公司的业务？'},{id:'earnings',title:'财务兑现',question:'如何改变盈利及事前预期？'}];
 
-export function openResearch(store,{seed=true,clock=()=>new Date().toISOString(),sourceReader=readPublicArticle,seeds=researchSeeds}={}) {
+export function openResearch(store,{seed=true,clock=()=>new Date().toISOString(),sourceReader=readPublicArticle,seeds=researchSeeds,semanticEvents=null,eventClusters=null,securityDirectory=null}={}) {
  const db=store.db;
  const screenings=openScreeningSamples(db,{clock}),triageKey=`${RULES_VERSION}@${screenings.rulesHash}`;
  const materials=openMaterials(db,{clock}),sourceJobs=new Set();
@@ -29,7 +30,8 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
  CREATE TABLE IF NOT EXISTS triage(news_id TEXT NOT NULL,news_revision INTEGER NOT NULL,rules_version TEXT NOT NULL,payload TEXT NOT NULL,processed_at TEXT NOT NULL,PRIMARY KEY(news_id,news_revision,rules_version));`);
  const get=id=>{const r=db.prepare('SELECT payload FROM research_topics WHERE id=?').get(id);if(!r)throw new Error('研究主题不存在');return JSON.parse(r.payload);};
  const withAvailability=topic=>({...topic,evidence:topic.evidence.map(e=>e.newsId?{...e,availableAt:store.revisionAvailableAt(e.newsId,e.newsRevision),availabilityBasis:'新闻修订实际接收时间；历史原字段保留'}:e)});
- const newsEvidence=(n,at)=>({id:`news:${n.id}:v${n.revision}`,newsId:n.id,newsRevision:n.revision,claim:n.title,sourceName:n.publisher,url:n.url,publishedAt:n.publishedAt,datePrecision:'instant',firstSeen:n.revisionFirstSeen,articleFirstSeen:n.articleFirstSeen,revisionFirstSeen:n.revisionFirstSeen,availableAt:n.revisionFirstSeen,originKey:n.publisher,verification:'unverified',contentScope:'headline-only',addedAt:at});
+ const withSemanticStatus=topic=>!topic.relatedEvents?.some(l=>l.semanticBasis)?topic:{...topic,relatedEvents:topic.relatedEvents.map(l=>l.semanticBasis?{...l,basisStatus:semanticBasisStatus(semanticEvents,topic,get(l.topicId),l.semanticBasis)}:l)};
+ const newsEvidence=(n,at)=>({id:`news:${n.id}:v${n.revision}`,newsId:n.id,newsRevision:n.revision,claim:n.title,sourceName:n.publisher,url:n.url,publishedAt:n.publishedAt,datePrecision:n.datePrecision||'instant',firstSeen:n.revisionFirstSeen,articleFirstSeen:n.articleFirstSeen,revisionFirstSeen:n.revisionFirstSeen,availableAt:n.revisionFirstSeen,originKey:n.publisher,verification:'unverified',contentScope:'headline-only',addedAt:at});
  const commit=(topic,reason,expectedVersion,beforeWrite=()=>{})=>{
   db.exec('BEGIN IMMEDIATE');try{
    const old=db.prepare('SELECT payload FROM research_topics WHERE id=?').get(topic.id);const current=old?JSON.parse(old.payload):null;
@@ -65,14 +67,26 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
  };
  return {
   process,get,list,screenings,
+  directorySelection:text=>securityDirectory?.selection(text)||null,
   newsItem(id){const news=store.newsById(id);if(!news)throw new Error('新闻不存在');return {...news,triage:classifyHeadline(news)};},
   materialList(id){return materials.list(get(id));},
-  packet(id){return materials.packet(withAvailability(get(id)));},
-  related(id){
+  packet(id){return materials.packet(withSemanticStatus(withAvailability(get(id))));},
+  adoptModelDraft(id,data,candidate,beforeWrite=()=>{}){
+   const topic=get(id),packet=materials.packet(withSemanticStatus(withAvailability(topic)));
+   if(data.version!==topic.version||candidate?.trace?.inputHash!==packet.inputHash||candidate?.trace?.topicId!==id||candidate?.trace?.topicVersion!==topic.version||candidate?.status!=='candidate')throw new Error('模型候选与当前研究不匹配，请重新生成');
+   const sections=validateDossierSections(candidate.sections,topic.evidence);
+   topic.dossier={sections,reviewStatus:'draft',revisionReason:'本人采纳 Codex 候选为待复核草稿',preparedBy:'Codex 模型候选 · 本人采纳，尚待复核',preparedAt:clock(),basedOnResearchVersion:topic.version+1,sourceModelRun:{id:data.runId,...candidate.trace},missingEvidence:candidate.missingEvidence};
+   topic.researchUpdatedAt=clock();
+   return commit(topic,'采纳模型研判草稿：未标记完成、未提交交易',data.version,()=>{
+    if(materials.packet(withSemanticStatus(withAvailability(get(id)))).inputHash!==candidate.trace.inputHash)throw new Error('研究或材料已变化；此候选保留在历史中，请重新生成');
+    beforeWrite();
+   });
+  },
+  related(id,params={}){
    const topic=get(id),topics=list();
-   const links=(topic.relatedEvents||[]).map(link=>({...link,title:get(link.topicId).title,currentVersion:get(link.topicId).version}));
-   const incoming=topics.flatMap(t=>(t.relatedEvents||[]).filter(link=>link.topicId===id&&link.active).map(link=>({...link,topicId:t.id,title:t.title,currentVersion:t.version})));
-   return {candidates:relatedCandidates(topic,topics),links,incoming,method:'source-entity-title-retrieval-1'};
+   const links=(withSemanticStatus(topic).relatedEvents||[]).map(link=>({...link,title:get(link.topicId).title,currentVersion:get(link.topicId).version}));
+   const incoming=topics.flatMap(t=>(t.relatedEvents||[]).filter(link=>link.topicId===id&&link.active).map(link=>({...link,topicId:t.id,title:t.title,currentVersion:t.version,...(link.semanticBasis?{basisStatus:semanticBasisStatus(semanticEvents,t,topic,link.semanticBasis)}:{})})));
+   return {eventClusters:eventClusters?.forResearch(topic)||[],candidates:relatedCandidates(topic,topics),semantic:semanticResearchCandidates(store,semanticEvents,topic,topics,params),links,incoming,method:'source-entity-title-retrieval-1'};
   },
   linkTopic(id,data){
    const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再关联');
@@ -82,9 +96,14 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    const note=assertText(data.note,'事件关系依据',1200),links=topic.relatedEvents||[],index=links.findIndex(l=>l.topicId===target.id&&l.kind===data.kind);
    if(index<0&&links.length>=40)throw new Error('一个事件最多保存 40 条关系');
    if(index<0&&!data.active)throw new Error('该关系尚未建立');
-   const link={topicId:target.id,targetVersion:target.version,kind:data.kind,active:data.active,note,at:clock(),method:'human-linked'};
+   if(Object.hasOwn(data,'semanticBasis')&&!data.active)throw new Error('撤销关系不能替换比较依据');
+   const semanticBasis=Object.hasOwn(data,'semanticBasis')?freezeSemanticBasis(semanticEvents,topic,target,data.semanticBasis):!data.active?links[index]?.semanticBasis:null;
+   const link={topicId:target.id,targetVersion:target.version,kind:data.kind,active:data.active,note,at:clock(),method:semanticBasis?'human-linked-semantic-basis':'human-linked',...(semanticBasis?{semanticBasis}:{})};
    if(index>=0)links[index]=link;else links.push(link);topic.relatedEvents=links;
-   return commit(topic,`${data.active?'关联':'撤销'}事件关系：${RELATION_KINDS[data.kind]}；不合并证据或重复计权`,data.version);
+   return commit(topic,`${data.active?'关联':'撤销'}事件关系：${RELATION_KINDS[data.kind]}；不合并证据或重复计权`,data.version,()=>{
+    const currentTarget=get(target.id);if(currentTarget.version!==data.targetVersion)throw new Error('目标事件已有新版本，请重新核对');
+    if(data.active&&semanticBasis&&freezeSemanticBasis(semanticEvents,topic,currentTarget,data.semanticBasis).hash!==semanticBasis.hash)throw new Error('比较依据已变化或不属于这两份研究，请刷新后重新核对');
+   });
   },
   saveMaterial(id,data){return linkMaterial(id,data,{...data,scope:data.scope==='extracted-text'?null:data.scope},'manual');},
   async readMaterial(id,data){
@@ -139,12 +158,17 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    if(data.dossier){data={...data,dossier:{preparedAt:clock(),preparedBy:'研究者 · 实测人工研判',basedOnResearchVersion:1,sections:validateDossierSections(data.dossier.sections,data.evidence,{allowIncomplete:true}),reviewStatus:'draft'}};}
    return commit({...data,type:'event',status:'active',createdAt:clock()},'真实数据测试批次导入：研究者复核，首次获取在今日；未生成或批准交易');
   },
-  snapshot(){const topics=list(),news=store.news();const rows=new Map(db.prepare('SELECT * FROM triage WHERE rules_version=?').all(triageKey).map(r=>[`${r.news_id}:${r.news_revision}`,r]));
+  snapshot({topics=list(),news=store.news()}={}){const rows=new Map(db.prepare(`SELECT t.* FROM json_each(?) n JOIN triage t ON t.news_id=json_extract(n.value,'$.id') AND t.news_revision=json_extract(n.value,'$.revision') AND t.rules_version=?`).all(JSON.stringify(news.map(n=>({id:n.id,revision:n.revision}))),triageKey).map(r=>[`${r.news_id}:${r.news_revision}`,r]));
    const inbox=news.map(n=>{const r=rows.get(`${n.id}:${n.revision}`);return {...n,triage:r?JSON.parse(r.payload):{bucket:'pending',category:'等待初筛',companies:[],tradeSignal:false},processedAt:r?.processed_at||null};});
    return {topics,inbox,rulesVersion:RULES_VERSION,screeningSamples:screenings.stats(),counts:{pending:inbox.filter(n=>n.triage.bucket==='pending').length,review:inbox.filter(n=>n.triage.bucket==='review').length,clue:inbox.filter(n=>n.triage.bucket==='clue').length,quiet:inbox.filter(n=>n.triage.bucket==='quiet').length},execution:'rules-only',positions:[],applications:[]};
   },
   create(data){const at=clock(),title=assertText(data.title,'主题标题',140),summary=assertText(data.summary,'研究假设');
    return commit({id:randomUUID(),title,summary,type:'cluster',label:'自建主题',origin:'user',status:'active',createdAt:at,chain:[{id:'fact',title:'事实变化',question:'什么证据能证实变化？'},{id:'mechanism',title:'影响机制',question:'变化如何传到目标公司的业务？'},{id:'earnings',title:'财务兑现',question:'如何改变预期与盈利？'}],evidence:[],companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'添加支持、反对或待核实线索，建立可证伪的因果链。'},'用户创建主题');
+  },
+  createFromMaterialEvent(snapshot,basis,beforeWrite){
+   const m=materials.get(snapshot.id),at=clock(),title=assertText(basis.event.title,'事项标题',140),summary='待核对事项：'+title;
+   const topic={id:randomUUID(),title,summary,type:'event',label:'材料拆分 · 待核对',origin:'material-event-review',status:'active',createdAt:at,chain:defaultChain(),eventExtraction:structuredClone(basis),companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'核对原文事项边界、主体身份及反证；共享材料不构成独立佐证。',evidence:[{id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,datePrecision:m.datePrecision,firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:at,originKey:m.url?new URL(m.url).hostname:m.sourceName,verification:'unverified',contentScope:m.scope,stance:'unverified',family:'other',step:'fact',interpretation:basis.reviewNote}]};
+   return commit(topic,'本人选择材料拆分事项建立研究；共享原材料，未完成研判或创建交易',undefined,()=>beforeWrite(topic));
   },
   update(id,data){const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
    const allowed=['version','status','hypothesis','assessment','nextEvidence','dossier'];if(Object.keys(data).some(k=>!allowed.includes(k)))throw new Error('不支持的研究修改');
@@ -165,7 +189,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
     const d=data.dossier;if(!d||Object.keys(d).some(k=>!['sections','reviewStatus','revisionReason'].includes(k))||!['draft','complete'].includes(d.reviewStatus))throw new Error('研判修改字段无效');
     const sections=validateDossierSections(d.sections,topic.evidence,{allowIncomplete:d.reviewStatus==='draft'}),reason=assertText(d.revisionReason,'研判修订原因',1000);
     if(d.reviewStatus==='complete'&&(researchReadiness(topic).gaps.length||sections.some(s=>!s.sourceIds.length)))throw new Error('完成研判前需补齐研究记录并为每章关联来源；未知事项须说明核查方法');
-    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1};topic.researchUpdatedAt=clock();
+    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1,...(topic.dossier?.sourceModelRun?{sourceModelRun:topic.dossier.sourceModelRun}:{})};topic.researchUpdatedAt=clock();
    }
    return commit(topic,data.status?'主题归档状态变更':data.dossier?'保存详细研判与人工完成状态（未提交交易）':data.assessment?'保存消息状态、概率与影响评估（未提交交易）':'保存交易假设（未提交交易申请）',data.version);
   },
@@ -185,15 +209,17 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    topic.researchUpdatedAt=at;
    return commit(topic,`主张修订：${clean.revisionReason}`,data.version);
   },
-  addCompany(id,data){const topic=get(id);
+  addCompany(id,data,beforeWrite=()=>{},entityResolution=null){const topic=get(id);
    if(data.replace!==undefined&&typeof data.replace!=='boolean')throw new Error('关系修订标记无效');
    if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
-   const company=normalizeCompanyRelation(data,topic,clock()),index=topic.companies.findIndex(c=>c.symbol===company.symbol);
+   const company=normalizeCompanyRelation(data,withAvailability(topic),clock(),entityResolution?.identity||topic.companies.find(c=>c.symbol===String(data.symbol).trim().toUpperCase())?.entityResolution?.identity),index=topic.companies.findIndex(c=>c.symbol===company.symbol);
    if(index>=0&&!data.replace)throw new Error('公司已关联；请选择修订关系，避免静默覆盖');
    if(index<0&&data.replace)throw new Error('待修订的公司关系不存在');
    if(index<0&&topic.companies.length>=20)throw new Error('一个主题最多关联 20 个标的');
+   if(entityResolution)company.entityResolution=structuredClone(entityResolution);
+   else if(index>=0&&topic.companies[index].entityResolution)company.entityResolution=structuredClone(topic.companies[index].entityResolution);
    if(index>=0)topic.companies[index]=company;else topic.companies.push(company);
-   return commit(topic,index>=0?'修订公司关系：旧关系保留在历史版本':'关联公司：主体、传导方向和关系来源分别记录',data.version);
+   return commit(topic,index>=0?'修订公司关系：旧关系保留在历史版本':'关联公司：主体、传导方向和关系来源分别记录',data.version,beforeWrite);
   },
   removeCompany(id,data){const topic=get(id),symbol=instrument(data.symbol).symbol;
    if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');

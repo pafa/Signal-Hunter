@@ -30,5 +30,8 @@ export function dailyEligibility(symbol,date,receivedAt){
 }
 export function dailyHealth(symbol,quote,at=new Date().toISOString()){
  const clock=marketClock(symbol,at),last=quote?.lastDate||quote?.points?.filter(p=>p.close>0).at(-1)?.date;
- return {...clock,lastDate:last||null,status:!last?'missing':!clock.expectedDate?'unknown':last<clock.expectedDate?'lagging':last>clock.expectedDate?'ahead':'aligned',label:!last?'无日线':!clock.expectedDate?'日期待核验':last<clock.expectedDate?'落后应有交易日':last>clock.expectedDate?'日线日期异常':'日期已对齐'};
+ const expected=clock.expectedDate,bar=quote?.points?.find(p=>p.date===expected);
+ const expectedBarStatus=!expected?'unknown':!bar?'row-missing':Number.isFinite(bar.close)&&bar.close>0?'valid':'close-missing';
+ const gapLabel=expectedBarStatus==='close-missing'?`来源 ${expected} 收盘价缺失`:`来源尚无 ${expected} 日线`;
+ return {...clock,lastDate:last||null,expectedBarStatus,status:!last?'missing':!expected?'unknown':last<expected?'lagging':last>expected?'ahead':'aligned',label:!last?'无日线':!expected?'日期待核验':last<expected?gapLabel:last>expected?'日线日期异常':'日期已对齐'};
 }

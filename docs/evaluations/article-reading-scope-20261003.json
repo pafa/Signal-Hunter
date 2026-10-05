@@ -1,0 +1,299 @@
+{
+  "schema": "article-reading-scope-evaluation-1",
+  "baseCommit": "1e97e01cf570927691b5280f2d2ccdd431f20c9a",
+  "readerVersion": "public-article-4",
+  "evidenceSchema": "article-extraction-1",
+  "frozenPlanHash": "0160f1bd04f03f97f70ace20b197f057549977522774c1aa37ecf0150615c5e5",
+  "codeHash": "0867b3b7b7b6baa2586bf65c4e870937019ebfbcfae2ca8229bf6f9e9e65a36a",
+  "scope": "Known historical pages and two finite real Codex diagnostics; assistant expectations, not independent quality or forward evaluation",
+  "results": [
+    {
+      "id": "csrc-huijin",
+      "url": "https://www.csrc.gov.cn/csrc/c100028/c7462111/content.shtml",
+      "publishedAt": "2024-02-06",
+      "chars": 320,
+      "fetchStartedAt": "2026-10-02T22:35:30.044Z",
+      "fetchReceivedAt": "2026-10-02T22:35:30.313Z",
+      "materialId": "6b6fa10129cd10d3141512433bdd23e1df3f477dcb55cbdbfb69166e5772e48b",
+      "revision": 3,
+      "bodyHash": "1478888ac637f05c3acb1f731253e057a472e914a37a4430c857419f57056be9",
+      "contentHash": "086793c81aa201dc68c099c8b23949323c0a10c0c34a95dd51b5c52a75dd39de",
+      "profile": "csrc-article-1",
+      "scanScope": "publisher-article-links",
+      "removedControls": {
+        "fontSize": 1,
+        "share": 1
+      },
+      "attachmentCount": 0,
+      "attachmentFormats": [],
+      "attachmentsRead": 0,
+      "omittedAttachmentLinks": 0,
+      "truncated": false
+    },
+    {
+      "id": "csrc-ma",
+      "url": "https://www.csrc.gov.cn/csrc/c100028/c7508366/content.shtml",
+      "publishedAt": "2024-09-24",
+      "chars": 1009,
+      "fetchStartedAt": "2026-10-02T22:35:30.314Z",
+      "fetchReceivedAt": "2026-10-02T22:35:30.428Z",
+      "materialId": "88ea4731741f1934558852fefac8f40bd5e54a463f9a85a57e380f56a8c9c0fb",
+      "revision": 2,
+      "bodyHash": "b666314f65e61fd2995b6c1a18da8a6760a206c9fe3eefc87071b9dbf18a4b04",
+      "contentHash": "189211a1855729550de6e5f09f4be8ce413e72b8fec65cd2abef5a83d94e67b0",
+      "profile": "csrc-article-1",
+      "scanScope": "publisher-article-links",
+      "removedControls": {
+        "fontSize": 1,
+        "share": 1
+      },
+      "attachmentCount": 1,
+      "attachmentFormats": [
+        "pdf"
+      ],
+      "attachmentsRead": 0,
+      "omittedAttachmentLinks": 0,
+      "truncated": false
+    },
+    {
+      "id": "hkma-mortgage",
+      "url": "https://www.hkma.gov.hk/chi/news-and-media/press-releases/2024/10/20241016-4/",
+      "publishedAt": "2024-10-16",
+      "chars": 1107,
+      "fetchStartedAt": "2026-10-02T22:35:30.428Z",
+      "fetchReceivedAt": "2026-10-02T22:35:32.668Z",
+      "materialId": "f0659f9c136f7e6aedcde9ba89718b9deb3b9f235ac9fd7246800c2d57df8d07",
+      "revision": 3,
+      "bodyHash": "f14ac7b137d02fb75eddf5ecaf17122183acc5b44379f3e94ea6804205407196",
+      "contentHash": "53f3dae865dfc9b7518cd264ec6867da1b7de711c9c03723dff7a8f881706a53",
+      "profile": "hkma-release-1",
+      "scanScope": "publisher-article-links",
+      "removedControls": {
+        "fontSize": 0,
+        "share": 0
+      },
+      "attachmentCount": 0,
+      "attachmentFormats": [],
+      "attachmentsRead": 0,
+      "omittedAttachmentLinks": 0,
+      "truncated": false
+    },
+    {
+      "id": "hkma-completion",
+      "url": "https://www.hkma.gov.hk/chi/news-and-media/press-releases/2024/12/20241204-5/",
+      "publishedAt": "2024-12-04",
+      "chars": 795,
+      "fetchStartedAt": "2026-10-02T22:35:32.669Z",
+      "fetchReceivedAt": "2026-10-02T22:35:34.848Z",
+      "materialId": "4cc13cff58335842342656a581dc214bf23237054ea76136af8a837b371ebd62",
+      "revision": 3,
+      "bodyHash": "8ab0051900afeb73826e716bc25a3546a8ed26281770030da510c356a71816e0",
+      "contentHash": "d99ad9d8f65d082ad9d22d3c65d4609b1cb357680a65dcad3a15dd72775376b4",
+      "profile": "hkma-release-1",
+      "scanScope": "publisher-article-links",
+      "removedControls": {
+        "fontSize": 0,
+        "share": 0
+      },
+      "attachmentCount": 0,
+      "attachmentFormats": [],
+      "attachmentsRead": 0,
+      "omittedAttachmentLinks": 0,
+      "truncated": false
+    }
+  ],
+  "paragraphAudit": [
+    {
+      "id": "csrc-huijin",
+      "paragraphs": 2,
+      "missing": [],
+      "controlsAbsent": true,
+      "attachments": 0
+    },
+    {
+      "id": "csrc-ma",
+      "paragraphs": 9,
+      "missing": [],
+      "controlsAbsent": true,
+      "attachments": 1
+    },
+    {
+      "id": "hkma-mortgage",
+      "paragraphs": 12,
+      "missing": [],
+      "controlsAbsent": true,
+      "attachments": 0
+    },
+    {
+      "id": "hkma-completion",
+      "paragraphs": 8,
+      "missing": [],
+      "controlsAbsent": true,
+      "attachments": 0
+    }
+  ],
+  "runs": [
+    {
+      "kind": "comparison",
+      "id": "de06dba8-c7ba-4740-83b5-f8e7bdc46ceb",
+      "status": "candidate",
+      "trace": {
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "event-pair-material-1/event-time-evidence-2/article-reading-scope-1",
+        "promptHash": "fc32c7ce544f9a33b5e8e591be15d03be0912811a687ebe37bed58cd09245baa",
+        "schemaHash": "c55db1dc263509f655e049fe6a7e6b4d86df3a7926efa731e048a5dd865abcf6",
+        "inputHash": "84a49a3ceca7891f3b71157e978f87f076ebd0c90b7a86805ce8f4bc8410833f",
+        "startedAt": "2026-10-02T22:39:12.130Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 13194,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 883,
+          "reasoning_output_tokens": 140
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "b6bd6f98cab9f5654047139681d25b5eff9638705a8c895240165fa0c9d2b008",
+        "finishedAt": "2026-10-02T22:40:01.295Z",
+        "toolCallsObserved": 0
+      },
+      "relation": "unrelated",
+      "sectionCount": 0,
+      "missingEvidenceCount": 6,
+      "unreadAttachmentDisclosed": true,
+      "plannedPromptHash": "fc32c7ce544f9a33b5e8e591be15d03be0912811a687ebe37bed58cd09245baa",
+      "packetFieldsChangedSincePlan": [],
+      "inputUnchangedSincePlan": true
+    },
+    {
+      "kind": "research",
+      "id": "823e10cc-3109-4464-8c84-15bd57d66b55",
+      "status": "candidate",
+      "trace": {
+        "topicId": "19594f3c-4d1b-4f28-ad56-e696ef144b3d",
+        "topicVersion": 2,
+        "provider": "local-codex-cli",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "promptVersion": "codex-research-2",
+        "promptHash": "f723b85939142165bf2990d39afd9dd555224a0f2d0e990be25677a3e7b2557b",
+        "schemaHash": "8c74b3fc5bb7775e9fe6f303ce2caa299723167514f4d28ebcdc11bce0f5bfdd",
+        "inputHash": "e3aebf676c599221637202a714395f75f0dc816576ed4598b07b6b8c742c3f38",
+        "startedAt": "2026-10-02T22:40:01.301Z",
+        "cliVersion": "codex-cli 0.159.0-alpha.12.1",
+        "usage": {
+          "input_tokens": 13011,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2775,
+          "reasoning_output_tokens": 107
+        },
+        "runtimeWarningCount": 1,
+        "outputHash": "c04628608ecf9aa2b5869209dcf4b105d6f61eec7796be1ebd8fea21ba1ed345",
+        "finishedAt": "2026-10-02T22:42:03.136Z",
+        "toolCallsObserved": 0
+      },
+      "relation": null,
+      "sectionCount": 5,
+      "missingEvidenceCount": 10,
+      "unreadAttachmentDisclosed": true,
+      "plannedPromptHash": "079926a5cd016a1c168d67fef2350218366f9705556285868fbc5b5d54bdc131",
+      "packetFieldsChangedSincePlan": [
+        "generatedAt"
+      ],
+      "inputUnchangedSincePlan": true
+    }
+  ],
+  "preserved": {
+    "preservedMaterials": 16,
+    "preservedRuns": 11,
+    "oldMaterialsHash": "48132a0ca1ff60a911ef28fb6ec015fc7f926727bcaefefa09f09336ee462432",
+    "oldRunsHash": "f06f999a267737fffae885e19b6a567302a06f6947ccdd065af9b6b15a0aea1f"
+  },
+  "restart": {
+    "semantic_runs": {
+      "rows": 12,
+      "hash": "ab65868fcccc98fef063f75d583abec3d6afa14d07020210bd7d4ab1c60fedf0"
+    },
+    "model_research_runs": {
+      "rows": 1,
+      "hash": "2f9c17d93a621ee90b5c3a69894f2a9b2a8546ff6aefe816153a5b751aeab819"
+    },
+    "semantic_decisions": {
+      "rows": 0,
+      "hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "research_materials": {
+      "rows": 20,
+      "hash": "969852a1b8f497d9ff029d2d52ca6951ddf1122e190fcb8dae324dacd1e26852"
+    },
+    "research_topics": {
+      "rows": 3,
+      "hash": "8ba996943278a8ac8286813524ccde93e757c3da699c50b56db7a458d4fb603b"
+    },
+    "research_versions": {
+      "rows": 21,
+      "hash": "2cdea17ef8b89eabcd9324e4413fdfaed985756ed5964f196d45b51edb102591"
+    },
+    "research_source_attempts": {
+      "rows": 18,
+      "hash": "b1101d3796cc7c3017369e08b97921a05ce568eca60818cdc64e6bae66eb9e82"
+    },
+    "paper_books": {
+      "rows": 1,
+      "hash": "5bbb2c86e32e764d446b68392a6542602766c27b56fd880e8e934e4ec36bd2f2"
+    },
+    "paper_versions": {
+      "rows": 1,
+      "hash": "51359cd70fea69e5deeb192556ccf20e6652e7811293b36fb96fd8683fde3510"
+    }
+  },
+  "checks": {
+    "tests": 535,
+    "releaseFiles": 301,
+    "build": true,
+    "existingLargeBundleWarning": true,
+    "desktop": [
+      1440,
+      1000
+    ],
+    "narrow": [
+      390,
+      844
+    ],
+    "materialDialogWidthPairs": [
+      [
+        778,
+        778
+      ],
+      [
+        376,
+        376
+      ]
+    ],
+    "comparisonDialogWidthPairs": [
+      [
+        1118,
+        1118
+      ],
+      [
+        364,
+        364
+      ]
+    ],
+    "browserErrors": 0,
+    "browserWarnings": 0,
+    "originalWeekTopics": 8
+  },
+  "limits": [
+    "Attachments were not fetched or MIME-verified; links and names do not establish content",
+    "Paragraph audit compares whitespace-normalized inclusion against prior frozen publisher HTML; not tables, attachment or semantic completeness",
+    "Only verified publisher control locations are removed; extra blank lines remain possible",
+    "Inputs, code, schema and expectations fixed before calls; research service regenerated only packet.generatedAt, so actual prompt hash differs and both hashes are retained",
+    "Each real call reported one runtime warning; zero observed tools; outputs remain unadopted candidates",
+    "Material linking replayed this round saved actual extractions, not extra network fetches",
+    "Old rows preserved in isolated copies; no original database migration or daemon activation"
+  ]
+}
