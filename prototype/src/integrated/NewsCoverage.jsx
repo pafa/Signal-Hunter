@@ -1,3 +1,4 @@
+import NewsCoverageReport from './NewsCoverageReport';
 import {OFFICIAL_NEWS_SOURCES} from '../../shared/news-sources.mjs';
 import {safeErrorText} from '../../shared/safe-errors.mjs';
 import React,{useState} from 'react';
@@ -31,6 +32,7 @@ export default function NewsCoverage({data,mutate,busy}){
  {r?.error&&<p className="m-warning">{safeErrorText(r.error)} · 已保存的页和旧标题保留</p>}
  {r&&<><small>原始 {r.rawCount??'—'} · 接受 {r.acceptedCount??'—'} · 不合格 {r.rejectedCount??'—'} · 窗口外 {r.outsideWindow??0} · 重复 {r.duplicates??0} · 新增 {r.added??'—'} · 修订 {r.updated??'—'}</small><small>窗口内发布时间：{r.observedFrom?`${time(r.observedFrom)} — ${time(r.observedTo)}`:'没有合格条目'}</small>{r.possiblyTruncated&&<p className="m-warning">入口或页数存在上限；只代表本次返回内容，不能判断完整覆盖。</p>}{r.coverage==='api-range-exhausted'&&<small>API日期范围已翻页至末页；不证明全市场或独立新闻覆盖。</small>}{r.unobservedSeconds>1800&&<p className="m-warning">距离此前成功收取约 {Math.ceil(r.unobservedSeconds/60)} 分钟；间隔内覆盖待核对。</p>}</>}
  </article>;})}</div>
+ <NewsCoverageReport serverTime={data?.serverTime}/>
  <details><summary>最近 30 次入口记录</summary><div className="ops-scroll"><table className="i-table"><thead><tr><th>入口 / 开始</th><th>结果</th><th>新增 / 修订</th><th>留档</th></tr></thead><tbody>{(data?.newsIntake?.recent||[]).map(r=><tr key={r.id}><td>{r.label}<small>{time(r.startedAt)}</small></td><td>{state(r)}<small>{safeErrorText(r.error)}</small></td><td>{r.added??'—'} / {r.updated??'—'}</td><td><Button onClick={async()=>{try{setReceipt(await request(`/api/news/intake/${r.id}`));setError('');}catch(e){setError(e.message);}}}>逐页记录</Button></td></tr>)}</tbody></table></div></details>
  {error&&<p role="alert">{error}</p>}{receipt&&<section aria-label="采集逐页记录"><h4>{receipt.label} · 原始响应指纹</h4><p className="m-note">原始响应保存在本机数据库中。旧版没有留档时不补造。</p>{receipt.pages.map(p=><p key={p.page}>第 {p.page} 页 · {p.payload.state} · {time(p.receivedAt)}<br/>指纹 {p.responseHash?.slice(0,20)||'未收到响应'}<br/>接受 {p.payload.acceptedCount??'—'} · 不合格 {p.payload.rejectedCount??'—'}{p.payload.error&&<small>{safeErrorText(p.payload.error)}</small>}</p>)}{!receipt.pages.length&&<p>此旧记录没有逐页响应留档。</p>}</section>}
  </details>;

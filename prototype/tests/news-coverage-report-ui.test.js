@@ -1,0 +1,18 @@
+import test from 'node:test';import assert from 'node:assert/strict';import React,{act} from 'react';import {createServer} from 'vite';import {fileURLToPath} from 'node:url';import {JSDOM} from 'jsdom';
+async function ui(run){
+ const vite=await createServer({configFile:false,root:fileURLToPath(new URL('../',import.meta.url)),server:{middlewareMode:true,watch:null},appType:'custom'}),dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/'}),names=['window','document','HTMLElement','fetch','IS_REACT_ACT_ENVIRONMENT'],before=new Map(names.map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)]));let root;dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
+ try{Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true});const {createRoot}=await import('react-dom/client');root=createRoot(document.getElementById('root'));const {default:Review}=await vite.ssrLoadModule('/src/integrated/NewsCoverageReport.jsx');const button=t=>[...document.querySelectorAll('button')].find(x=>x.textContent===t),area=t=>[...document.querySelectorAll('label')].find(x=>x.firstChild?.textContent===t).querySelector('textarea,input,select');
+ const edit=async(label,value)=>act(()=>{const e=area(label);Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e),'value').set.call(e,value);e.dispatchEvent(new dom.window.Event('input',{bubbles:true}));e.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+ const respond=b=>new Response(JSON.stringify(b),{headers:{'content-type':'application/json'}});let handler=()=>({enabled:false,runs:[],materials:[],attempts:[],history:[],search:{items:[],total:0},samples:[]});globalThis.fetch=async path=>respond(await handler(path));
+ await run({Review,setFetch:f=>{handler=f;},render:n=>act(()=>root.render(n)),button,area,edit,submit:()=>act(async()=>document.querySelector('form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true})))});
+ }finally{if(root)await act(()=>root.unmount());for(const [k,d] of before)if(d)Object.defineProperty(globalThis,k,d);else delete globalThis[k];dom.window.close();await vite.close();}
+}
+
+
+
+test('coverage report loads only on request, keeps keyboard focus, rejects duplicate submits and clears stale results on a failed refresh',()=>ui(async({Review,render,button,area,edit,submit,setFetch})=>{
+ let calls=0,resolve;setFetch(path=>{calls++;assert.equal(path,'/api/news/coverage?from=2026-09-28&to=2026-10-04');return new Promise(r=>{resolve=r;});});
+ await render(React.createElement(Review,{serverTime:'2026-10-04T12:00:00Z'}));assert.equal(calls,0);const run=button('生成覆盖报告');run.focus();await act(()=>run.click());assert.equal(calls,1);assert.equal(document.activeElement,run);assert.equal(run.getAttribute('aria-disabled'),'true');await act(()=>run.click());assert.equal(calls,1);
+ await act(async()=>resolve({from:'2026-09-28',to:'2026-10-04',generatedAt:'2026-10-04T12:00:00Z',runCount:41,inputHash:'a'.repeat(64),sources:[],limitations:['Not full coverage']}));assert(document.body.textContent.includes('共 41 次采集尝试'));assert.equal(run.getAttribute('aria-disabled'),'false');assert.equal(document.activeElement,run);
+ await edit('报告开始日期（UTC）','2026-10-01');assert(document.body.textContent.includes('2026-09-28 至 2026-10-04'));setFetch(()=>{throw Error('Explicit test failure');});await submit();assert(!document.body.textContent.includes('共 41 次'));assert.equal(document.querySelector('[role="alert"]').textContent,'Explicit test failure');assert.equal(run.getAttribute('aria-disabled'),'false');
+}));

@@ -19,5 +19,5 @@ export function directoryCodeRecall(text){
   }catch{/* Unsupported tokens remain unresolved; never infer another market. */}
   return ' ';
  });
- return {names,matches:entry=>tokens.some(t=>t.symbol===entry.symbol&&(!t.venue||t.venue===entry.venue))};
+ return {names,tokens:tokens.map(t=>({...t})),matches:entry=>tokens.some(t=>t.symbol===entry.symbol&&(!t.venue||t.venue===entry.venue))};
 }

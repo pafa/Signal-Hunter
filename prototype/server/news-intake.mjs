@@ -1,3 +1,4 @@
+import {newsCoverageReport} from './news-coverage-report.mjs';
 import {randomUUID} from 'node:crypto';
 import {fetchText,hash,newsUrl,parseReutersFeedResult} from './providers.mjs';
 import {officialQueries,sourcePageUrl,parseOfficialPage,NEWS_ADAPTER_VERSION} from './news-sources.mjs';
@@ -23,6 +24,7 @@ export function openNewsIntake(store,{clock=()=>new Date().toISOString()}={}){
  const latest=(id,success=false)=>read(db.prepare("SELECT payload FROM news_intake_runs WHERE query_id=?"+(success?" AND json_extract(payload,'$.state')='ok'":'')+' ORDER BY started_at DESC,rowid DESC LIMIT 1').get(id));
  return {
   snapshot(){return {queries:newsQueries(store.getSettings(),clock()).map(q=>({...q,last:latest(q.id),lastSuccess:latest(q.id,true)})),recent:db.prepare('SELECT payload FROM news_intake_runs ORDER BY started_at DESC,rowid DESC LIMIT 30').all().map(read),coverage:'observed-only'};},
+  report(input){return newsCoverageReport(db,newsQueries(store.getSettings(),clock()),input,clock(),payload=>read({payload}));},
   detail(id){const row=read(db.prepare('SELECT payload FROM news_intake_runs WHERE id=?').get(id));if(!row)throw new Error('采集记录不存在');return {...row,pages:db.prepare('SELECT page,url,response_hash AS responseHash,received_at AS receivedAt,payload FROM news_intake_pages WHERE run_id=? ORDER BY page').all(id).map(p=>({...p,payload:JSON.parse(p.payload)}))};},
   async run(query,fetcher,context){
    context?.assertActive?.();
@@ -31,21 +33,24 @@ export function openNewsIntake(store,{clock=()=>new Date().toISOString()}={}){
    db.prepare('INSERT INTO news_intake_runs VALUES(?,?,?,?,?)').run(row.id,row.queryId,startedAt,null,JSON.stringify(row));
    const save=value=>db.prepare('UPDATE news_intake_runs SET finished_at=?,payload=? WHERE id=?').run(value.finishedAt||null,JSON.stringify(value),row.id);
    const pageSave=(page,value)=>db.prepare('UPDATE news_intake_pages SET payload=? WHERE run_id=? AND page=?').run(JSON.stringify(value),row.id,page);
-   const deadline=AbortSignal.timeout(30000),seenPages=new Set(),seenItems=new Set();let page=1;
+   const deadline=AbortSignal.timeout(30000),seenPages=new Set(),seenItems=new Set();let page=1,pageReceipt={};
    try{
     for(;page<=(query.id==='hkma'?3:1);page++){
      context?.assertActive?.();const url=official?sourcePageUrl(query,page):query.url;
      db.prepare('INSERT INTO news_intake_pages VALUES(?,?,?,NULL,NULL,?)').run(row.id,page,url,JSON.stringify({state:'requesting'}));
-     const body=await fetchText(url,(u,options)=>fetcher(u,{...options,signal:AbortSignal.any([options.signal,deadline])})),receivedAt=clock();context?.assertActive?.();
-     const responseHash=hash(body);
-     db.exec('BEGIN IMMEDIATE');try{db.prepare('INSERT OR IGNORE INTO news_source_responses VALUES(?,?,?)').run(responseHash,body,Buffer.byteLength(body));db.prepare('UPDATE news_intake_pages SET response_hash=?,received_at=?,payload=? WHERE run_id=? AND page=?').run(responseHash,receivedAt,JSON.stringify({state:'received'}),row.id,page);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
+     pageReceipt={};let receivedAt,responseHash;
+     const body=await fetchText(url,(u,options)=>fetcher(u,{...options,signal:AbortSignal.any([options.signal,deadline])}),{onReceipt:({body,httpStatus,responseHeaders})=>{
+      receivedAt=clock();context?.assertActive?.();responseHash=hash(body);pageReceipt={httpStatus,responseHeaders};
+      // Bounded error bodies are evidence, never items to parse or ingest.
+      db.exec('BEGIN IMMEDIATE');try{db.prepare('INSERT OR IGNORE INTO news_source_responses VALUES(?,?,?)').run(responseHash,body,Buffer.byteLength(body));db.prepare('UPDATE news_intake_pages SET response_hash=?,received_at=?,payload=? WHERE run_id=? AND page=?').run(responseHash,receivedAt,JSON.stringify({...pageReceipt,state:'received'}),row.id,page);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
+     }});context?.assertActive?.();
      if(seenPages.has(responseHash))throw new Error('来源重复返回同一页，已停止补采；此前页保留');seenPages.add(responseHash);
      const parsed=official?parseOfficialPage(query,body,page):{...parseReutersFeedResult(body),hasMore:false,outsideWindow:0,duplicates:0,rejections:[]};
      const fresh=parsed.items.filter(n=>!seenItems.has(n.id));const overlap=parsed.items.length-fresh.length;
      if(page>1&&parsed.items.length&&fresh.length===0)throw new Error('分页没有新增条目，已停止；此前页保留');
      const times=fresh.map(i=>i.publishedAt).sort();
      const next={...row,pages:page,paginationOverlap:!!row.paginationOverlap||overlap>0,sourceObservedFrom:[row.sourceObservedFrom,parsed.sourceObservedFrom].filter(Boolean).sort()[0]||null,sourceObservedTo:[row.sourceObservedTo,parsed.sourceObservedTo].filter(Boolean).sort().at(-1)||null,rawCount:row.rawCount+parsed.rawCount,acceptedCount:row.acceptedCount+fresh.length,rejectedCount:row.rejectedCount+parsed.rejectedCount,outsideWindow:row.outsideWindow+(parsed.outsideWindow||0),duplicates:row.duplicates+(parsed.duplicates||0)+overlap,observedFrom:[row.observedFrom,times[0]].filter(Boolean).sort()[0]||null,observedTo:[row.observedTo,times.at(-1)].filter(Boolean).sort().at(-1)||null,responseHash,possiblyTruncated:official?parsed.hasMore:parsed.rawCount>=100,coverage:parsed.coverage||'observed-only'};
-     const pageRecord={state:'committed',rawCount:parsed.rawCount,acceptedCount:fresh.length,rejectedCount:parsed.rejectedCount,outsideWindow:parsed.outsideWindow||0,duplicates:(parsed.duplicates||0)+overlap,rejections:parsed.rejections,hasMore:parsed.hasMore};
+     const pageRecord={...pageReceipt,state:'committed',rawCount:parsed.rawCount,acceptedCount:fresh.length,rejectedCount:parsed.rejectedCount,outsideWindow:parsed.outsideWindow||0,duplicates:(parsed.duplicates||0)+overlap,rejections:parsed.rejections,hasMore:parsed.hasMore};
      store.ingest(fresh,receivedAt,result=>{
       Object.assign(next,{added:row.added+result.added,updated:row.updated+result.updated,ingestCommitted:true});save(next);pageSave(page,pageRecord);
       for(const item of fresh)db.prepare('INSERT OR IGNORE INTO news_intake_observations VALUES(?,?,?)').run(row.id,item.id,store.newsById(item.id).revision);
@@ -59,7 +64,7 @@ export function openNewsIntake(store,{clock=()=>new Date().toISOString()}={}){
     save(row);return row;
    }catch(error){
     Object.assign(row,{state:context?.signal?.aborted?'cancelled':row.pages?'partial':'error',finishedAt:clock(),error:String(error.message||error).slice(0,200),coverage:'incomplete'});
-    pageSave(page,{state:row.state,error:row.error});save(row);return row;
+    pageSave(page,{...pageReceipt,state:row.state,error:row.error});save(row);return row;
    }
   },
  };

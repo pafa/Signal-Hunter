@@ -2,7 +2,7 @@ import {claimsOf} from '../shared/claims.mjs';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {buildEvaluationBaseline,collectEvaluationSources} from './evaluation-baseline.mjs';
-import {digest,codexPrompt,CODEX_PROMPT_VERSION,CODEX_DRAFT_SCHEMA} from './codex-research.mjs';
+import {digest,codexPrompt,CODEX_PROMPT_VERSION,CODEX_DRAFT_SCHEMA,CODEX_SCHEMA_VERSION,codexDraftSchema} from './codex-research.mjs';
 import {validateCandidate as validateModelCandidate} from './model-research-runs.mjs';
 import {immutableMaterialSnapshot} from './research-materials.mjs';
 import {forwardEligibility,evaluationTime,evaluationMemberKeys} from '../shared/evaluation.mjs';
@@ -19,7 +19,7 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
  db.exec(`CREATE TABLE IF NOT EXISTS forward_baselines(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,request_hash TEXT NOT NULL,payload TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS forward_captures(run_id TEXT PRIMARY KEY,baseline_id TEXT NOT NULL,topic_id TEXT NOT NULL,payload TEXT NOT NULL);`);
  const guard=()=>{if(!enabled)throw new Error('当前模式不启用前向记录');if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw new Error('恢复副本需先完成核对确认');};
- const recipe=()=>({provider:'local-codex-cli',binary:config.binary||null,model:config.model||null,effort:config.effort||'high',timeoutMs:config.timeoutMs??180000,promptVersion:CODEX_PROMPT_VERSION,schemaHash:digest(CODEX_DRAFT_SCHEMA)});
+ const recipe=()=>({provider:'local-codex-cli',binary:config.binary||null,model:config.model||null,effort:config.effort||'high',timeoutMs:config.timeoutMs??180000,promptVersion:CODEX_PROMPT_VERSION,schemaHash:digest(CODEX_DRAFT_SCHEMA),schemaVersion:CODEX_SCHEMA_VERSION});
  const active=()=>db.prepare('SELECT value FROM settings WHERE key=?').get(stateKey)?.value||null;
  const baseline=id=>{const row=db.prepare('SELECT payload FROM forward_baselines WHERE id=?').get(id);if(!row)throw new Error('前向基线不存在');return checked(JSON.parse(row.payload));};
  const brief=b=>({id:b.id,title:b.title,frozenAt:b.baseline.frozenAt,rulesHash:b.baseline.rulesHash,sourceHash:b.sourceHash,execution:b.execution,forwardEligible:false});
@@ -59,7 +59,7 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
    const baselineId=active();if(!baselineId)return;
    guard();const b=baseline(baselineId),topic=research.get(run.topicId),reasons=[];
    if(topic.version!==run.packet.input.topicVersion||research.packet(run.topicId).inputHash!==run.packet.inputHash)throw new Error('研究已更新，请刷新后再生成');
-   const execution={...recipe(),promptHash:digest(codexPrompt(run.packet))},sourceHash=digest(collectEvaluationSources(root));
+   const execution={...recipe(),schemaHash:digest(codexDraftSchema(run.packet)),promptHash:digest(codexPrompt(run.packet))},sourceHash=digest(collectEvaluationSources(root));
    if(digest(recipe())!==digest(b.execution)||sourceHash!==b.sourceHash)reasons.push('代码或模型配置已不同于冻结基线');
    if(run.packet.input.sourceRevision)reasons.push('包含旧来源与历史判断');
    if(db.prepare('SELECT 1 FROM model_research_runs WHERE topic_id=? AND id<>?').get(run.topicId,run.id))reasons.push('该研究已有模型调用');
@@ -110,7 +110,7 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
    const trace=run.candidate?.trace||run.failure?.trace;
    if(run.candidate){try{validateModelCandidate(run.candidate,run.packet,{model:capture.execution.model,topicId:capture.topicId});}catch{reasons.push('原模型候选完整性校验失败');}}
    if(run.candidate&&!trace?.promptHash)reasons.push('实际模型执行依据缺失');
-   if(trace?.promptHash)for(const key of ['model','effort','promptVersion','promptHash','schemaHash'])if(trace[key]!==capture.execution[key])reasons.push('实际模型执行与冻结配置不符');
+   if(trace?.promptHash)for(const key of ['model','effort','promptVersion','promptHash','schemaHash',...(capture.execution.schemaVersion?['schemaVersion']:[])])if(trace[key]!==capture.execution[key])reasons.push('实际模型执行与冻结配置不符');
    return {...capture,modelStatus:run.status,resultTrace:trace||null,executionVerified:!!trace?.promptHash&&reasons.length===0,integrity:{valid:reasons.length===0,reasons:[...new Set(reasons)]},forwardEligible:false};
   },
   records(){return db.prepare('SELECT run_id FROM forward_captures ORDER BY rowid DESC LIMIT 100').all().map(({run_id})=>{const c=api.get(run_id);return {runId:c.runId,baselineId:c.baselineId,topicId:c.topicId,topicVersion:c.topicVersion,topicTitle:c.topicTitle,modelStatus:c.modelStatus,inputEligibility:c.inputEligibility,integrity:c.integrity,forwardEligible:false};});}

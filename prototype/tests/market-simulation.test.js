@@ -12,6 +12,11 @@ import {createService} from '../server/service.mjs';
 import {createHandler} from '../server/index.mjs';
 const config={issuerCapPct:25,themeCapPct:40,cashFloorPct:20,feeBps:10,slippageBps:10,maxHoldDays:5,maxOrderMinutes:60,quoteMaxAgeSeconds:120,allowOvernight:true};
 const start='2026-10-02T14:00:00.000Z';
+test('equivalent timestamp spellings cannot consume the same execution liquidity twice',()=>{
+ const f=setup();try{const order=f.propose();f.approve(order.id);f.advance(1000,{availableBuy:40});f.sim.process();const first=f.sim.snapshot(),frozen=JSON.stringify(first.fills[0]),event=JSON.stringify(f.sim.event(first.version));
+ f.market().quotes['AAPL.US'].asOf='2026-10-02T22:00:01+08:00';const next=f.sim.process();assert.equal(next.fills.length,1);assert.equal(next.orders[0].filledQty,40);assert.equal(next.cashCents,first.cashCents);assert.equal(JSON.stringify(next.fills[0]),frozen);assert.equal(JSON.stringify(f.sim.event(first.version)),event);
+ }finally{f.close();}
+});
 function quote(symbol,at,extra={}){return {id:randomUUID(),symbol,kind:'market-simulation-input',verified:true,source:'synthetic-fixture-only',rulesVersion:'fixture-rules-1',issuerId:symbol,currency:symbol.endsWith('.HK')?'HKD':symbol.endsWith('.SH')?'CNY':'USD',asOf:at,receivedAt:at,validUntil:'2026-10-02T20:00:00Z',bid:'99.90',ask:'100.00',mark:'100.00',fx:{id:'fx-fixture',source:'synthetic-fixture-only',usdPerUnit:'1',asOf:at,receivedAt:at,validUntil:'2026-10-04T20:00:00Z'},tradable:true,halted:false,priceLimitState:'normal',sessionOpen:'2026-10-02T13:30:00Z',sessionClose:'2026-10-02T20:00:00Z',sellableAt:at,settlesAt:'2026-10-03T14:00:00Z',buyLot:1,sellLot:1,minBuyQty:1,tickSize:'0.01',availableBuy:1000,availableSell:1000,...extra};}
 function setup(path=':memory:'){
  let now=start,market={quotes:{'AAPL.US':quote('AAPL.US',start)}};const store=openStore(path),research=openResearch(store,{seed:false,clock:()=>now});let topic=research.create({title:'Synthetic acquisition research',summary:'No real orders or market data'});topic=research.addCompany(topic.id,{version:topic.version,symbol:'AAPL.US',note:'Test company association'});
@@ -171,3 +176,24 @@ test('held issuer identity survives quote changes; valuation and sale stay block
    assert.deepEqual(sim.snapshot().fills,saved.fills);
   }finally{if(store)store.close();else f.close();rmSync(dir,{recursive:true,force:true});}
  });
+test('sub-millisecond post-approval quotes fill separately while timezone aliases consume capacity only once',()=>{
+ const f=setup();try{const o=f.propose();f.approve(o.id);f.advance(1,{asOf:'2026-10-02T14:00:00.000000100Z',availableBuy:40});let b=f.sim.process();assert.equal(b.fills.length,1);assert.equal(b.orders[0].filledQty,40);const first=JSON.stringify(b.fills[0]);
+ f.market().quotes['AAPL.US'].asOf='2026-10-02T22:00:00.000000100+08:00';b=f.sim.process();assert.equal(b.fills.length,1);assert.equal(JSON.stringify(b.fills[0]),first);
+ f.advance(0,{asOf:'2026-10-02T14:00:00.000000200Z',availableBuy:60});b=f.sim.process();assert.equal(b.orders[0].filledQty,100);assert.equal(b.fills.length,2);assert.equal(b.orders[0].status,'filled');assert.equal(JSON.stringify(b.fills[0]),first);
+ }finally{f.close();}
+});
+test('sub-millisecond inventory release and cash settlement never occur early',()=>{
+ const f=setup();try{
+  const buy=f.propose();f.approve(buy.id);f.advance(1,{sellableAt:'2026-10-02T14:00:00.001000001Z'});f.sim.process();
+  const sell=f.propose({side:'sell',qty:100,limitPrice:'99'});assert.equal(f.sim.review(sell.id).eligible,false);
+  f.advance(1);f.approve(sell.id);f.advance(1,{settlesAt:'2026-10-02T14:00:00.003000001Z'});let b=f.sim.process();assert.equal(b.orders.at(-1).status,'filled');assert.equal(b.unsettled.length,1);const cash=b.cashCents,pending=b.unsettled[0].amountCents;
+  b=f.sim.process();assert.equal(b.cashCents,cash);assert.equal(b.unsettled.length,1);f.advance(1);b=f.sim.process();assert.equal(b.unsettled.length,0);assert.equal(b.cashCents,cash+pending);
+ }finally{f.close();}
+});
+test('nanosecond capacities and frozen quote text survive database reopen',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'signal-nanos-')),path=join(dir,'test.sqlite'),f=setup(path);let reopened;
+ try{const o=f.propose();f.approve(o.id);f.advance(1,{asOf:'2026-10-02T14:00:00.000000100Z',availableBuy:40});const before=f.sim.process(),history=f.sim.history().map(r=>f.sim.event(r.version)),market=structuredClone(f.market()),fill=JSON.stringify(before.fills[0]);f.close();
+ reopened=openStore(path);const research=openResearch(reopened,{seed:false}),sim=openMarketSimulation(reopened,research,{clock:()=> '2026-10-02T14:00:00.001Z',getInputs:()=>market});
+ market.quotes['AAPL.US'].asOf='2026-10-02T22:00:00.000000100+08:00';const after=sim.process();assert.equal(after.fills.length,1);assert.equal(after.cashCents,before.cashCents);assert.equal(JSON.stringify(after.fills[0]),fill);assert.deepEqual(history.map(r=>sim.event(r.version)),history);assert.match(after.orders[0].waitReason,/当前可用数量不足/);assert.equal(sim.process().version,after.version);
+ }finally{if(reopened)reopened.close();else f.close();rmSync(dir,{recursive:true,force:true});}
+});

@@ -1,4 +1,4 @@
-import {digest,CODEX_PROMPT_VERSION,CODEX_DRAFT_SCHEMA} from './codex-research.mjs';
+import {digest,CODEX_PROMPT_VERSION,CODEX_DRAFT_SCHEMA,CODEX_SCHEMA_VERSION} from './codex-research.mjs';
 import {RULES_VERSION} from './triage.mjs';
 import {READER_VERSION} from './source-reader.mjs';
 import {openPipelineRelations} from './pipeline-relations.mjs';
@@ -14,7 +14,7 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
  CREATE TABLE IF NOT EXISTS research_pipeline_audit(id INTEGER PRIMARY KEY,item_id TEXT,action TEXT NOT NULL,at TEXT NOT NULL,payload TEXT NOT NULL);`);
  db.prepare('INSERT OR IGNORE INTO research_pipeline_settings VALUES(1,1,?)').run(JSON.stringify({dailyCalls:10,includeClues:false}));
  const settings=()=>{const r=db.prepare('SELECT * FROM research_pipeline_settings WHERE slot=1').get();return {extractEvents:false,version:r.version,...JSON.parse(r.payload)};};
- const executionHash=()=>digest({model:config.model,binary:config.binary,effort:config.effort||'high',timeoutMs:config.timeoutMs??180000,prompt:CODEX_PROMPT_VERSION,schema:CODEX_DRAFT_SCHEMA,reader:READER_VERSION});
+ const executionHash=()=>digest({model:config.model,binary:config.binary,effort:config.effort||'high',timeoutMs:config.timeoutMs??180000,prompt:CODEX_PROMPT_VERSION,schema:CODEX_DRAFT_SCHEMA,schemaVersion:CODEX_SCHEMA_VERSION,reader:READER_VERSION});
  const audit=(id,action,payload={})=>db.prepare('INSERT INTO research_pipeline_audit(item_id,action,at,payload) VALUES(?,?,?,?)').run(id,action,at(),JSON.stringify(payload));
  const guard=()=>{if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw Error('恢复副本需先完成核对确认');};
  const transaction=fn=>{db.exec('BEGIN IMMEDIATE');try{guard();const r=fn();db.exec('COMMIT');return r;}catch(e){db.exec('ROLLBACK');throw e;}};

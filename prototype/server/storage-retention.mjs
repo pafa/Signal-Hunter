@@ -12,8 +12,9 @@ export function retentionPolicy(input={}){
  return policy;
 }
 async function regular(path){const stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink())throw new Error('不是普通文件');return stat;}
-async function fingerprint(path){const hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);return hash.digest('hex');}
-export async function previewStorageRetention(databasePath,backupRoot,{policy:input={},now=Date.now()}={}){
+async function fingerprint(path,signal){const hash=createHash('sha256');for await(const chunk of createReadStream(path,{signal}))hash.update(chunk);return hash.digest('hex');}
+export async function previewStorageRetention(databasePath,backupRoot,{policy:input={},now=Date.now(),signal}={}){
+ signal?.throwIfAborted();
  const policy=retentionPolicy(input);if(!Number.isFinite(now))throw new Error('预览时间无效');
  const database=resolve(databasePath),root=resolve(backupRoot),dbStat=await regular(database),warnings=[],snapshots=[];
  let databaseBytes=dbStat.size;
@@ -21,7 +22,9 @@ export async function previewStorageRetention(databasePath,backupRoot,{policy:in
  let freeBytes=null;try{const fs=await statfs(dirname(database));freeBytes=fs.bavail*fs.bsize;}catch{warnings.push({kind:'free-space-unavailable'});}
  let entries=[];try{const stat=await lstat(root);if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error('备份根路径必须是普通目录');entries=await readdir(root,{withFileTypes:true});}catch(error){if(error.code!=='ENOENT')throw error;warnings.push({kind:'backup-root-missing'});}
  let observedBackupBytes=0,unmeasuredEntries=0;
+ signal?.throwIfAborted();
  for(const entry of entries){
+  signal?.throwIfAborted();
   const directory=join(root,entry.name);
   if(!entry.isDirectory()||entry.isSymbolicLink()||!entry.name.startsWith('snapshot-')){unmeasuredEntries++;continue;}
   const record={directory,bytes:0,createdAt:null,verified:false,candidate:false,reason:'unverified'};
@@ -29,13 +32,14 @@ export async function previewStorageRetention(databasePath,backupRoot,{policy:in
    const names=await readdir(directory);if(names.some(name=>!['manifest.json','workbench.sqlite'].includes(name)))throw new Error('备份目录含未知文件');
    const manifestPath=join(directory,'manifest.json'),file=join(directory,'workbench.sqlite');const manifestStat=await regular(manifestPath);if(manifestStat.size>1024*1024)throw new Error('清单过大');const fileStat=await regular(file);
    record.bytes=manifestStat.size+fileStat.size;observedBackupBytes+=record.bytes;
-   const manifest=JSON.parse(await readFile(manifestPath,'utf8')),created=Date.parse(manifest.createdAt);
+   const manifest=JSON.parse(await readFile(manifestPath,{encoding:'utf8',signal})),created=Date.parse(manifest.createdAt);
    if(manifest.format!==1||manifest.database!=='workbench.sqlite'||!Number.isFinite(created)||created>now||!/^[a-f0-9]{64}$/.test(manifest.sha256??''))throw new Error('清单或时间无效');
-   if(await fingerprint(file)!==manifest.sha256)throw new Error('备份指纹不匹配');
+   if(await fingerprint(file,signal)!==manifest.sha256)throw new Error('备份指纹不匹配');
    record.createdAt=new Date(created).toISOString();record.verified=true;record.reason='retained';
-  }catch(error){record.reason=error.message;unmeasuredEntries++;}
+  }catch(error){signal?.throwIfAborted();record.reason=error.message;unmeasuredEntries++;}
   snapshots.push(record);
  }
+ signal?.throwIfAborted();
  const verified=snapshots.filter(s=>s.verified).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||a.directory.localeCompare(b.directory));
  verified.forEach((snapshot,index)=>{snapshot.candidate=index>=policy.keepNewest&&now-Date.parse(snapshot.createdAt)>policy.maxAgeDays*86400000;snapshot.reason=snapshot.candidate?'older-than-age-and-newest-reserve':index<policy.keepNewest?'newest-reserve':'within-age';});
  if(unmeasuredEntries)warnings.push({kind:'partial-capacity-measurement',entries:unmeasuredEntries});

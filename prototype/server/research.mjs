@@ -1,3 +1,4 @@
+import {researchHistoryPage,researchHistoryDetail} from './research-history.mjs';
 import {validateDossierSections} from '../shared/research-dossier.mjs';
 import {researchReadiness} from '../shared/research-readiness.mjs';
 import {normalizeCompanyRelation} from '../shared/company-directory.mjs';
@@ -86,7 +87,8 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   process,get,list,screenings,
   directorySelection:text=>securityDirectory?.selection(text)||null,
   newsItem(id){const news=store.newsById(id);if(!news)throw new Error('新闻不存在');return {...news,triage:classifyHeadline(news)};},
-  materialList(id){return materials.list(get(id));},
+  materialList(id,options){return materials.list(get(id),options);},
+  materialDetail(id,materialId){return materials.detail(get(id),materialId);},
   packet(id){return materials.packet(withSemanticStatus(withAvailability(get(id))));},
   adoptModelDraft(id,data,candidate,beforeWrite=()=>{}){
    const topic=get(id),packet=materials.packet(withSemanticStatus(withAvailability(topic)));
@@ -284,6 +286,8 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    e.verification=data.verdict==='confirmed'?'reviewed':'unverified';e.stance=data.stance;e.review={at:clock(),by:'user',note};
    return commit(topic,'人工核验 / 修正证据；旧核验保留在版本记录',data.version);
   },
+  historyPage(id,params){get(id);return researchHistoryPage(db,id,params);},
+  historyDetail(id,version){get(id);const result=researchHistoryDetail(db,id,version);return {...result,topic:withAvailability(result.topic)};},
   history(id){get(id);const rows=db.prepare('SELECT * FROM research_versions WHERE topic_id=? ORDER BY version DESC').all(id),topics=rows.map(r=>JSON.parse(r.payload)),lookup=availabilityLookup(topics);return rows.map((r,i)=>({version:r.version,recordedAt:r.recorded_at,reason:r.reason,topic:withAvailability(topics[i],lookup)}));},
  };
 }

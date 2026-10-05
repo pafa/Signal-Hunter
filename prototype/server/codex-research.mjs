@@ -9,7 +9,8 @@ import {PACKET_VERSION} from './research-materials.mjs';
 import {validateDossierSections} from '../shared/research-dossier.mjs';
 import {MATERIALITY_REVIEW_SCHEMA,validateMaterialityReviews} from './materiality-review.mjs';
 
-export const CODEX_PROMPT_VERSION='codex-research-7';
+export const CODEX_PROMPT_VERSION='codex-research-8';
+export const CODEX_SCHEMA_VERSION='codex-draft-evidence-1';
 export const digest=value=>createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
 const sectionIds=['facts','materiality','companies','scenarios','conditions'];
 const textSchema={type:'string'};
@@ -17,6 +18,18 @@ export const CODEX_DRAFT_SCHEMA={type:'object',additionalProperties:false,requir
  sections:{type:'array',items:{type:'object',additionalProperties:false,required:['id','title','paragraphs','sourceIds'],properties:{id:{type:'string',enum:sectionIds},title:textSchema,paragraphs:{type:'array',items:textSchema},sourceIds:{type:'array',items:textSchema}}}},
  missingEvidence:{type:'array',items:textSchema},materialityReviews:MATERIALITY_REVIEW_SCHEMA
 }};
+// Constrain generated identifiers, without substituting or repairing model text.
+// Keep the base template unchanged so historical schema hashes remain meaningful.
+export function codexDraftSchema(packet){
+ validatePacket(packet);
+ const schema=structuredClone(CODEX_DRAFT_SCHEMA),ids=packet.input.evidence.map(e=>e.id);
+ const refs=schema.properties.sections.items.properties.sourceIds;
+ if(ids.length)refs.items={type:'string',enum:ids};else refs.maxItems=0;
+ const citations=schema.properties.materialityReviews.items.properties.citations;
+ const materials=packet.input.evidence.filter(e=>e.material).map(e=>e.id);
+ if(materials.length)citations.items.properties.evidenceId={type:'string',enum:materials};else citations.maxItems=0;
+ return schema;
+}
 const messages={configuration:'请配置本机 Codex 可执行路径、模型和推理强度',packet:'研判材料包无效、指纹不符或超过 512 KB',unavailable:'本机 Codex 无法启动',timeout:'Codex 研判超时；可在检查运行状态后重试',cancelled:'Codex 研判已取消',process:'Codex 调用失败，请在本机检查登录、模型权限和额度',protocol:'Codex 返回了无法识别的运行记录',tool:'Codex 尝试调用工具，本次候选未接受',limit:'Codex 输出超过限制，本次候选未接受',output:'Codex 研判格式或引用校验失败'};
 export class CodexResearchError extends Error{
  constructor(code,trace={}){super(messages[code]||messages.process);this.name='CodexResearchError';this.code=code;this.trace=trace;}
@@ -141,5 +154,5 @@ export async function runStructuredCodex({prompt,schema,promptVersion,inputHash,
 
 export async function generateCodexDraft(packet,config={}){
  validatePacket(packet);
- return runStructuredCodex({prompt:codexPrompt(packet),schema:CODEX_DRAFT_SCHEMA,promptVersion:CODEX_PROMPT_VERSION,inputHash:packet.inputHash,metadata:{topicId:packet.input.topicId,topicVersion:packet.input.topicVersion},validate:output=>validateCodexDraft(output,packet)},config);
+ return runStructuredCodex({prompt:codexPrompt(packet),schema:codexDraftSchema(packet),promptVersion:CODEX_PROMPT_VERSION,inputHash:packet.inputHash,metadata:{topicId:packet.input.topicId,topicVersion:packet.input.topicVersion,schemaVersion:CODEX_SCHEMA_VERSION},validate:output=>validateCodexDraft(output,packet)},config);
 }

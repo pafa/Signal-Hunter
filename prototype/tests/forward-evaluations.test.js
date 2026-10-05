@@ -138,3 +138,18 @@ test('unclustered excluded calls still exclude their source when another topic l
   assert.ok(f.service.forwardEvaluations.get(second.id).inputEligibility.reasons.includes('同事件簇或来源已有前向调用记录'));
  }finally{await f.close();}
 });
+test('legacy template-schema capture remains readable; new capture requires matching schema version',async()=>{
+ const f=fixture();try{
+  freeze(f);const {topic}=await f.prepare(),run=start(f,topic);await f.service.modelResearch.wait(run.id);
+  const capture=JSON.parse(f.store.db.prepare('SELECT payload FROM forward_captures WHERE run_id=?').get(run.id).payload),saved=JSON.parse(f.store.db.prepare('SELECT payload FROM model_research_runs WHERE id=?').get(run.id).payload);
+  assert.equal(f.service.forwardEvaluations.get(run.id).executionVerified,true);
+  delete saved.candidate.trace.schemaVersion;f.store.db.prepare('UPDATE model_research_runs SET payload=? WHERE id=?').run(JSON.stringify(saved),run.id);
+  assert.equal(f.service.forwardEvaluations.get(run.id).executionVerified,false);
+  delete capture.execution.schemaVersion;capture.execution.schemaHash=digest(CODEX_DRAFT_SCHEMA);delete capture.snapshotHash;capture.snapshotHash=digest(capture);
+  saved.candidate.trace.schemaHash=digest(CODEX_DRAFT_SCHEMA);
+  f.store.db.prepare('UPDATE model_research_runs SET payload=? WHERE id=?').run(JSON.stringify(saved),run.id);
+  f.store.db.prepare('UPDATE forward_captures SET payload=? WHERE run_id=?').run(JSON.stringify(capture),run.id);
+  assert.equal(f.service.forwardEvaluations.get(run.id).executionVerified,true);
+  assert.equal(f.store.db.prepare('SELECT payload FROM forward_captures WHERE run_id=?').get(run.id).payload,JSON.stringify(capture));
+ }finally{await f.close();}
+});

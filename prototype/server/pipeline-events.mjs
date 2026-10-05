@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {digest,codexPrompt,CODEX_DRAFT_SCHEMA} from './codex-research.mjs';
+import {digest,codexPrompt,codexDraftSchema} from './codex-research.mjs';
 import {materialEventsPacket,materialEventsPrompt,MATERIAL_EVENTS_SCHEMA} from './material-events.mjs';
 import {eventComparisonSnapshot} from './semantic-event-scopes.mjs';
 
@@ -15,7 +15,7 @@ export function openPipelineEvents(store,research,models,extractions,{config={},
   // Packet generation time is packaging metadata. A quota wait must not expire
   // unchanged evidence; input availability dates and all instructions stay bound.
   const stable={...packet};if(kind==='dossier')delete stable.generatedAt;
-  return digest({kind,packet:stable,prompt:kind==='extract'?materialEventsPrompt(stable):codexPrompt(stable),schema:kind==='extract'?MATERIAL_EVENTS_SCHEMA:CODEX_DRAFT_SCHEMA,configHash:configHash()});
+  return digest({kind,packet:stable,prompt:kind==='extract'?materialEventsPrompt(stable):codexPrompt(stable),schema:kind==='extract'?MATERIAL_EVENTS_SCHEMA:codexDraftSchema(stable),configHash:configHash()});
  };
  const read=id=>{const row=db.prepare('SELECT * FROM research_pipeline_event_jobs WHERE id=?').get(id);if(!row)throw Error('事项队列条目不存在');return row;};
  const runOf=row=>row.run_id?(row.kind==='extract'?extractions.get(row.topic_id,row.run_id):models.get(row.topic_id,row.run_id)):null;

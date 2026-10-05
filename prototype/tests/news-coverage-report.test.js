@@ -1,0 +1,28 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {openStore} from '../server/store.mjs';import {openNewsIntake} from '../server/news-intake.mjs';import {createService} from '../server/service.mjs';import {createHandler} from '../server/index.mjs';
+const at='2026-10-04T12:00:00.000Z',window={from:'2026-10-01',to:'2026-10-04'};
+function insert(s,i,patch={}){const r={id:'r'+i,queryId:'discovery',label:'Synthetic discovery',startedAt:`2026-10-01T00:${String(i%60).padStart(2,'0')}:00.000Z`,finishedAt:at,state:'ok',rawCount:2,acceptedCount:2,rejectedCount:0,outsideWindow:0,duplicates:0,added:1,updated:0,provider:'synthetic',adapterVersion:'fixture-1',keywords:'',kind:'latest',...patch};s.db.prepare('INSERT INTO news_intake_runs VALUES(?,?,?,?,?)').run(r.id,r.queryId,r.startedAt,r.finishedAt,JSON.stringify(r));return r;}
+test('coverage includes all attempts beyond recent 30, preserves missing legacy counts and deduplicates only recorded observations',()=>{
+ const s=openStore(':memory:'),intake=openNewsIntake(s,{clock:()=>at});try{
+ for(let i=0;i<40;i++){const r=insert(s,i);s.db.prepare('INSERT INTO news_intake_observations VALUES(?,?,?)').run(r.id,'same-news',i<20?1:2);}
+ insert(s,40,{state:'partial',acceptedCount:1,possiblyTruncated:true,paginationOverlap:true,keywords:'new scope'});insert(s,41,{state:'error',rawCount:undefined,acceptedCount:undefined,duplicates:undefined});insert(s,42,{queryId:'retired',state:'cancelled',startedAt:'2026-10-02T01:00:00.000Z'});
+ insert(s,43,{startedAt:'2026-09-30T23:59:59.999Z'});insert(s,44,{startedAt:'2026-10-05T00:00:00.000Z'});insert(s,45,{startedAt:'2026-10-04T13:00:00.000Z'});
+ const before=s.db.prepare('SELECT * FROM news_intake_runs').all(),r=intake.report(window),g=r.sources.find(x=>x.queryId==='discovery');assert.equal(intake.snapshot().recent.length,30);assert.equal(r.runCount,43);assert.equal(g.attempts,42);assert.equal(g.states.ok,40);assert.equal(g.states.partial,1);assert.equal(g.states.failed,1);assert.equal(g.counts.rawCount.observedSum,82);assert.equal(g.counts.rawCount.unknownRuns,1);assert.equal(g.counts.acceptedCount.observedSum,81);assert.equal(g.uniqueObservedItems,1);assert.equal(g.uniqueObservedRevisions,2);assert.equal(r.observationCount,40);assert.equal(g.truncatedRuns,1);assert.equal(g.overlapRuns,1);assert.equal(g.configurations.length,2);assert.equal(g.days[1].attempts,0);assert.equal(r.sources.find(x=>x.queryId==='retired').currentEnabled,null);assert.equal(r.sources.find(x=>x.queryId==='tracking').attempts,0);assert.equal(r.coverage,'unverified');assert.deepEqual(s.db.prepare('SELECT * FROM news_intake_runs').all(),before);assert.equal(intake.report(window).inputHash,r.inputHash);
+ const old=before[0];s.db.prepare('UPDATE news_intake_runs SET payload=? WHERE id=?').run(JSON.stringify({...JSON.parse(old.payload),state:'error'}),old.id);assert.notEqual(intake.report(window).inputHash,r.inputHash);
+ }finally{s.close();}
+});
+test('coverage uses UTC boundaries, empty days and elapsed edge intervals without future attempts or publication-time claims',()=>{
+ const s=openStore(':memory:'),intake=openNewsIntake(s,{clock:()=>at});try{
+ insert(s,0,{startedAt:'2026-10-01T08:00:00+08:00',acceptedCount:0});insert(s,1,{startedAt:'2026-10-02T08:00:00+08:00'});
+ const r=intake.report({from:'2026-10-01',to:'2026-10-01'}),g=r.sources.find(x=>x.queryId==='discovery');assert.equal(r.runCount,1);assert.equal(g.emptySuccessfulRuns,1);assert.equal(g.longestNoAttemptSeconds,86400);assert.equal(r.sources.find(x=>x.queryId==='hkma').longestNoAttemptSeconds,86400);
+ assert.equal(intake.report({from:'2026-10-04',to:'2026-10-04'}).sources[0].longestNoAttemptSeconds,43200);
+ for(const input of [{},{...window,extra:1},{from:'2026-02-30',to:'2026-03-01'},{from:'2026-09-01',to:'2026-10-04'},{from:'2026-10-04',to:'2026-10-05'},{from:'2026-10-04',to:'2026-10-03'}])assert.throws(()=>intake.report(input),/覆盖报告窗口无效/);
+ }finally{s.close();}
+});
+test('coverage API reports ended-parent interruptions without fetching, altering source records or admitting remote origins',async()=>{
+ const s=openStore(':memory:');let calls=0;const service=createService(s,{mode:'research',now:()=>Date.parse(at),fetcher:async()=>{calls++;throw Error('No network expected');}});const h=createHandler(s,service);
+ const call=async(url,origin)=>{let status,result;await h({method:'GET',url,headers:{host:'127.0.0.1:4179',...(origin?{origin}:{})}},{writeHead:x=>status=x,end:x=>result=JSON.parse(x)});return {status,result};};
+ try{
+ insert(s,0,{state:'running',runToken:'missing-parent'});insert(s,1,{state:'error'});const good=await call('/api/news/coverage?from=2026-10-01&to=2026-10-04');assert.equal(good.status,200);assert.equal(good.result.sources[0].states.running,1);assert.equal(good.result.sources[0].states.failed,1);assert.equal(good.result.sources[1].states.failed,0);s.db.prepare("INSERT INTO operation_runs(name,token,started_at,outcome) VALUES('news','missing-parent',?,'interrupted')").run(at);const interrupted=await call('/api/news/coverage?from=2026-10-01&to=2026-10-04');assert.equal(interrupted.result.sources[0].states.interrupted,1);assert.equal(JSON.parse(s.db.prepare("SELECT payload FROM news_intake_runs WHERE id='r0'").get().payload).state,'running');const invalid=await call('/api/news/coverage?from=bad&to=bad');assert.equal(invalid.status,400);assert.match(invalid.result.error,/覆盖报告窗口无效/);assert.equal((await call('/api/news/coverage?from=2026-10-01&to=2026-10-04','https://untrusted.example')).status,403);assert.equal(calls,0);
+ }finally{await service.close();s.close();}
+});

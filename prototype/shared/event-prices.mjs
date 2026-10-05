@@ -1,0 +1,4 @@
+export const EVENT_PRICE_VERSION='event-prices/2';
+export const EVENT_PRICE_WINDOWS=[{id:'1h',label:'1小时',ms:3600000},{id:'1d',label:'1自然日',ms:86400000},{id:'5d',label:'5自然日',ms:432000000},{id:'20d',label:'20自然日',ms:1728000000}];
+export const eventPriceErrors=['价格报告参数无效','价格报告不存在','价格报告档案或来源指纹不符','价格报告超过完整读取上限，请缩小原评估窗口','价格报告请求标识已用于其他内容','当前模式不启用价格报告冻结','源码已变化，请重启后冻结价格报告'];
+export const EVENT_PRICE_POLICY={baseline:'first-observed-minute-label-at-least-60s-after-decision',maximumBoundaryDelayMs:300000,windows:EVENT_PRICE_WINDOWS,days:'elapsed-24h-not-trading-days',revision:'first-valid-completed-observation-by-received-time-then-id',completion:'later-minute-present-and-label-plus-60s-before-receipt',benchmark:'explicit-same-market-currency-and-provider-exact-endpoint-labels',adjustment:'none',sourceInterval:'yahoo-explicit-provider-1m-evidence',missingPrices:'explicit-provider-null-close-labels-preserved-never-filled',independentValidation:false};

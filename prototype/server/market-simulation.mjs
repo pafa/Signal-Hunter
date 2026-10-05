@@ -1,3 +1,5 @@
+import {compareMarketTime} from './market-time.mjs';
+import {executionLiquidity} from './market-liquidity.mjs';
 import {withMarketObservationPeaks} from './market-observations.mjs';
 import {strategyRisk,entryIssues} from './strategy-risk.mjs';
 import {randomUUID,createHash} from 'node:crypto';
@@ -106,8 +108,8 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
    guard();if(!enabled)return api.snapshot();const market=inputs(),at=clock();guard();let changed=false;const updates=[];
    db.exec('BEGIN IMMEDIATE');try{
     const b=read();if(!b){db.exec('COMMIT');return api.snapshot();}
-    for(const settlement of b.unsettled.filter(x=>Date.parse(x.at)<=Date.parse(at))){b.cashCents=sum([b.cashCents,settlement.amountCents]);updates.push({kind:'cash-settlement',...settlement});changed=true;}
-    b.unsettled=b.unsettled.filter(x=>Date.parse(x.at)>Date.parse(at));
+    for(const settlement of b.unsettled.filter(x=>compareMarketTime(x.at,at)<=0)){b.cashCents=sum([b.cashCents,settlement.amountCents]);updates.push({kind:'cash-settlement',...settlement});changed=true;}
+    b.unsettled=b.unsettled.filter(x=>compareMarketTime(x.at,at)>0);
     const risk=strategyRisk(withMarketObservationPeaks(db,b,accountId),market.quotes,at);
     if(risk.peakCents>b.highWaterCents){b.highWaterCents=risk.peakCents;changed=true;}
     for(const lot of b.lots){const q=market.quotes[lot.symbol];if(!lotQuoteIssues(lot,q,b.config,at).length&&decimal(q.mark)>decimal(lot.peakPrice||lot.entryPrice||q.mark)){lot.peakPrice=String(q.mark);changed=true;}}
@@ -120,9 +122,9 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
      const check=preview(b,o,market,at),q=market.quotes[o.symbol],remaining=o.qty-o.filledQty;
      const wait=reason=>{if(o.waitReason!==reason){o.waitReason=reason;updates.push({orderId:o.id,waiting:reason});changed=true;}};
      if(!check.eligible){wait(check.reasons.join('；'));continue;}
-     if(Date.parse(q.asOf)<=Date.parse(o.approvedAt)){wait('等待批准之后的新报价，不能回用审批前价格成交');continue;}
-     const liquidityKey=hash({symbol:o.symbol,source:q.source,asOf:q.asOf}),fingerprint=hash(q),liquidityRow=query('SELECT payload FROM market_sim_liquidity WHERE key=?').get(liquidityKey),used=liquidityRow?JSON.parse(liquidityRow.payload):null;
-     if(used&&used.fingerprint!==fingerprint){wait('同一报价时点内容发生变化，等待新的稳定快照');continue;}
+     if(compareMarketTime(q.asOf,o.approvedAt)<=0){wait('等待批准之后的新报价，不能回用审批前价格成交');continue;}
+     const liquidity=executionLiquidity(db,q,{table:sql('market_sim_book'),book:b}),{key:liquidityKey,fingerprint,used}=liquidity;
+     if(liquidity.reason){wait(liquidity.reason);continue;}
      const side=o.side==='buy'?'availableBuy':'availableSell',lot=o.side==='buy'?q.buyLot:q.sellLot;
      const available=q[side]-(used?.[o.side]||0);let qty=Math.floor(Math.min(remaining,available)/lot)*lot;
      if(qty<=0){wait('当前可用数量不足，保留未成交余量');continue;}
@@ -131,19 +133,19 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
      const gross=amount(qty,execution,q.fx.usdPerUnit),charge=fee(gross,b.config.feeBps),net=o.side==='buy'?gross+charge:gross-charge;
      if(net<0){wait('费用超过卖出金额');continue;}
      if(o.side==='buy'&&(net>o.budgetCents-o.spentCents||net>b.cashCents)){wait('成交费用或汇率变化超出预算');continue;}
-     const fill={id:randomUUID(),orderId:o.id,topicId:o.topicId,topicVersion:o.topicVersion,symbol:o.symbol,side:o.side,qty,price:execution,fx:q.fx,grossCents:gross,feeCents:charge,netCents:net,at,marketSnapshot:q,approvalFingerprint:o.approval.fingerprint};
+     const fill={id:randomUUID(),liquidityVersion:2,orderId:o.id,topicId:o.topicId,topicVersion:o.topicVersion,symbol:o.symbol,side:o.side,qty,price:execution,fx:q.fx,grossCents:gross,feeCents:charge,netCents:net,at,marketSnapshot:q,approvalFingerprint:o.approval.fingerprint};
      if(o.side==='buy'){
       b.cashCents-=net;o.spentCents+=net;b.lots.push({id:fill.id,symbol:o.symbol,topicId:o.topicId,topicVersion:o.topicVersion,issuerId:q.issuerId,qty,costCents:net,openedAt:at,entryPrice:execution,peakPrice:execution,sellableAt:q.sellableAt,holdUntil:o.holdUntil});
      }else{
       let needed=qty,basis=0;const allocations=[];
-      for(const l of b.lots.filter(l=>l.symbol===o.symbol&&l.topicId===o.topicId&&Date.parse(l.sellableAt)<=Date.parse(at))){
+      for(const l of b.lots.filter(l=>l.symbol===o.symbol&&l.topicId===o.topicId&&compareMarketTime(l.sellableAt,at)<=0)){
        const n=Math.min(needed,l.qty);if(!n)continue;const cost=n===l.qty?l.costCents:Number((BigInt(l.costCents)*BigInt(n)+BigInt(l.qty)/2n)/BigInt(l.qty));l.qty-=n;l.costCents-=cost;needed-=n;basis+=cost;allocations.push({lotId:l.id,qty:n,costCents:cost});
       }
       if(needed)throw new Error('市场模拟内部可卖量不一致');b.lots=b.lots.filter(l=>l.qty>0);fill.costCents=basis;fill.realizedCents=net-basis;fill.allocations=allocations;b.realizedCents+=net-basis;
-      if(Date.parse(q.settlesAt)<=Date.parse(at))b.cashCents=sum([b.cashCents,net]);else b.unsettled.push({fillId:fill.id,amountCents:net,at:q.settlesAt,rulesVersion:q.rulesVersion});
+      if(compareMarketTime(q.settlesAt,at)<=0)b.cashCents=sum([b.cashCents,net]);else b.unsettled.push({fillId:fill.id,amountCents:net,at:q.settlesAt,rulesVersion:q.rulesVersion});
      }
      b.feesCents+=charge;b.fills.push(fill);o.filledQty+=qty;o.status=o.filledQty===o.qty?'filled':'partial';o.waitReason=null;
-     b.liquidity[liquidityKey]={fingerprint,buy:used?.buy||0,sell:used?.sell||0};b.liquidity[liquidityKey][o.side]+=qty;
+     b.liquidity[liquidityKey]={version:2,fingerprint,buy:used?.buy||0,sell:used?.sell||0};b.liquidity[liquidityKey][o.side]+=qty;
      query('INSERT INTO market_sim_liquidity VALUES(?,?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload').run(liquidityKey,JSON.stringify(b.liquidity[liquidityKey]));
      updates.push({kind:'fill',fillId:fill.id,orderId:o.id,qty,status:o.status});changed=true;
     }

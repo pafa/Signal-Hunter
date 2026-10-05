@@ -1,0 +1,3 @@
+export const PRICE_COLLECTION_VERSION='price-collection/1';
+export const PRICE_COLLECTION_POLICY={version:PRICE_COLLECTION_VERSION,scope:'new-screenings-after-explicit-activation-all-buckets',maximumBoundaryDelayMs:300000,receiptGraceMs:120000,requestLimitPerRun:12,enrollmentLimitPerRun:200,minimumRequestIntervalMs:60000,windowUnits:'elapsed-natural-days',priceScope:'public-observations-not-executable',independentValidation:false};
+export const priceCollectionErrors=['价格采集参数无效','当前模式不启用价格评估采集','价格采集配置已更新，请刷新后重试','价格采集请求标识已用于其他内容','价格采集档案指纹不符','价格采集记录不存在','价格采集源码已变化，请重启后重新确认配置','请先暂停价格评估采集再修改配置','价格采集读取超过完整上限'];

@@ -23,11 +23,15 @@
     "storage:preview": "node scripts/storage-preview.mjs",
     "market:verify": "node scripts/verify-market-sources.mjs",
     "research:codex": "node scripts/codex-research.mjs",
+    "research:compare": "node scripts/compare-models.mjs",
+    "semantic:evaluate": "node scripts/evaluate-semantics.mjs",
+    "recall:evaluate": "node scripts/evaluate-recall.mjs",
     "instance:create": "node scripts/create-instance.mjs",
     "start:instance": "node scripts/start.mjs --instance",
     "recovery:rehearse": "node scripts/recovery-rehearsal.mjs",
     "news:verify": "node scripts/verify-news-sources.mjs",
-    "backup:prune": "node scripts/backup-prune.mjs"
+    "backup:prune": "node scripts/backup-prune.mjs",
+    "pipeline:compare": "node scripts/compare-pipeline.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",

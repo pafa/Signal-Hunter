@@ -1,6 +1,7 @@
+import {historyStatusLabels} from '../../shared/historical-recall.mjs';
 import ArticleReadingScope from '../major/ArticleReadingScope';
 import PublicationDateEvidence from '../major/PublicationDateEvidence';
-import React,{useEffect,useState} from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import {Button} from '../major/Primitives';
 import NewsLibrary from '../major/NewsLibrary';
 import {request,time} from '../major/api';
@@ -30,25 +31,30 @@ export function ComparisonResult({run}){
   {!!run.history?.length&&<details><summary>本输入对决定历史（{run.history.length}）</summary>{run.history.map(d=><p key={d.version}>v{d.version} · {actions[d.action]} · {kinds[d.relation]} · {time(d.at)}<br/>{d.note}</p>)}</details>}
  </>;
 }
-export default function SemanticEvents({initialPair=null,onBack}){
+export default function SemanticEvents({initialPair=null,onBack,historyContext=null}){
+ const pending=useRef(null),acting=useRef(false),live=useRef(true);
+ useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
+ const historyBase=historyContext?`/api/historical-recall/${historyContext.reportId}/comparisons`:null;
+ const listPath=historyBase?`${historyBase}?candidateId=${encodeURIComponent(historyContext.candidateId)}`:'/api/semantic-events';
  const [batches,setBatches]=useState(false),[clusters,setClusters]=useState(false);
  const [pair,setPair]=useState(initialPair||{left:null,right:null}),[picker,setPicker]=useState(null),[data,setData]=useState(null),[selected,setSelected]=useState(''),[detail,setDetail]=useState(null),[refresh,setRefresh]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[notes,setNotes]=useState({});
- useEffect(()=>{let live=true,timer;request('/api/semantic-events').then(result=>{if(!live)return;setData(result);setSelected(id=>id||result.runs[0]?.id||'');if(result.runs.some(r=>r.status==='running'))timer=setTimeout(()=>setRefresh(n=>n+1),2000);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;clearTimeout(timer);};},[refresh]);
+ useEffect(()=>{let live=true,timer;request(listPath).then(result=>{if(!live)return;setData(result);setSelected(id=>id||result.runs[0]?.id||'');if(result.runs.some(r=>r.status==='running'))timer=setTimeout(()=>setRefresh(n=>n+1),2000);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;clearTimeout(timer);};},[refresh,listPath]);
  useEffect(()=>{let live=true;setDetail(null);if(selected)request(`/api/semantic-events/${selected}`).then(r=>{if(live)setDetail(r);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[selected,refresh]);
- async function action(path,body,select=false){setBusy(true);setError('');try{const r=await request(path,'POST',body);if(select)setSelected(r.id);setRefresh(n=>n+1);}catch(e){setError(e.message);}finally{setBusy(false);}}
- function start(){action('/api/semantic-events',Object.fromEntries(['left','right'].map(side=>[side,{id:pair[side].id,revision:pair[side].revision,...(pair[side].kind?{kind:pair[side].kind}:{})}])),true);}
+ async function action(path,body,select=false){if(acting.current)return;acting.current=true;setBusy(true);setError('');try{const r=await request(path,'POST',body);if(!live.current)return;if(select){setSelected(r.id);pending.current=null;}setRefresh(n=>n+1);}catch(e){if(live.current)setError(e.message);}finally{acting.current=false;if(live.current)setBusy(false);}}
+ function start(){if(historyContext){pending.current??={candidateId:historyContext.candidateId,reportHash:historyContext.reportHash,requestId:crypto.randomUUID()};action(historyBase,pending.current,true);return;}action('/api/semantic-events',Object.fromEntries(['left','right'].map(side=>[side,{id:pair[side].id,revision:pair[side].revision,...(pair[side].kind?{kind:pair[side].kind}:{})}])),true);}
  const ready=pair.left&&pair.right&&`${pair.left.kind||'news'}:${pair.left.id}`!==`${pair.right.kind||'news'}:${pair.right.id}`,run=detail?.id===selected?detail:null;
  if(clusters)return <EventClusters onBack={()=>setClusters(false)} onResult={id=>{setClusters(false);setSelected(id);setRefresh(n=>n+1);}}/>;
  if(batches)return <SemanticBatches onBack={()=>setBatches(false)} onResult={id=>{setBatches(false);setSelected(id);setRefresh(n=>n+1);}}/>;
  return <section className="semantic-events" aria-label="事件语义比较">
-  <div className="event-actions"><Button onClick={onBack}>返回规则召回</Button><Button disabled={busy} onClick={()=>setRefresh(n=>n+1)}>刷新比较记录</Button><Button onClick={()=>setBatches(true)}>持久比较批次</Button><Button onClick={()=>setClusters(true)}>事件簇记录</Button></div>
-  <p>从新闻、已保存材料或已建立的事项选择两侧，也可比较刚才的召回线索。Codex 判断仅作候选，冻结各侧阅读范围、输入版本与每次人工决定。采纳不改写研究，也不生成交易。</p>
+  <div className="event-actions"><Button onClick={onBack}>{historyContext?'返回历史类比':'返回规则召回'}</Button><Button disabled={busy} onClick={()=>setRefresh(n=>n+1)}>刷新比较记录</Button>{!historyContext&&<><Button onClick={()=>setBatches(true)}>持久比较批次</Button><Button onClick={()=>setClusters(true)}>事件簇记录</Button></>}</div>
+  <p>{historyContext?'核对这份历史报告中的固定输入对；来源变化后需重新检索。原报告保留，比较单独保存，不自动确认共同机制。':'从新闻、已保存材料或已建立的事项选择两侧，也可比较刚才的召回线索。'}Codex 判断仅作候选，冻结各侧阅读范围、输入版本与每次人工决定。采纳不改写研究，也不生成交易。</p>
+  {historyContext?.retrievalStatus&&<p className="m-note">原检索结果：{historyStatusLabels[historyContext.retrievalStatus]||historyContext.retrievalStatus}。语义复核单独保存，原报告的命中数与排除原因保持不变。</p>}
   {error&&<p role="alert" className="m-warning">{error}</p>}
-  <div className="event-pair">{['left','right'].map(side=><article key={side}><small>{side==='left'?'左侧':'右侧'}输入</small><h4>{pair[side]?.eventFocus?.title||pair[side]?.title||'尚未选择'}</h4>{pair[side]&&<p>{semanticScopeLabels[pair[side].contentScope]||'仅标题'} · v{pair[side].revision}</p>}<Button disabled={busy} onClick={()=>setPicker({side,kind:'news'})}>选择{side==='left'?'左侧':'右侧'}新闻</Button><Button disabled={busy} onClick={()=>setPicker({side,kind:'material'})}>选择{side==='left'?'左侧':'右侧'}材料</Button><Button disabled={busy} onClick={()=>setPicker({side,kind:'event'})}>选择{side==='left'?'左侧':'右侧'}事项</Button></article>)}</div>
+  <div className="event-pair">{['left','right'].map(side=><article key={side}><small>{side==='left'?'左侧':'右侧'}输入</small><h4>{pair[side]?.eventFocus?.title||pair[side]?.title||'尚未选择'}</h4>{pair[side]&&<p>{semanticScopeLabels[pair[side].contentScope]||'仅标题'} · v{pair[side].revision}</p>}{!historyContext&&<><Button disabled={busy} onClick={()=>setPicker({side,kind:'news'})}>选择{side==='left'?'左侧':'右侧'}新闻</Button><Button disabled={busy} onClick={()=>setPicker({side,kind:'material'})}>选择{side==='left'?'左侧':'右侧'}材料</Button><Button disabled={busy} onClick={()=>setPicker({side,kind:'event'})}>选择{side==='left'?'左侧':'右侧'}事项</Button></>}</article>)}</div>
   {picker&&<div className="semantic-picker"><h3>选择{picker.side==='left'?'左侧':'右侧'}{picker.kind==='event'?'事项':picker.kind==='material'?'材料':'报道'}</h3><Button onClick={()=>setPicker(null)}>收起选择列表</Button>{picker.kind==='event'?<SemanticEventLibrary onSelect={m=>{setPair(p=>({...p,[picker.side]:m}));setPicker(null);}}/>:picker.kind==='material'?<SemanticMaterialLibrary onSelect={m=>{setPair(p=>({...p,[picker.side]:m}));setPicker(null);}}/>:<NewsLibrary onOpen={n=>{setPair(p=>({...p,[picker.side]:n}));setPicker(null);}}/>}</div>}
-  <div className="event-actions"><Button primary disabled={busy||!ready||!data?.enabled||data.runs.some(r=>r.status==='running')} onClick={start}>比较所选输入</Button><span>{data?.enabled?`本机 Codex · ${data.model}`:'未启用本机 Codex；请检查服务配置'}</span></div>
-  <div className="event-workspace"><div className="event-results" aria-label="语义比较记录">{data?.runs.map(r=><button key={r.id} disabled={busy} aria-pressed={selected===r.id} onClick={()=>setSelected(r.id)}><small>{semanticRunLabel(r)}{r.stale?' · 旧版本':''}{r.active?' · 当前采纳':''}</small><strong>{r.left.title}</strong><p>↔ {r.right.title}</p><small>{kinds[r.relation]||'等待结果'} · {time(r.createdAt)}</small></button>)}{data&&!data.runs.length&&<p>暂无比较记录。未被标题规则召回的报道也可在上方选择。</p>}</div>
+  <div className="event-actions"><Button primary disabled={busy||!ready||!data?.enabled||data.runs.some(r=>r.status==='running')} onClick={start}>{historyContext&&pending.current?'重试本次比较':'比较所选输入'}</Button><span>{data?.enabled?`本机 Codex · ${data.model}`:'未启用本机 Codex；请检查服务配置'}</span></div>
+  <div className="event-workspace"><div className="event-results" aria-label="语义比较记录">{data?.runs.map(r=><button key={r.id} disabled={busy} aria-pressed={selected===r.id} onClick={()=>setSelected(r.id)}><small>{semanticRunLabel(r)}{r.stale?' · 旧版本':''}{r.active?' · 当前采纳':''}</small><strong>{r.left.title}</strong><p>↔ {r.right.title}</p><small>{kinds[r.relation]||'等待结果'} · {time(r.createdAt)}</small></button>)}{data&&!data.runs.length&&<p>暂无比较记录。{historyContext?'点击上方开始核对这对历史资料。':'未被标题规则召回的报道也可在上方选择。'}</p>}</div>
    <div className="event-detail" aria-label="语义比较详情">{run?<><ComparisonResult run={run}/>{run.status==='running'&&<Button disabled={busy} onClick={()=>action(`/api/semantic-events/${run.id}/cancel`,{})}>取消本次比较</Button>}{run.status==='candidate'&&<form className="m-form" onSubmit={e=>e.preventDefault()}><label>本人核对说明<textarea maxLength={1200} value={notes[run.id]||''} onChange={e=>setNotes(n=>({...n,[run.id]:e.target.value}))}/></label><div className="event-actions">{Object.entries(actions).map(([key,label])=><Button key={key} disabled={busy||!notes[run.id]?.trim()||key==='accept'&&run.stale||key==='withdraw'&&(run.decision?.runId!==run.id||run.decision?.action!=='accept')} onClick={()=>action(`/api/semantic-events/${run.id}/decision`,{version:run.decisionVersion,action:key,note:notes[run.id]})}>{label}</Button>)}</div></form>}</>:<p>选择一份比较查看冻结输入、结果与决定历史。</p>}</div>
-  </div><small>最近 50 次比较；数据库保留更早记录。不同事件的类比与“无法判断”同样保留，不作为同一事件自动合并。</small>
+  </div><small>{historyContext?`本条历史资料共 ${data?.total??0} 次比较，显示最近 50 次`:'最近 50 次比较'}；数据库保留更早记录。不同事件的类比与“无法判断”同样保留，不作为同一事件自动合并。</small>
  </section>;
 }

@@ -24,7 +24,7 @@ test('review drafts survive record switches and refresh, pending decisions lock 
   await act(async()=>buttons('刷新拆分记录')[0].click());assert.equal(textareas()[0].value,'a事项一说明');
   await act(()=>buttons('排除此事项')[0].click());assert.equal(calls[0].path,base+'/a/decision');assert.equal(select().disabled,true);assert([...document.querySelectorAll('select,textarea')].every(el=>el.disabled));await choose('b');assert.equal(select().value,'a');await act(()=>buttons('排除此事项')[0].click());assert.equal(calls.length,1);
   await act(async()=>finish(null));assert.equal(textareas()[0].value,'a事项一说明');await act(()=>buttons('排除此事项')[0].click());assert.deepEqual(calls[1],calls[0]);
-  records.a.reviews[0]=[{version:1,action:'reject',note:'a事项一说明',at:'2026-10-03T00:00:00Z'}];await act(async()=>finish({materialEventRun:records.a}));assert.equal(textareas()[0].value,'');assert.equal(textareas()[1].value,'a事项二未提交');await choose('b');assert.equal(textareas()[0].value,'b待处理说明');
+  records.a.reviews[0]=[{version:1,action:'reject',note:'a事项一说明',inputHash:'frozen',at:'2026-10-03T00:00:00Z'}];await act(async()=>finish({materialEventRun:records.a}));assert.equal(textareas()[0].value,'');assert.equal(textareas()[1].value,'a事项二未提交');await choose('b');assert.equal(textareas()[0].value,'b待处理说明');
   records.b.reviews[0]=[{version:1,action:'reject',note:'其他窗口完成核对',at:'2026-10-03T00:00:00Z'}];await act(async()=>buttons('刷新拆分记录')[0].click());assert.equal(textareas()[0].value,'','new decision versions must not reuse old unsent notes');
  }finally{if(root)await act(()=>root.unmount());Object.assign(globalThis,before);dom.window.close();await vite.close();}
 });

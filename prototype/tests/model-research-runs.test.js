@@ -111,7 +111,7 @@ test('HTTP exposes read-only status, async generation and explicit adoption; dem
   const call=async(method,url,body)=>{let status,result;await handler({method,url,headers:{host:'127.0.0.1:4179','content-type':'application/json'},async *[Symbol.asyncIterator](){if(body)yield JSON.stringify(body);}},{writeHead:n=>status=n,end:b=>result=JSON.parse(b)});return {status,result};};
   try{
    assert.equal((await call('GET',base)).result.enabled,mode!=='demo');assert.equal(service.modelResearch.list(topic.id).length,0);
-   const invalid=await call('POST',base,{version:1,model:'unapproved-override'});assert.equal(invalid.status,400);assert.equal(invalid.result.error,'模型调用仅接受研究版本；模型配置由本机服务管理');
+   const invalid=await call('POST',base,{version:1,model:'unapproved-override'});assert.equal(invalid.status,400);assert.equal(invalid.result.error,'模型调用仅接受研究版本和请求标识；模型配置由本机服务管理');
    const started=await call('POST',base,{version:1});assert.equal(started.status,mode==='demo'?400:202);
    if(mode==='research'){
     await service.modelResearch.wait(started.result.id);const detail=await call('GET',`${base}/${started.result.id}`);assert.equal(detail.result.status,'candidate');

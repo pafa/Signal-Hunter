@@ -45,7 +45,15 @@ export function openMaterials(db,{clock=()=>new Date().toISOString()}={}){
    return {material,persist:()=>db.prepare('INSERT INTO research_materials VALUES(?,?,?,?)').run(id,documentId,revision,JSON.stringify(material))};
   },
   attempt(topicId,data){db.prepare('INSERT INTO research_source_attempts(topic_id,payload) VALUES(?,?)').run(topicId,JSON.stringify({...data,at:clock()}));},
-  list(topic){return {materials:topic.evidence.filter(e=>e.materialId).map(e=>({...get(e.materialId),evidenceId:e.id,stance:e.stance,interpretation:e.interpretation,verification:e.verification})),attempts:db.prepare('SELECT payload FROM research_source_attempts WHERE topic_id=? ORDER BY id DESC LIMIT 20').all(topic.id).map(r=>JSON.parse(r.payload))};},
+  list(topic,{view='full'}={}){
+   if(!['full','summary'].includes(view))throw Error('材料列表视图无效');
+   const read=view==='full'?get:id=>{const row=db.prepare("SELECT json_remove(payload,'$.body','$.publicationDateEvidence','$.extractionEvidence') payload FROM research_materials WHERE id=?").get(id);if(!row)throw Error('材料快照不存在');return JSON.parse(row.payload);};
+   return {materials:topic.evidence.filter(e=>e.materialId).map(e=>({...read(e.materialId),evidenceId:e.id,stance:e.stance,interpretation:e.interpretation,verification:e.verification})),attempts:db.prepare('SELECT payload FROM research_source_attempts WHERE topic_id=? ORDER BY id DESC LIMIT 20').all(topic.id).map(r=>JSON.parse(r.payload))};},
+  detail(topic,id){
+   const evidence=topic.evidence.find(e=>e.materialId===id);
+   if(!evidence)throw Error('材料未关联此研究');
+   return immutableMaterialSnapshot(db,{id,revision:evidence.materialRevision});
+  },
   packet(topic){
    const relatedResearch=(topic.relatedEvents||[]).filter(l=>l.active).map(link=>{
     const row=db.prepare('SELECT payload FROM research_versions WHERE topic_id=? AND version=?').get(link.topicId,link.targetVersion);
