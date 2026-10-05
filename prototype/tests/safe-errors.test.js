@@ -46,3 +46,8 @@ test('HTTP projection followed by real Operations rendering preserves every safe
  }
  }finally{await server.close();}
 });
+
+test('forward archive errors expose exact owned labels but not appended private diagnostics',()=>{
+ const label='前向档案指纹不符';assert.equal(safeErrorText(new Error(label)),label);
+ assert.equal(safeErrorText(new Error(label+' FIXTURE_PRIVATE')),'任务失败，请检查来源或运行配置');
+});

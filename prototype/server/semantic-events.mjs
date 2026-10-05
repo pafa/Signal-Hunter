@@ -3,7 +3,7 @@ import {ARTICLE_SCOPE_INSTRUCTIONS,ARTICLE_SCOPE_VERSION} from './article-extrac
 import {TIME_EVIDENCE_SCHEMA,TIME_PROMPT_VERSION,TIME_INSTRUCTIONS,validateTimeEvidence} from './semantic-time.mjs';
 import {materialComparisonSnapshot,comparisonMaterials,comparisonSummary} from './semantic-materials.mjs';
 import {randomUUID} from 'node:crypto';
-import {digest,runStructuredCodex,CodexResearchError} from './codex-research.mjs';
+import {digest,runStructuredCodex,CodexResearchError,rejectedOutputDiagnostic} from './codex-research.mjs';
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {semanticKinds,semanticErrors as errors} from '../shared/semantic-labels.mjs';
 
@@ -105,7 +105,7 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
     if(controller.signal.aborted)throw new CodexResearchError('cancelled');
     validateComparisonCandidate(candidate,packet,run.model,{requireTimeEvidence:true});
     write({...run,status:'candidate',finishedAt:new Date(now()).toISOString(),candidate});
-   }).catch(error=>{write({...run,status:controller.signal.aborted?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),failure:error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型比较失败；原输入保留，请检查本机配置'}});}).finally(()=>{jobs.delete(run.id);releaseModelLease(db,run.id);});
+   }).catch(error=>{write({...run,status:controller.signal.aborted?'cancelled':'failed',finishedAt:new Date(now()).toISOString(),outputDiagnostic:rejectedOutputDiagnostic(error,packet.inputHash),failure:error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型比较失败；原输入保留，请检查本机配置'}});}).finally(()=>{jobs.delete(run.id);releaseModelLease(db,run.id);});
    void done.catch(()=>console.error('语义比较保存失败；原输入保留，请检查本机存储。'));
    jobs.set(run.id,{controller,done});return summary(run);
   },
