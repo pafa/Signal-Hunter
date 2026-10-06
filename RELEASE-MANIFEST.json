@@ -58,8 +58,8 @@
       "sha256": "625a5a4b2050f15bec584a1c8eb01081aa840646859fe2ba0f52ff749e0b860d"
     },
     "README.md": {
-      "bytes": 16128,
-      "sha256": "d51a4320fb41cd7b5d727a9fa58f2f0d50c1d4033c2d99c85d7a6c4e91982ad5"
+      "bytes": 16234,
+      "sha256": "8e793f690b7d929143ef8ece10d417e52cc2eaed524163cdb08219e7262abb75"
     },
     "SECURITY.md": {
       "bytes": 2268,
@@ -74,8 +74,8 @@
       "sha256": "d8bcfef6287f47ca7073adbf8d9a8b7f3db5ec4ed05ec69a22d5384d01c57ec2"
     },
     "docs/BACKLOG.md": {
-      "bytes": 424230,
-      "sha256": "028e8ed90fe13e29ba41eaa367c5272d8cae666bb0c0790616d853b07114960e"
+      "bytes": 428208,
+      "sha256": "7a0ccdb659bcc41b52755976ab688059a105a05a561b8b7115fd101098c38624"
     },
     "docs/BRANDING.md": {
       "bytes": 990,
@@ -86,12 +86,12 @@
       "sha256": "ecb3e73eeb588bde28ccbd073062fa62f7da8454f3ecf1f469e3db962c5819d8"
     },
     "docs/DECISIONS.md": {
-      "bytes": 87241,
-      "sha256": "ffca6838094bc0e7e949ae2478dd3f963b3694b9be0655f48281b560fe144964"
+      "bytes": 88407,
+      "sha256": "40763e69250ccaba2aa3ce38d51950e689566574b32830f7e0c83ea2c831e3a7"
     },
     "docs/DEPLOYMENT.md": {
-      "bytes": 113546,
-      "sha256": "f75280a5682e848641241d3a29593ec450ec6f024ef59c63f2a8e9525873bbdf"
+      "bytes": 114513,
+      "sha256": "9c7b6e846fafda72b565e5eba678266dc84757afa6ebb97b7e9bb6c9897ec7e2"
     },
     "docs/EVALUATION-PROTOCOL.md": {
       "bytes": 46856,
@@ -298,8 +298,8 @@
       "sha256": "6f5bcbf3913809e99b4893b79bd0a0c673ad94a41a88ea3df7b96c2025eb9ab5"
     },
     "prototype/scripts/verify-news-sources.mjs": {
-      "bytes": 2211,
-      "sha256": "1b60a33fb24e4fce82e17323f26eaebf10ad7d26c80af414ec64a83ad2ec06fd"
+      "bytes": 2236,
+      "sha256": "033a0819c2e8a55e106c3c4bd57c073730f5fc4c905caff7e86130fc3bffaf7a"
     },
     "prototype/server/article-extraction.mjs": {
       "bytes": 5523,
@@ -526,8 +526,8 @@
       "sha256": "f98a0b264bce7d6019783cc61952b37e207793f01f95e9aa554f670b199075eb"
     },
     "prototype/server/news-sources.mjs": {
-      "bytes": 5758,
-      "sha256": "7faaa7b5de663dc2ffef6079347e5354325f3b6e2498b94c22ac6028f305b414"
+      "bytes": 5844,
+      "sha256": "37479e3febc92f2cdb3834f99b602b3e389de60cc86483b959350b12005da916"
     },
     "prototype/server/news-window.mjs": {
       "bytes": 2858,
@@ -694,8 +694,8 @@
       "sha256": "26e6b859ec63e758fc680b8136822e48be574fb630fc76c9f81e6cb4a9d72e68"
     },
     "prototype/server/source-reader.mjs": {
-      "bytes": 5334,
-      "sha256": "bce2938addca494425728b1228c8cfadbc1278b7693faf2153043f061b75693c"
+      "bytes": 5420,
+      "sha256": "2a264c2a8bd16f55ede1e8dca78b06b836f38f48a54cea8b81474a72f9814ad8"
     },
     "prototype/server/static-site.mjs": {
       "bytes": 1736,
@@ -794,8 +794,8 @@
       "sha256": "6b5fce4c97bee9d44c658bf017c99e656cfe7b49fe339892d333c1528da9510b"
     },
     "prototype/shared/news-sources.mjs": {
-      "bytes": 1944,
-      "sha256": "02242fe15b3e905514559a304b6d7007fe312035458fe76074bbd1538bd4cf7f"
+      "bytes": 2308,
+      "sha256": "b45fdd9a6e3a69661e0b8ffef5fb6575ce4f179ce58b92a9d75f203d6bc00293"
     },
     "prototype/shared/price-collection.mjs": {
       "bytes": 855,
@@ -1421,6 +1421,10 @@
       "bytes": 9388,
       "sha256": "141ceba4f6bad9d3f1e3af85db1e9a3f80d4a82e0d710aeaf078d342c2a48897"
     },
+    "prototype/tests/direct-news.test.js": {
+      "bytes": 4703,
+      "sha256": "dead32ac4a2dc76b00f068b6c724cd8c3e464d60d30c5f7d98dae286715d81de"
+    },
     "prototype/tests/dossier-editor.test.js": {
       "bytes": 16364,
       "sha256": "2986b8278d1c59d4e21ac17965d5f773f63edf3ae47878f048d39d2284345ff1"
@@ -1794,12 +1798,12 @@
       "sha256": "465d8b8b672620770f4abd32b96af7624a8633acc8a759471df8780b225ff500"
     },
     "prototype/tests/research-materials.test.js": {
-      "bytes": 13916,
-      "sha256": "b6fe4e7b2cd6f696157a5dae9c56575a7ba67801ced079a57e61fafbe3807646"
+      "bytes": 14642,
+      "sha256": "c5518317b20da1f34c7e9e1373e989d089cf91a9f756dac29c11633e52031cac"
     },
     "prototype/tests/research-navigation.test.js": {
-      "bytes": 10251,
-      "sha256": "5fa6e7376d69f61a9b8288480723c5df9325c88437c27a2cb15bcdd204604ddd"
+      "bytes": 10482,
+      "sha256": "241ffd669bbb8bcfbe8ad15ea09de17b6faf731cc43c8becb079094fb2c1d8a1"
     },
     "prototype/tests/research-pipeline-ui.test.js": {
       "bytes": 4681,

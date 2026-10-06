@@ -10,6 +10,9 @@ import {Readability} from '@mozilla/readability';
 
 export const READER_VERSION='public-article-7';
 export const MAX_SOURCE_BYTES=1_000_000;
+function assertArticleHost(url){
+ if(['news.google.com','consent.google.com','accounts.google.com'].includes(url.hostname))throw new Error('这是聚合或登录入口，请在阅读来源后粘贴发布方的文章链接');
+}
 // Resolve once, validate every address, and pin the chosen IP in the TLS request.
 // Redirects re-enter this check. No browser cookies, credentials, scripts or subresources.
 function transport(url,address,signal){
@@ -30,7 +33,7 @@ function transport(url,address,signal){
 }
 export function extractArticle(html,url){
  if(Buffer.byteLength(html)>MAX_SOURCE_BYTES)throw new Error('来源页面超过 1 MB');
- if(['news.google.com','consent.google.com','accounts.google.com'].includes(new URL(url).hostname))throw new Error('这是聚合或登录入口，请在阅读来源后粘贴发布方的文章链接');
+ assertArticleHost(new URL(url));
  const dom=new JSDOM(html,{url});
  try{
   const dates=collectPublicationDates(dom.window.document,url);
@@ -48,6 +51,7 @@ export async function readPublicArticle(value,{resolver=lookup,request=transport
  let url=publicSourceUrl(value);const signal=AbortSignal.timeout(timeoutMs);
  const bounded=promise=>new Promise((resolve,reject)=>{const abort=()=>reject(new Error('公开网页读取超时'));signal.addEventListener('abort',abort,{once:true});if(signal.aborted){abort();return;}promise.then(resolve,reject).finally(()=>signal.removeEventListener('abort',abort));});
  for(let redirects=0;redirects<=3;redirects++){
+  assertArticleHost(url);
   const addresses=await bounded(resolver(url.hostname,{all:true,family:4}));
   if(!addresses.length||addresses.some(a=>!isPublicIPv4(a.address)))throw new Error('来源解析到非公网地址，未发起读取');
   const response=await bounded(request(url,addresses[0].address,signal));

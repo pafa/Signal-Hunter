@@ -29,6 +29,12 @@ test('redirects revalidate DNS and pin the checked address; loops, timeout and H
  // Keep one referenced timer so Node's unref'ed AbortSignal can fire during this isolated test.
  const timer=setTimeout(()=>{},100);try{await assert.rejects(readPublicArticle('https://ir.acme.com/a',{timeoutMs:10,resolver:()=>new Promise(()=>{})}),/超时/);}finally{clearTimeout(timer);}
 });
+test('aggregator and login URLs fail before DNS or transport, including a public redirect',async()=>{
+ let resolutions=0,requests=0;const resolver=async()=>{resolutions++;return [{address:'93.184.216.34'}];},request=async()=>{requests++;return {status:302,headers:{location:'https://news.google.com/articles/wrapper'}};};
+ for(const host of ['news.google.com','consent.google.com','accounts.google.com'])await assert.rejects(readPublicArticle('https://'+host+'/wrapper',{resolver,request}),/聚合或登录/);
+ assert.equal(resolutions,0);assert.equal(requests,0);
+ await assert.rejects(readPublicArticle('https://ir.acme.com/a',{resolver,request}),/聚合或登录/);assert.equal(resolutions,1);assert.equal(requests,1);
+});
 test('article extraction returns plain text, never executes scripts and refuses short or oversized pages',async()=>{
  const article=extractArticle(html,'https://ir.acme.com/a');assert.match(article.body,/subject to shareholder approval/);assert.doesNotMatch(article.body,/<script|readerPwned/);assert.equal(globalThis.readerPwned,undefined);assert.equal(article.scope,'extracted-text');
  assert.throws(()=>extractArticle('<html>Sign in</html>','https://ir.acme.com/a'),/未提取/);
