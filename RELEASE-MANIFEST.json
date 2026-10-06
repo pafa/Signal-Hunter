@@ -74,8 +74,8 @@
       "sha256": "d8bcfef6287f47ca7073adbf8d9a8b7f3db5ec4ed05ec69a22d5384d01c57ec2"
     },
     "docs/BACKLOG.md": {
-      "bytes": 421525,
-      "sha256": "359784f303ed9ec2d214b130db19fe0f23a3b4f8deae8594a7269f0a881a4543"
+      "bytes": 424230,
+      "sha256": "028e8ed90fe13e29ba41eaa367c5272d8cae666bb0c0790616d853b07114960e"
     },
     "docs/BRANDING.md": {
       "bytes": 990,
@@ -86,8 +86,8 @@
       "sha256": "ecb3e73eeb588bde28ccbd073062fa62f7da8454f3ecf1f469e3db962c5819d8"
     },
     "docs/DECISIONS.md": {
-      "bytes": 86384,
-      "sha256": "adf4bee7867d992d1bf6b0126bb05d3acead497361fa93f9c0411769ad9346ec"
+      "bytes": 87241,
+      "sha256": "ffca6838094bc0e7e949ae2478dd3f963b3694b9be0655f48281b560fe144964"
     },
     "docs/DEPLOYMENT.md": {
       "bytes": 113546,
