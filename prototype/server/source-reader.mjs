@@ -4,10 +4,11 @@ import {lookup} from 'node:dns/promises';
 import {publicSourceUrl,isPublicIPv4} from './public-source-url.mjs';
 export {publicSourceUrl,isPublicIPv4} from './public-source-url.mjs';
 import {prepareArticleExtraction,finishArticleExtraction} from './article-extraction.mjs';
+import {articleTableText} from './article-table-text.mjs';
 import {JSDOM} from 'jsdom';
 import {Readability} from '@mozilla/readability';
 
-export const READER_VERSION='public-article-4';
+export const READER_VERSION='public-article-7';
 export const MAX_SOURCE_BYTES=1_000_000;
 // Resolve once, validate every address, and pin the chosen IP in the TLS request.
 // Redirects re-enter this check. No browser cookies, credentials, scripts or subresources.
@@ -37,9 +38,10 @@ export function extractArticle(html,url){
   const article=new Readability(dom.window.document,{maxElemsToParse:18000,charThreshold:200}).parse();
   const body=article?.textContent?.replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
   if(!body||body.length<200||/^(?:access denied|just a moment|request blocked|enable javascript|verify you are human)/i.test(article.title||''))throw new Error('未提取到足够正文，可能是访问限制或非文章页面；可手动补充');
-  if(body.length>80000)throw new Error('正文超过 8 万字符，请手动补充必要段落');
+  const structuredBody=articleTableText(dom.window.document,article.content);
+  if(structuredBody.length>80000)throw new Error('正文超过 8 万字符，请手动补充必要段落');
   const publication=publicationDateResult(dates),extractionEvidence=finishArticleExtraction(dom.window.document,url,preparation,article.content);
-  return {title:(article.title||new URL(url).hostname).slice(0,200),sourceName:(article.siteName||new URL(url).hostname).slice(0,160),body,...publication,extractionEvidence,scope:'extracted-text',method:READER_VERSION};
+  return {title:(article.title||new URL(url).hostname).slice(0,200),sourceName:(article.siteName||new URL(url).hostname).slice(0,160),body:structuredBody,...publication,extractionEvidence,scope:'extracted-text',method:READER_VERSION};
  }finally{dom.window.close();}
 }
 export async function readPublicArticle(value,{resolver=lookup,request=transport,timeoutMs=20000}={}){

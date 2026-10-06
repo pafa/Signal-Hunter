@@ -4,7 +4,9 @@ import {digest,CodexResearchError,rejectedOutputDiagnostic} from './codex-resear
 import {COMPANY_ENTITIES_VERSION,companyEntitiesPacket,validateCompanyEntities,generateCompanyEntities} from './company-entities.mjs';
 
 function validateSavedCandidate({packet,candidate,model,topicId}){
- if(packet?.schema!==COMPANY_ENTITIES_VERSION||packet.input?.topicId!==topicId||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
+ // Old packets remain auditable; recomputing the current packet marks them
+ // stale and prevents new linking without rewriting a stored model result.
+ if(![COMPANY_ENTITIES_VERSION,'company-entities-1'].includes(packet?.schema)||packet.input?.topicId!==topicId||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
  if(candidate?.status!=='candidate'||candidate.reviewStatus!=='unreviewed'||candidate.trace?.inputHash!==packet.inputHash||candidate.trace?.model!==model||typeof candidate.rawOutput!=='string'||digest(candidate.rawOutput)!==candidate.trace.outputHash)throw new CodexResearchError('output');
  let raw;try{raw=validateCompanyEntities(JSON.parse(candidate.rawOutput),packet);}catch{throw new CodexResearchError('output');}
  if(digest(raw)!==digest(candidate.resolution))throw new CodexResearchError('output');

@@ -1,5 +1,5 @@
 import {marketJson,marketFailure} from './market-diagnostics.mjs';
-import {validProviderMinute} from '../shared/provider-time.mjs';
+import {validProviderMinute,providerMinuteTimestamp} from '../shared/provider-time.mjs';
 import {instrument} from '../shared/securities.mjs';
 export {instrument} from '../shared/securities.mjs';
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
@@ -62,12 +62,15 @@ export function parseMinutes(payload, spec) {
   return {symbol:spec.symbol,name:String(data.name||spec.code),market:spec.market,currency:spec.currency,marketTimezone:spec.marketTimezone,providerTimezone:spec.providerTimezone,provider:'eastmoney-public',interval:'1m',deliveryDelay:'unverified',adjustment:'none',lastBarMayBeIncomplete:true,minuteQuality,points:unique,providerTime:unique.at(-1).time,last:unique.at(-1).close};
 }
 
-export async function fetchText(url, fetcher=fetch) {
+export async function fetchText(url, fetcher=fetch, {onReceipt}={}) {
   const response=await fetcher(url,{signal:AbortSignal.timeout(15000),redirect:'error',headers:{Accept:'application/rss+xml, application/json, text/xml'}});
-  if (!response.ok) throw new Error(`上游 HTTP ${response.status}`);
+  if (!response.ok&&!onReceipt) throw new Error(`上游 HTTP ${response.status}`);
   const chunks=[];let size=0;
-  for await (const chunk of response.body) {size+=chunk.length;if(size>2_000_000) throw new Error('上游数据超过大小限制');chunks.push(Buffer.from(chunk));}
-  return Buffer.concat(chunks).toString('utf8');
+  for await (const chunk of response.body||[]) {size+=chunk.length;if(size>2_000_000) throw new Error('上游数据超过大小限制');chunks.push(Buffer.from(chunk));}
+  const body=Buffer.concat(chunks).toString('utf8');
+  if(onReceipt)await onReceipt({body,httpStatus:response.status,responseHeaders:Object.fromEntries(['content-type','date','retry-after','location'].filter(k=>response.headers?.has(k)).map(k=>[k,response.headers.get(k)]))});
+  if(!response.ok)throw new Error(`上游 HTTP ${response.status}`);
+  return body;
 }
 
 async function fetchEastmoneyMinutes(symbol, fetcher=fetch) {
@@ -86,19 +89,32 @@ export function parseYahooMinutes(payload,spec){
  const data=payload?.chart?.result?.[0],meta=data?.meta;
  if(!meta||meta.symbol?.toUpperCase()!==yahooSymbol(spec)||meta.currency!==spec.currency)throw new Error('备用行情证券或币种不匹配');
  if(meta.exchangeTimezoneName&&meta.exchangeTimezoneName!==spec.marketTimezone)throw new Error('备用行情交易所时区不匹配');
- const closes=data.indicators?.quote?.[0]?.close||[],points=[],minuteQuality={version:'minute-quality/1',invalidRows:0,duplicateTimes:[],roundedTimes:[]},seen=new Set();
+ const volumes=data.indicators?.quote?.[0]?.volume,minuteVolume={version:'provider-minute-volume/1',field:'indicators.quote[0].volume',interval:meta.dataGranularity||null,aligned:Array.isArray(volumes)&&volumes.length===(data.timestamp||[]).length,basis:'provider-bar-values',unit:'供应商原始单位，股/手及修订完整性未独立核验'};
+ const closes=data.indicators?.quote?.[0]?.close||[],points=[],minuteQuality={version:'minute-quality/1',invalidRows:0,duplicateTimes:[],roundedTimes:[],sourceInterval:typeof meta.dataGranularity==='string'?meta.dataGranularity:null,missingCloseTimes:[]},seen=new Set();
  if(closes.length!==(data.timestamp||[]).length)minuteQuality.invalidRows++;
  for(const [i,t] of (data.timestamp||[]).entries()){
+  // Retain explicit nulls separately without changing the conservative invalid-row
+  // count used by continuous-window consumers. Never infer a price or session break.
+  if(Number.isInteger(t)&&t>0&&t<=4102444800&&t%60===0&&closes[i]===null)minuteQuality.missingCloseTimes.push(new Date(t*1000).toISOString().slice(0,16).replace('T',' '));
   if(!Number.isInteger(t)||t<=0||t>4102444800||!Number.isFinite(closes[i])||closes[i]<=0){minuteQuality.invalidRows++;continue;}
-  const time=new Date(t*1000).toISOString().slice(0,16).replace('T',' ');if(t%60!==0)minuteQuality.roundedTimes.push(time);if(seen.has(time))minuteQuality.duplicateTimes.push(time);seen.add(time);points.push({time,close:closes[i]});
+  const time=new Date(t*1000).toISOString().slice(0,16).replace('T',' ');if(t%60!==0)minuteQuality.roundedTimes.push(time);if(seen.has(time))minuteQuality.duplicateTimes.push(time);seen.add(time);points.push({time,close:closes[i],...(Array.isArray(volumes)?{volume:Number.isSafeInteger(volumes[i])&&volumes[i]>=0?volumes[i]:null}:{})});
  }
  const unique=[...new Map(points.map(p=>[p.time,p])).values()].sort((a,b)=>a.time.localeCompare(b.time));
  if(!unique.length)throw new Error('备用行情没有有效分钟数据');
- return {symbol:spec.symbol,name:meta.longName||meta.shortName||spec.code,market:spec.market,currency:spec.currency,marketTimezone:meta.exchangeTimezoneName||spec.marketTimezone,providerTimezone:'UTC',provider:'yahoo-public-chart',interval:'1m',deliveryDelay:'unverified',adjustment:'none',lastBarMayBeIncomplete:true,minuteQuality,points:unique,providerTime:unique.at(-1).time,last:unique.at(-1).close};
+ return {symbol:spec.symbol,name:meta.longName||meta.shortName||spec.code,market:spec.market,currency:spec.currency,marketTimezone:meta.exchangeTimezoneName||spec.marketTimezone,providerTimezone:'UTC',provider:'yahoo-public-chart',interval:'1m',deliveryDelay:'unverified',adjustment:'none',lastBarMayBeIncomplete:true,minuteQuality,minuteVolume,points:unique,providerTime:unique.at(-1).time,last:unique.at(-1).close};
 }
 export async function fetchMinutes(symbol,fetcher=fetch){
- try{return await fetchEastmoneyMinutes(symbol,fetcher);}catch(primaryError){
-  const spec=instrument(symbol),url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooSymbol(spec))+'?interval=1m&range=1d';
-  try{return {...parseYahooMinutes(await marketJson(()=>fetchText(url,fetcher)),spec),fallbackReason:primaryError.message.slice(0,120)};}catch(backupError){const error=new Error('主源与备用源均失败：'+backupError.message);error.kind='all-sources-failed';error.attempts=[{source:'eastmoney-public',...marketFailure(primaryError)},{source:'yahoo-public-chart',...marketFailure(backupError)}];throw error;}
+ let primary,primaryError;
+ try{primary=await fetchEastmoneyMinutes(symbol,fetcher);}catch(error){primaryError=error;}
+ if(primary&&providerMinuteTimestamp(primary.providerTime,primary.providerTimezone)!==null)return primary;
+ const spec=instrument(symbol),url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(yahooSymbol(spec))+'?interval=1m&range=1d';
+ try{
+  const backup=parseYahooMinutes(await marketJson(()=>fetchText(url,fetcher)),spec);
+  return {...backup,fallbackReason:primary?'主源分钟时间未核验，采用备用源UTC时间':primaryError.message.slice(0,120),...(primary?{sourceSelection:{version:1,reason:'primary-time-unverified',primarySource:primary.provider,primaryTime:primary.providerTime,primaryTimezone:primary.providerTimezone,backupSource:backup.provider,outcome:'backup-selected'}}:{})};
+ }catch(backupError){
+  // Preserve the usable research chart with its original unknown time. The
+  // service still applies cancellation and cache-regression gates before saving.
+  if(primary)return {...primary,sourceSelection:{version:1,reason:'primary-time-unverified',primarySource:primary.provider,primaryTime:primary.providerTime,primaryTimezone:primary.providerTimezone,backupSource:'yahoo-public-chart',outcome:'backup-unavailable'}};
+  const error=new Error('主源与备用源均失败：'+backupError.message);error.kind='all-sources-failed';error.attempts=[{source:'eastmoney-public',...marketFailure(primaryError)},{source:'yahoo-public-chart',...marketFailure(backupError)}];throw error;
  }
 }

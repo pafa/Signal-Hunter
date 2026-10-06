@@ -1,20 +1,25 @@
+import {historyRecallErrors} from '../shared/historical-recall.mjs';
 import {safeErrorText,safeDiagnosticPayload} from '../shared/safe-errors.mjs';
 import {runtimeConfig,assertDatabaseMode,checkDatabaseFile} from './runtime.mjs';
 import http from 'node:http';
 import {createStaticHandler} from './static-site.mjs';
 import {createBackup} from './backup.mjs';
 import {fileURLToPath} from 'node:url';
+import {existsSync,realpathSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {openStore} from './store.mjs';
 import {createService} from './service.mjs';
 import {planExit} from './risk-rules.mjs';
+import {workbenchResponse} from './workbench-response.mjs';
+import {screeningSamplePage} from './screening-history.mjs';
 
 export function createHandler(store,service,{apiPort=4179,frontendPort=4178,staticHandler=null}={}){
  for(const port of [apiPort,frontendPort])if(!Number.isInteger(port)||port<1024||port>65535)throw new Error('本地端口无效');
  const hosts=new Set([`127.0.0.1:${apiPort}`,`127.0.0.1:${frontendPort}`,`localhost:${frontendPort}`]);
  const origins=new Set([...hosts].map(host=>`http://${host}`));
  return async(req,res)=>{
-  const reply=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(code<400?safeDiagnosticPayload(body):body));};
+  const sendJson=(code,body,headers={})=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(body);};
+  const reply=(code,body)=>sendJson(code,JSON.stringify(code<400?safeDiagnosticPayload(body):body));
   if(!hosts.has(req.headers.host)||req.headers.origin&&!origins.has(req.headers.origin)){reply(403,{error:'仅允许本机工作台访问'});return;}
   try{
     const url=new URL(req.url,'http://127.0.0.1:4179');
@@ -27,7 +32,11 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&forwardReviewMatch&&['review','review-inputs'].includes(forwardReviewMatch[2])){reply(200,service.forwardReviews[forwardReviewMatch[2]==='review'?'detail':'inputs'](forwardReviewMatch[1]));return;}
     const forwardMatch=/^\/api\/forward-evaluations\/(baselines|records)\/([-a-f0-9]{36})$/.exec(url.pathname);
     if(req.method==='GET'&&forwardMatch){reply(200,service.forwardEvaluations[forwardMatch[1]==='baselines'?'baseline':'get'](forwardMatch[2]));return;}
+    if(req.method==='GET'&&url.pathname==='/api/price-collection'){reply(200,service.priceCollection.snapshot());return;}
+    if(req.method==='GET'&&/^\/api\/price-collection\/[-a-f0-9]{36}$/.test(url.pathname)){reply(200,service.priceCollection.get(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/evaluations'){reply(200,service.evaluations.list());return;}
+    const priceMatch=/^\/api\/evaluations\/([-a-f0-9]{36})\/prices(?:\/([-a-f0-9]{36}))?$/.exec(url.pathname);
+    if(req.method==='GET'&&priceMatch){reply(200,priceMatch[2]?service.eventPrices.get(priceMatch[1],priceMatch[2]):service.eventPrices.list(priceMatch[1]));return;}
     const evaluationMatch=/^\/api\/evaluations\/([-a-f0-9]{36})(?:\/(report|export))?$/.exec(url.pathname);
     if(req.method==='GET'&&evaluationMatch){reply(200,service.evaluations[evaluationMatch[2]||'detail'](evaluationMatch[1]));return;}
     const marketAccount=url.searchParams.get('account')||'aggressive',market=Object.hasOwn(service.marketSimulations||{},marketAccount)?service.marketSimulations[marketAccount]:null;
@@ -45,10 +54,18 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&/^\/api\/semantic-batches\/[-a-z0-9]{36}$/.test(url.pathname)){reply(200,service.semanticBatches.get(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/semantic-events'){reply(200,service.semanticEvents.list());return;}
     if(req.method==='GET'&&/^\/api\/semantic-events\/[-a-z0-9]{36}$/.test(url.pathname)){reply(200,service.semanticEvents.get(url.pathname.split('/')[3]));return;}
+    const historyComparison=/^\/api\/historical-recall\/([-a-f0-9]{36})\/comparisons$/.exec(url.pathname);
+    if(historyComparison&&([...url.searchParams.keys()].some(k=>k!=='candidateId')||url.searchParams.getAll('candidateId').length>1))throw Error(historyRecallErrors[9]);
+    if(req.method==='GET'&&historyComparison){reply(200,service.historicalComparisons.list(historyComparison[1],url.searchParams.get('candidateId')));return;}
+    const materialHistory=/^\/api\/materials\/([a-f0-9]{64})\/history-recall(?:\/([-a-f0-9]{36}))?$/.exec(url.pathname);
+    if(req.method==='GET'&&materialHistory){const key='material:'+materialHistory[1];reply(200,materialHistory[2]?service.historicalRecall.get(key,materialHistory[2]):service.historicalRecall.list(key));return;}
+    if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/history-recall(?:\/[-a-f0-9]{36})?$/.test(url.pathname)){const p=url.pathname.split('/');reply(200,p[5]?service.historicalRecall.get(p[3],p[5]):service.historicalRecall.list(p[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/events'){const params=Object.fromEntries(url.searchParams);for(const key of ['offset','limit'])if(key in params)params[key]=Number(params[key]);reply(200,service.eventContinuity(params));return;}
     if(req.method==='GET'&&/^\/api\/events\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.eventDetail(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/observations\/[a-f0-9]{64}\/receipts$/.test(url.pathname)){reply(200,service.observations.receipts(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/observation-rules\/[-a-zA-Z0-9]{8,80}\/history$/.test(url.pathname)){reply(200,service.observations.rules.history(url.pathname.split('/')[3]));return;}
+    if(req.method==='GET'&&url.pathname==='/api/news/coverage'){reply(200,service.newsCoverageReport(Object.fromEntries(url.searchParams)));return;}
+    if(req.method==='GET'&&url.pathname==='/api/observations'){reply(200,service.observations.page(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/operations'){reply(200,service.operations());return;}
     if(req.method==='GET'&&/^\/api\/news\/intake\/[-a-f0-9]{36}$/.test(url.pathname)){reply(200,service.newsIntakeDetail(url.pathname.split('/')[4]));return;}
     if(req.method==='GET'&&url.pathname==='/api/reference-fx'){reply(200,service.referenceFx.status());return;}
@@ -58,18 +75,28 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/paper/history'){reply(200,service.paper.history());return;}
     if(req.method==='GET'&&url.pathname==='/api/bars'){const symbol=url.searchParams.get('symbol');if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅查看关注标的');const quote=store.quote(symbol);const rows=quote?store.db.prepare('SELECT provider_time AS time,close FROM quote_bars WHERE symbol=? AND provider=? AND timezone=? ORDER BY provider_time DESC LIMIT 6000').all(symbol,quote.provider||'legacy',quote.providerTimezone||'unverified'):[];reply(200,rows.reverse());return;}
     if(req.method==='GET'&&url.pathname==='/api/research-pipeline'){reply(200,service.researchPipeline.snapshot());return;}
-    if(req.method==='GET'&&url.pathname==='/api/data'){reply(200,service.snapshot());return;}
-    if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/screening$/.test(url.pathname)){reply(200,service.research.screenings.packet(url.pathname.split('/')[3]));return;}
+    if(req.method==='GET'&&url.pathname==='/api/data'){const {body,headers}=workbenchResponse(service.snapshot(),req.headers['x-signal-topics-hash']);sendJson(200,body,headers);return;}
+    if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/screening$/.test(url.pathname)){reply(200,screeningSamplePage(store.db,url.pathname.split('/')[3],service.research.screenings.rulesHash,Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.research.newsItem(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/news/search'){reply(200,service.research.newsPage(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/material-events(?:\/[-a-z0-9]{36})?$/.test(url.pathname)){const p=url.pathname.split('/');reply(200,p[5]?service.materialEvents.get(p[3],p[5]):service.materialEvents.list(p[3]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/company-entities(?:\/[-a-z0-9]{36})?$/.test(url.pathname)){const p=url.pathname.split('/');reply(200,p[5]?service.companyEntities.get(p[3],p[5]):service.companyEntities.list(p[3]));return;}
-    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/materials$/.test(url.pathname)){reply(200,service.research.materialList(url.pathname.split('/')[3]));return;}
+    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/materials$/.test(url.pathname)){
+      if([...url.searchParams.keys()].some(k=>k!=='view')||url.searchParams.getAll('view').length>1)throw Error('材料列表视图无效');
+      reply(200,service.research.materialList(url.pathname.split('/')[3],{view:url.searchParams.get('view')??'full'}));return;
+    }
+    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/materials\/[a-f0-9]{64}$/.test(url.pathname)){const p=url.pathname.split('/');reply(200,service.research.materialDetail(p[3],p[5]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/packet$/.test(url.pathname)){reply(200,service.research.packet(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/model-runs$/.test(url.pathname)){reply(200,{...service.modelResearch.status(),runs:service.modelResearch.list(url.pathname.split('/')[3])});return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/model-runs\/[^/]+$/.test(url.pathname)){reply(200,service.modelResearch.get(url.pathname.split('/')[3],url.pathname.split('/')[5]));return;}
     if(req.method==='GET'&&/^\/api\/research\/[^/]+\/related$/.test(url.pathname)){reply(200,service.research.related(url.pathname.split('/')[3],Object.fromEntries(url.searchParams)));return;}
-    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/history$/.test(url.pathname)){reply(200,service.research.history(url.pathname.split('/')[3]));return;}
+    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/history$/.test(url.pathname)){
+      const id=url.pathname.split('/')[3];
+      if(!url.search)return reply(200,service.research.history(id));
+      if(url.searchParams.get('view')!=='summary'||[...url.searchParams.keys()].some(k=>!['view','limit','before','ceiling'].includes(k)||url.searchParams.getAll(k).length!==1))throw Error('研究历史分页参数无效');
+      const {view,...params}=Object.fromEntries(url.searchParams);reply(200,service.research.historyPage(id,params));return;
+    }
+    if(req.method==='GET'&&/^\/api\/research\/[^/]+\/history\/[^/]+$/.test(url.pathname)){if(url.search)throw Error('研究历史分页参数无效');const p=url.pathname.split('/');reply(200,service.research.historyDetail(p[3],p[5]));return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/revisions$/.test(url.pathname)){reply(200,store.revisions(url.pathname.split('/')[3]));return;}
     if(!['POST','PATCH','DELETE'].includes(req.method)){reply(404,{error:'接口不存在'});return;}
     if(service.health().restoreReviewRequired&&!/^\/api\/operations\/(?:restore-review|[a-z]+)$/.test(url.pathname)){reply(409,{error:'恢复副本需先完成核对确认，暂不接受业务修改'});return;}
@@ -79,8 +106,12 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&historyComparison){if(url.search)throw Error(historyRecallErrors[9]);reply(202,service.historicalComparisons.start(historyComparison[1],data));return;}
+    if(req.method==='POST'&&materialHistory&&!materialHistory[2]){reply(200,service.historicalRecall.freeze('material:'+materialHistory[1],data));return;}
+    if(req.method==='POST'&&/^\/api\/news\/[a-f0-9]{64}\/history-recall$/.test(url.pathname)){reply(200,service.historicalRecall.freeze(url.pathname.split('/')[3],data));return;}
     if(req.method==='POST'&&/^\/api\/research-pipeline\/events\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retryEvent(url.pathname.split('/')[4]);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&/^\/api\/research-pipeline\/relations\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retryRelation(url.pathname.split('/')[4]);reply(200,updatedSnapshot());return;}
+    if(req.method==='PATCH'&&url.pathname==='/api/price-collection'){service.priceCollection.configure(data);reply(200,updatedSnapshot());return;}
     if(req.method==='PATCH'&&url.pathname==='/api/research-pipeline'){service.researchPipeline.configure(data);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&/^\/api\/research-pipeline\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retry(url.pathname.split('/')[3]);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/reference-fx/refresh'){reply(200,await service.referenceFx.refresh(data));return;}
@@ -90,6 +121,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='POST'&&url.pathname==='/api/forward-evaluations/pause'){reply(200,service.forwardEvaluations.pause(data));return;}
     if(req.method==='POST'&&url.pathname==='/api/forward-evaluations'){reply(201,service.forwardEvaluations.freeze(data));return;}
     if(req.method==='POST'&&url.pathname.startsWith('/api/evaluations')){
+      if(priceMatch&&!priceMatch[2]){reply(201,service.eventPrices.freeze(priceMatch[1],data));return;}
       const m=/^\/api\/evaluations(?:\/([-a-f0-9]{36})\/(annotate|seal))?$/.exec(url.pathname);
       if(!m)throw new Error('评估批次参数无效');
       const allowed=m[2]==='annotate'?['requestId','version','label']:m[2]==='seal'?['requestId','version','confirm']:['requestId','version','title','start','end','rulesHash'];
@@ -132,7 +164,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
       else reply(200,service.semanticEvents.decide(parts[3],data));return;
     }
     if(req.method==='POST'&&/^\/api\/research\/[^/]+\/model-runs$/.test(url.pathname)){
-      if(Object.keys(data).some(k=>k!=='version'))throw new Error('模型调用仅接受研究版本；模型配置由本机服务管理');
+      if(Object.keys(data).some(k=>!['version','requestId'].includes(k)))throw new Error('模型调用仅接受研究版本和请求标识；模型配置由本机服务管理');
       reply(202,service.modelResearch.start(url.pathname.split('/')[3],data));return;
     }
     if(req.method==='POST'&&/^\/api\/research\/[^/]+\/model-runs\/[^/]+\/(cancel|adopt)$/.test(url.pathname)){
@@ -181,14 +213,14 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
   }catch(error){reply(400,{error:error instanceof SyntaxError?'JSON 格式无效':safeErrorText(error)});}
 };}
 
-if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+if(process.argv[1]&&existsSync(process.argv[1])&&realpathSync(process.argv[1])===realpathSync(fileURLToPath(import.meta.url))){
   const config=runtimeConfig();
   checkDatabaseFile(config);
   const store=openStore(config.dbPath);
   try{assertDatabaseMode(store,config.mode);}catch(error){store.close();throw error;}
   const staticHandler=config.production?createStaticHandler(fileURLToPath(new URL('../dist',import.meta.url))):null;
   const modelConfig=process.env.SIGNAL_CODEX_BIN&&process.env.SIGNAL_CODEX_MODEL?{binary:process.env.SIGNAL_CODEX_BIN,model:process.env.SIGNAL_CODEX_MODEL,effort:process.env.SIGNAL_CODEX_EFFORT||'high',timeoutMs:Number(process.env.SIGNAL_CODEX_TIMEOUT_MS||180000)}:null;
-  const service=createService(store,{mode:config.mode,instance:config.instance,modelConfig,backupTask:async()=>{
+  const service=createService(store,{mode:config.mode,instance:config.instance,modelConfig,storageConfig:{databasePath:config.dbPath,backupRoot:resolve(dirname(config.dbPath),'backups')},backupTask:async()=>{
     const result=await createBackup(config.dbPath,resolve(dirname(config.dbPath),'backups'));
     store.status('backup',{state:'ok',receivedAt:result.createdAt,directory:result.directory,sha256:result.sha256});return {ok:true};
   }}),server=http.createServer(createHandler(store,service,{...config,staticHandler}));

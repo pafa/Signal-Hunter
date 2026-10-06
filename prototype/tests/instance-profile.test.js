@@ -44,7 +44,13 @@ test('actual CLI creates a profile, rejects overrides on startup, and service te
  const f=await fixture(),run=(name,args=[],env={})=>spawnSync(process.execPath,[script(name),...args],{cwd:tmpdir(),env:{...process.env,...env},encoding:'utf8'});
  const made=run('create-instance.mjs',[f.database,f.output,'Synthetic instance','4378','4379']);assert.equal(made.status,0,made.stderr);
  const bad=run('start.mjs',['--instance',f.output],{SIGNAL_MODE:'demo'});assert.notEqual(bad.status,0);assert.match(bad.stderr,/冲突/);
- const plist=join(f.dir,'service.plist'),generated=run('service-config.mjs',['macos',plist],{SIGNAL_INSTANCE_PROFILE:f.output});assert.equal(generated.status,0,generated.stderr);const text=readFileSync(plist,'utf8');assert.match(text,/SIGNAL_INSTANCE_PROFILE/);assert.ok(text.includes(f.output));assert.match(text,/<string>research<\/string>/);
+ const modelEnv={SIGNAL_CODEX_BIN:join(f.dir,'fixture-codex'),SIGNAL_CODEX_MODEL:'fixture-model',SIGNAL_CODEX_EFFORT:'medium',SIGNAL_CODEX_TIMEOUT_MS:'123456',SIGNAL_UNRELATED_SECRET:'fixture-only'};
+ for(const platform of ['macos','linux']){
+  const output=join(f.dir,platform==='macos'?'service.plist':'signal-hunter.service'),generated=run('service-config.mjs',[platform,output],{SIGNAL_INSTANCE_PROFILE:f.output,...modelEnv});assert.equal(generated.status,0,generated.stderr);const text=readFileSync(output,'utf8');assert.match(text,/SIGNAL_INSTANCE_PROFILE/);assert.ok(text.includes(f.output));
+  for(const key of ['SIGNAL_CODEX_BIN','SIGNAL_CODEX_MODEL','SIGNAL_CODEX_EFFORT','SIGNAL_CODEX_TIMEOUT_MS']){assert.ok(text.includes(key));assert.ok(text.includes(modelEnv[key]));}
+  assert.ok(!text.includes('SIGNAL_UNRELATED_SECRET'));assert.ok(!text.includes(modelEnv.SIGNAL_UNRELATED_SECRET));assert.equal(statSync(output).mode&0o777,0o600);
+  if(platform==='macos')assert.match(text,/<string>research<\/string>/);
+ }
 });
 test('HTTP exposes dataset identity and rejects stale reads and writes before touching records',async()=>{
  const store=openStore(':memory:'),instance={id:'fixture-instance',label:'Synthetic saved studies',fixed:true,databaseName:'fixture.sqlite'},service=createService(store,{mode:'research',instance}),handler=createHandler(store,service);

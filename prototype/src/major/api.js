@@ -1,9 +1,14 @@
 let instanceId=null,datasetChanged=false;
+let topicsCache=null,cacheEpoch=0,readSequence=0,cacheSequence=0;
 export const currentInstanceId=()=>instanceId||'legacy';
 const changedMessage='数据集已切换或尚未核对，请刷新页面后再继续';
 export async function request(path,method='GET',data){
  if(datasetChanged)throw new Error(changedMessage);
- const headers={...(method==='GET'?{}:{'Content-Type':'application/json'}),...(instanceId?{'X-Signal-Instance':instanceId}:{})};
+ // Mutations invalidate the shared cache; an earlier read may still finish but
+ // must not repopulate it. Each request retains its own revalidation baseline.
+ if(method!=='GET'){topicsCache=null;cacheEpoch++;}
+ const workbench=method==='GET'&&path==='/api/data',cached=workbench?topicsCache:null,epoch=cacheEpoch,sequence=++readSequence;
+ const headers={...(method==='GET'?{}:{'Content-Type':'application/json'}),...(instanceId?{'X-Signal-Instance':instanceId}:{}),...(cached?{'X-Signal-Topics-Hash':cached.hash}:{})};
  const response=await fetch(path,{method,headers,body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(55000)});
  if(!(response.headers.get('content-type')||'').includes('application/json'))throw new Error('本地数据服务未连接，请启动 npm run api');
  const result=await response.json();
@@ -12,6 +17,19 @@ export async function request(path,method='GET',data){
  const identity=result.runtime?.instance?.id||result.instance?.id;
  if(instanceId&&identity&&instanceId!==identity){datasetChanged=true;throw new Error(changedMessage);}
  if(identity)instanceId=identity;
+ if(workbench){
+  const hash=response.headers.get('X-Signal-Topics-Hash'),unchanged=Object.hasOwn(result.research||{},'topicsUnchanged');
+  if(unchanged){
+   if(result.research.topicsUnchanged!==true||!cached||hash!==cached.hash||identity!==cached.identity||Object.hasOwn(result.research,'topics'))throw new Error('研究缓存校验失败，请刷新页面后重试');
+   result.research.topics=structuredClone(cached.topics);
+   delete result.research.topicsUnchanged;
+  }
+  if(epoch===cacheEpoch&&sequence>=cacheSequence){
+   cacheSequence=sequence;
+   topicsCache=typeof identity==='string'&&identity&&/^[a-f0-9]{64}$/.test(hash||'')&&Array.isArray(result.research?.topics)
+    ?(unchanged?cached:{hash,identity,topics:structuredClone(result.research.topics)}):null;
+  }
+ }
  return result;
 }
 export const time=value=>value?/^\d{4}-\d{2}-\d{2}$/.test(value)?`${value}（仅日期）`:new Date(value).toLocaleString('zh-CN',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'未知';

@@ -17,8 +17,9 @@ async function withComponents(run){
   dom.window.HTMLDialogElement.prototype.close=function(){calls.close++;this.open=false;};
   const {createRoot}=await import('react-dom/client');
   const primitives=await vite.ssrLoadModule('/src/major/Primitives.jsx'),{default:DailyChart}=await vite.ssrLoadModule('/src/integrated/DailyChart.jsx');
+  const {default:MarketPanel}=await vite.ssrLoadModule('/src/integrated/MarketPanel.jsx');
   root=createRoot(document.getElementById('root'));
-  await run({...primitives,DailyChart,calls,render:node=>act(()=>root.render(node)),launcher:document.getElementById('launcher')});
+  await run({...primitives,DailyChart,MarketPanel,calls,render:node=>act(()=>root.render(node)),launcher:document.getElementById('launcher')});
  }finally{
   if(root)await act(()=>root.unmount());
   for(const [name,descriptor] of before)if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];
@@ -97,4 +98,19 @@ test('read-only or out-of-range chart inspection does not consume Escape',()=>wi
   assert.equal(event.defaultPrevented,false);
  }
  assert.equal(changes,0);
+}));
+
+
+test('daily detail announces the selected date, value and currency, including missing samples and clearing',()=>withComponents(async({MarketPanel,render})=>{
+ const points=[{date:'2026-09-28',close:10},{date:'2026-09-29',close:null},{date:'2026-09-30',close:12.25}],topic={id:'keyboard-detail',companies:[{symbol:'AMD.US',name:'Synthetic'}],evidence:[]};
+ await render(h(MarketPanel,{topic,watch:[{symbol:'AMD.US',daily:{points,currency:'USD',marketTimezone:'America/New_York',provider:'synthetic-demo'}}],checks:{},onRefresh:()=>{}}));
+ const opener=[...document.querySelectorAll('button')].find(b=>b.textContent.startsWith('放大 / 明细'));opener.focus();await act(()=>opener.click());
+ const dialog=document.querySelector('dialog'),svg=dialog.querySelector('svg'),status=dialog.querySelector('[role="status"]');
+ assert.ok(status,'selected values need textual and live feedback in the detail');assert.equal(svg.getAttribute('aria-describedby'),status.id);assert.equal(status.getAttribute('aria-atomic'),'true');assert.match(status.textContent,/尚未选中日期/);
+ svg.focus();const key=async k=>{const e=new window.KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true});await act(()=>svg.dispatchEvent(e));return e;};
+ await key('Home');assert.match(status.textContent,/2026-09-28.*10.00.*USD/);assert.equal(document.activeElement,svg);
+ await key('ArrowRight');assert.match(status.textContent,/2026-09-29.*无有效日线/);assert.doesNotMatch(status.textContent,/0.00/);
+ await key('End');assert.match(status.textContent,/2026-09-30.*12.25.*USD/);
+ assert.equal((await key('Escape')).defaultPrevented,true);assert.match(status.textContent,/尚未选中日期/);assert.equal(document.querySelector('dialog'),dialog);
+ assert.equal((await key('Escape')).defaultPrevented,false);await act(()=>dialog.dispatchEvent(new window.Event('cancel',{cancelable:true})));assert.equal(document.querySelector('dialog'),null);assert.equal(document.activeElement,opener);
 }));

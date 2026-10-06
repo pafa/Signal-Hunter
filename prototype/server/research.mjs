@@ -1,3 +1,4 @@
+import {researchHistoryPage,researchHistoryDetail} from './research-history.mjs';
 import {validateDossierSections} from '../shared/research-dossier.mjs';
 import {researchReadiness} from '../shared/research-readiness.mjs';
 import {normalizeCompanyRelation} from '../shared/company-directory.mjs';
@@ -9,7 +10,9 @@ import {instrument,hash} from './providers.mjs';
 import {classifyHeadline,evidenceCoverage,RULES_VERSION} from './triage.mjs';
 import {researchSeeds} from './research-seeds.mjs';
 import {validateResearchBrief} from './research-brief.mjs';
-import {openMaterials} from './research-materials.mjs';
+import {openMaterials,immutableMaterialSnapshot} from './research-materials.mjs';
+import {checkMaterialitySources} from './materiality-source-check.mjs';
+import {validateMaterialityReviews} from './materiality-review.mjs';
 import {readPublicArticle,publicSourceUrl} from './source-reader.mjs';
 import {RELATION_KINDS,relatedCandidates} from '../shared/research-links.mjs';
 import {semanticResearchCandidates,freezeSemanticBasis,semanticBasisStatus} from './semantic-research.mjs';
@@ -29,7 +32,18 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
  CREATE TABLE IF NOT EXISTS research_versions(topic_id TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,recorded_at TEXT NOT NULL,reason TEXT NOT NULL,PRIMARY KEY(topic_id,version));
  CREATE TABLE IF NOT EXISTS triage(news_id TEXT NOT NULL,news_revision INTEGER NOT NULL,rules_version TEXT NOT NULL,payload TEXT NOT NULL,processed_at TEXT NOT NULL,PRIMARY KEY(news_id,news_revision,rules_version));`);
  const get=id=>{const r=db.prepare('SELECT payload FROM research_topics WHERE id=?').get(id);if(!r)throw new Error('研究主题不存在');return JSON.parse(r.payload);};
- const withAvailability=topic=>({...topic,evidence:topic.evidence.map(e=>e.newsId?{...e,availableAt:store.revisionAvailableAt(e.newsId,e.newsRevision),availabilityBasis:'新闻修订实际接收时间；历史原字段保留'}:e)});
+ const withAvailability=(topic,lookup=store.revisionAvailableAt)=>({...topic,evidence:topic.evidence.map(e=>e.newsId?{...e,availableAt:lookup(e.newsId,e.newsRevision),availabilityBasis:'新闻修订实际接收时间；历史原字段保留'}:e)});
+ // Resolve each source revision once per read; never retain availability across requests.
+ const availabilityLookup=topics=>{
+  const refs=new Map(),key=(id,version)=>JSON.stringify([id,version]);
+  for(const topic of topics)for(const e of topic.evidence)if(e.newsId)refs.set(key(e.newsId,e.newsRevision),[e.newsId,e.newsRevision]);
+  const entries=[...refs.values()],times=new Map();
+  for(let i=0;i<entries.length;i+=500){
+   const rows=db.prepare(`SELECT ref.value AS reference,r.received_at FROM json_each(?) ref JOIN revisions r ON r.news_id=json_extract(ref.value,'$[0]') AND r.version=json_extract(ref.value,'$[1]')`).all(JSON.stringify(entries.slice(i,i+500)));
+   for(const row of rows)times.set(key(...JSON.parse(row.reference)),row.received_at);
+  }
+  return (id,version)=>times.get(key(id,version))??null;
+ };
  const withSemanticStatus=topic=>!topic.relatedEvents?.some(l=>l.semanticBasis)?topic:{...topic,relatedEvents:topic.relatedEvents.map(l=>l.semanticBasis?{...l,basisStatus:semanticBasisStatus(semanticEvents,topic,get(l.topicId),l.semanticBasis)}:l)};
  const newsEvidence=(n,at)=>({id:`news:${n.id}:v${n.revision}`,newsId:n.id,newsRevision:n.revision,claim:n.title,sourceName:n.publisher,url:n.url,publishedAt:n.publishedAt,datePrecision:n.datePrecision||'instant',firstSeen:n.revisionFirstSeen,articleFirstSeen:n.articleFirstSeen,revisionFirstSeen:n.revisionFirstSeen,availableAt:n.revisionFirstSeen,originKey:n.publisher,verification:'unverified',contentScope:'headline-only',addedAt:at});
  const commit=(topic,reason,expectedVersion,beforeWrite=()=>{})=>{
@@ -55,7 +69,11 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   }
   db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
  };
- const list=()=>db.prepare('SELECT payload FROM research_topics').all().map(r=>{const topic=withAvailability(JSON.parse(r.payload));const prior=db.prepare('SELECT payload FROM research_versions WHERE topic_id=? AND version<? ORDER BY version DESC LIMIT 1').get(topic.id,topic.version);return {...topic,coverage:evidenceCoverage(topic),changeSummary:researchDelta(topic,prior?JSON.parse(prior.payload):null)};}).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||(a.type==='cluster'?0:1)-(b.type==='cluster'?0:1)||a.id.localeCompare(b.id));
+ const list=()=>{
+  const rows=db.prepare(`SELECT t.payload,p.payload AS prior FROM research_topics t LEFT JOIN research_versions p ON p.topic_id=t.id AND p.version=(SELECT MAX(v.version) FROM research_versions v WHERE v.topic_id=t.id AND v.version<json_extract(t.payload,'$.version'))`).all();
+  const topics=rows.map(r=>JSON.parse(r.payload)),lookup=availabilityLookup(topics);
+  return topics.map((raw,i)=>{const topic=withAvailability(raw,lookup);return {...topic,coverage:evidenceCoverage(topic),changeSummary:researchDelta(topic,rows[i].prior?JSON.parse(rows[i].prior):null)};}).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||(a.type==='cluster'?0:1)-(b.type==='cluster'?0:1)||a.id.localeCompare(b.id));
+ };
  const linkMaterial=(id,data,input,method,beforeWrite=()=>{})=>{
   const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，材料未关联；请刷新后重试');
   if(!enums.stance.includes(data.stance)||!enums.family.includes(data.family)||!topic.chain.some(s=>s.id===data.step))throw new Error('材料作用、类别或因果环节无效');
@@ -69,13 +87,16 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   process,get,list,screenings,
   directorySelection:text=>securityDirectory?.selection(text)||null,
   newsItem(id){const news=store.newsById(id);if(!news)throw new Error('新闻不存在');return {...news,triage:classifyHeadline(news)};},
-  materialList(id){return materials.list(get(id));},
+  materialList(id,options){return materials.list(get(id),options);},
+  materialDetail(id,materialId){return materials.detail(get(id),materialId);},
   packet(id){return materials.packet(withSemanticStatus(withAvailability(get(id))));},
   adoptModelDraft(id,data,candidate,beforeWrite=()=>{}){
    const topic=get(id),packet=materials.packet(withSemanticStatus(withAvailability(topic)));
    if(data.version!==topic.version||candidate?.trace?.inputHash!==packet.inputHash||candidate?.trace?.topicId!==id||candidate?.trace?.topicVersion!==topic.version||candidate?.status!=='candidate')throw new Error('模型候选与当前研究不匹配，请重新生成');
    const sections=validateDossierSections(candidate.sections,topic.evidence);
+   const reviews=validateMaterialityReviews(candidate.materialityReviews,packet);
    topic.dossier={sections,reviewStatus:'draft',revisionReason:'本人采纳 Codex 候选为待复核草稿',preparedBy:'Codex 模型候选 · 本人采纳，尚待复核',preparedAt:clock(),basedOnResearchVersion:topic.version+1,sourceModelRun:{id:data.runId,...candidate.trace},missingEvidence:candidate.missingEvidence};
+   if(reviews?.length)topic.dossier.materialityReview={...packet.input.materialityReview,checks:reviews,topicVersion:topic.version,inputHash:packet.inputHash};
    topic.researchUpdatedAt=clock();
    return commit(topic,'采纳模型研判草稿：未标记完成、未提交交易',data.version,()=>{
     if(materials.packet(withSemanticStatus(withAvailability(get(id)))).inputHash!==candidate.trace.inputHash)throw new Error('研究或材料已变化；此候选保留在历史中，请重新生成');
@@ -200,7 +221,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
     const d=data.dossier;if(!d||Object.keys(d).some(k=>!['sections','reviewStatus','revisionReason'].includes(k))||!['draft','complete'].includes(d.reviewStatus))throw new Error('研判修改字段无效');
     const sections=validateDossierSections(d.sections,topic.evidence,{allowIncomplete:d.reviewStatus==='draft'}),reason=assertText(d.revisionReason,'研判修订原因',1000);
     if(d.reviewStatus==='complete'&&(researchReadiness(topic).gaps.length||sections.some(s=>!s.sourceIds.length)))throw new Error('完成研判前需补齐研究记录并为每章关联来源；未知事项须说明核查方法');
-    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1,...(topic.dossier?.sourceModelRun?{sourceModelRun:topic.dossier.sourceModelRun}:{})};topic.researchUpdatedAt=clock();
+    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1,...(topic.dossier?.sourceModelRun?{sourceModelRun:topic.dossier.sourceModelRun}:{}),...(topic.dossier?.materialityReview?{materialityReview:topic.dossier.materialityReview}:{})};topic.researchUpdatedAt=clock();
    }
    return commit(topic,data.status?'主题归档状态变更':data.dossier?'保存详细研判与人工完成状态（未提交交易）':data.assessment?'保存消息状态、概率与影响评估（未提交交易）':'保存交易假设（未提交交易申请）',data.version);
   },
@@ -227,6 +248,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    if(index>=0&&!data.replace)throw new Error('公司已关联；请选择修订关系，避免静默覆盖');
    if(index<0&&data.replace)throw new Error('待修订的公司关系不存在');
    if(index<0&&topic.companies.length>=20)throw new Error('一个主题最多关联 20 个标的');
+   if(data.materiality!==undefined)company.materiality=checkMaterialitySources(company.materiality,ref=>immutableMaterialSnapshot(db,ref));
    if(entityResolution)company.entityResolution=structuredClone(entityResolution);
    else if(index>=0&&topic.companies[index].entityResolution)company.entityResolution=structuredClone(topic.companies[index].entityResolution);
    if(index>=0)topic.companies[index]=company;else topic.companies.push(company);
@@ -264,6 +286,8 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    e.verification=data.verdict==='confirmed'?'reviewed':'unverified';e.stance=data.stance;e.review={at:clock(),by:'user',note};
    return commit(topic,'人工核验 / 修正证据；旧核验保留在版本记录',data.version);
   },
-  history(id){get(id);return db.prepare('SELECT * FROM research_versions WHERE topic_id=? ORDER BY version DESC').all(id).map(r=>({version:r.version,recordedAt:r.recorded_at,reason:r.reason,topic:withAvailability(JSON.parse(r.payload))}));},
+  historyPage(id,params){get(id);return researchHistoryPage(db,id,params);},
+  historyDetail(id,version){get(id);const result=researchHistoryDetail(db,id,version);return {...result,topic:withAvailability(result.topic)};},
+  history(id){get(id);const rows=db.prepare('SELECT * FROM research_versions WHERE topic_id=? ORDER BY version DESC').all(id),topics=rows.map(r=>JSON.parse(r.payload)),lookup=availabilityLookup(topics);return rows.map((r,i)=>({version:r.version,recordedAt:r.recorded_at,reason:r.reason,topic:withAvailability(topics[i],lookup)}));},
  };
 }

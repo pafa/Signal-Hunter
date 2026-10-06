@@ -64,6 +64,18 @@ test('failed ledger commit rolls shared liquidity and cash back together',()=>{
  }finally{f.close();}
 });
 
+test('two pools share capacity across equivalent quote and FX time spellings, while changed prices stay blocked',()=>{
+ const f=fixture({profiles:false});try{
+  f.quote('AAPL.US');for(const a of ['aggressive','steady']){const o=f.propose(a);f.approve(a,o.id);}
+  f.tick();const q=f.quote('AAPL.US',{availableBuy:150});f.accounts.aggressive.process();
+  q.asOf='2026-10-02T22:00:01+08:00';q.receivedAt='2026-10-02T14:00:01Z';q.fx.asOf=q.asOf;q.fx.receivedAt=q.receivedAt;
+  const b=f.accounts.steady.process();assert.equal(b.orders[0].filledQty,50);assert.equal(b.fills[0].liquidityVersion,2);
+  q.asOf='2026-10-02T10:00:01-04:00';assert.equal(f.accounts.steady.process().fills.length,1);
+  q.ask='100.01';const changed=f.accounts.steady.process();assert.equal(changed.fills.length,1);assert.match(changed.orders[0].waitReason,/内容发生变化/);
+  assert.equal(f.accounts.aggressive.snapshot().fills[0].qty+b.fills[0].qty,150);
+ }finally{f.close();}
+});
+
 test('price drawdown triggers exit review without an automatic sell or bypass of sellability',()=>{
  const f=fixture();try{
   f.limitUp();const o=f.propose('aggressive');f.approve('aggressive',o.id);f.tick();f.limitUp({sellableAt:'2026-10-03T14:00:00Z'});f.accounts.aggressive.process();

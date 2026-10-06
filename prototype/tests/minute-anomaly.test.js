@@ -15,8 +15,8 @@ const quote=()=>({...parseYahooMinutes(payload(),instrument('AAPL.US')),received
 const definition=c=>validateObservationDefinition({label:'Synthetic minute anomaly',join:'all',conditions:[c]},topic);
 const evaluate=(q=quote(),c=condition(),extra={})=>evaluateObservation({definition:definition(c),binding:{topicVersion:1,counterevidence:[]}},topic,{at,quote:()=>q,check:()=>({state:'ok'}),...extra});
 const stats=r=>r.results[0].input.statistical;
-test('minute anomaly requires explicit associated security and bounded return-only parameters',()=>{
- for(const patch of [{metric:'volume'},{windowSize:4},{windowSize:121},{windowSize:'5'},{zThreshold:0},{zThreshold:21},{direction:'up'},{symbol:'MSFT.US'},{interval:'1d'},{unexpected:true}])assert.throws(()=>definition(condition(patch)));
+test('minute anomaly requires explicit associated security and bounded metric parameters',()=>{
+ for(const patch of [{metric:'unknown'},{windowSize:4},{windowSize:121},{windowSize:'5'},{zThreshold:0},{zThreshold:21},{direction:'up'},{symbol:'MSFT.US'},{interval:'1d'},{unexpected:true}])assert.throws(()=>definition(condition(patch)));
  assert.equal(definition(condition()).conditions[0].interval,'1m');assert.equal(definition(condition()).conditions[0].currency,'USD');
 });
 test('minute returns exclude current sample and candidate from baseline with n-1 deviation',()=>{

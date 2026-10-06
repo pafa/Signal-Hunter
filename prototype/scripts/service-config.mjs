@@ -9,6 +9,9 @@ const cwd=fileURLToPath(new URL('../',import.meta.url)),runner=resolve(cwd,'scri
 const xml=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const label='org.signal-hunter.'+mode+(config.instance.fixed?'.'+config.instance.id.slice(0,8):'');
 const env={...(process.env.SIGNAL_INSTANCE_PROFILE?{SIGNAL_INSTANCE_PROFILE:process.env.SIGNAL_INSTANCE_PROFILE}:{}),SIGNAL_MODE:mode,SIGNAL_SERVE_STATIC:'1',SIGNAL_DB_PATH:config.dbPath,SIGNAL_FRONTEND_PORT:String(config.frontendPort),SIGNAL_API_PORT:String(config.apiPort)};
+// Service managers do not inherit the foreground launcher's model settings.
+// Preserve only explicit Codex configuration, never the whole process environment.
+for(const key of ['SIGNAL_CODEX_BIN','SIGNAL_CODEX_MODEL','SIGNAL_CODEX_EFFORT','SIGNAL_CODEX_TIMEOUT_MS'])if(process.env[key]!==undefined)env[key]=process.env[key];
 const quote=s=>'"'+String(s).replaceAll('\\','\\\\').replaceAll('"','\\"').replaceAll('%','%%')+'"';
 const text=platform==='macos'?`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {openStore} from '../server/store.mjs';
 import {openResearch} from '../server/research.mjs';
 import {openPaper} from '../server/paper.mjs';
-import {generateCodexDraft,validatePacket,validateCodexDraft,codexEnvironment,codexPrompt,digest,CodexResearchError} from '../server/codex-research.mjs';
+import {generateCodexDraft,validatePacket,validateCodexDraft,codexEnvironment,codexPrompt,digest,CodexResearchError,codexDraftSchema,CODEX_DRAFT_SCHEMA,CODEX_SCHEMA_VERSION} from '../server/codex-research.mjs';
 
 const exec=promisify(execFile),ids=['facts','materiality','companies','scenarios','conditions'];
 function fixture(){
@@ -22,7 +22,7 @@ function draft(packet){return {sections:ids.map(id=>({id,title:id,paragraphs:['�
 async function fakeCli(){
  const dir=await mkdtemp(join(tmpdir(),'signal-codex-test-')),binary=join(dir,'codex');
  await writeFile(binary,`#!/usr/bin/env node
-import fs from 'node:fs';
+import fs from 'node:fs';import {createHash} from 'node:crypto';
 const args=process.argv.slice(2);
 if(args.includes('--version')){console.log('codex-cli 0.159.0-test');process.exit(0);}
 const value=k=>args[args.indexOf(k)+1],model=value('--model');
@@ -38,7 +38,7 @@ else if(model==='oversized'){process.stdout.write('x'.repeat(2100000));setInterv
 else {
  const sourceId=packet.input.evidence[0].id;
  const output={sections:['facts','materiality','companies','scenarios','conditions'].map(id=>({id,title:id,paragraphs:['仅摘录，提议未完成；规模未知。'],sourceIds:[model==='bad-citation'?'invented':sourceId]})),missingEvidence:['补全原文']};
- if(model==='echo')output.missingEvidence=[JSON.stringify({args,env:Object.keys(process.env).filter(k=>k.startsWith('CODEX_')||k.startsWith('OPENAI_')),cwd:process.cwd()})];
+ if(model==='echo')output.missingEvidence=[JSON.stringify({schemaHash:createHash('sha256').update(fs.readFileSync(value('--output-schema'))).digest('hex'),args,env:Object.keys(process.env).filter(k=>k.startsWith('CODEX_')||k.startsWith('OPENAI_')),cwd:process.cwd()})];
  fs.writeFileSync(value('--output-last-message'),model==='invalid-json'?'not JSON':JSON.stringify(output));
  if(model==='incomplete')process.exit(0);
  event({type:'item.completed',item:{type:'agent_message',text:JSON.stringify(output)}});
@@ -68,7 +68,7 @@ test('actual child protocol produces versioned candidate without changing resear
   const result=await generateCodexDraft(f.packet,{binary:cli.binary,model:'echo',env:{...process.env,CODEX_APP_TOOLS_PIPE_PATH:'hidden',OPENAI_API_KEY:'hidden'},timeoutMs:5000});
   assert.equal(result.status,'candidate');assert.equal(result.reviewStatus,'unreviewed');assert.equal(result.trace.cliVersion,'codex-cli 0.159.0-test');assert.equal(result.trace.model,'echo');
   assert.equal(result.trace.inputHash,f.packet.inputHash);assert.equal(result.trace.outputHash,digest(result.rawOutput));assert.equal(result.trace.promptHash,digest(codexPrompt(f.packet)));assert.deepEqual(result.trace.usage,{input_tokens:25,output_tokens:10});
-  const observed=JSON.parse(result.missingEvidence[0]);assert.ok(observed.args.includes('--ignore-user-config'));assert.ok(observed.args.includes('--ephemeral'));assert.ok(observed.args.includes('read-only'));assert.ok(observed.args.includes('web_search="disabled"'));assert.ok(!observed.env.includes('CODEX_APP_TOOLS_PIPE_PATH'));assert.ok(!observed.env.includes('OPENAI_API_KEY'));
+  const observed=JSON.parse(result.missingEvidence[0]);assert.equal(observed.schemaHash,digest(codexDraftSchema(f.packet)));assert.equal(result.trace.schemaHash,observed.schemaHash);assert.equal(result.trace.schemaVersion,CODEX_SCHEMA_VERSION);assert.ok(observed.args.includes('--ignore-user-config'));assert.ok(observed.args.includes('--ephemeral'));assert.ok(observed.args.includes('read-only'));assert.ok(observed.args.includes('web_search="disabled"'));assert.ok(!observed.env.includes('CODEX_APP_TOOLS_PIPE_PATH'));assert.ok(!observed.env.includes('OPENAI_API_KEY'));
   assert.notEqual(observed.cwd,process.cwd());await assert.rejects(readdir(observed.cwd),e=>e.code==='ENOENT');
   assert.deepEqual({topic:f.research.get(f.topic.id),book:f.paper.snapshot(),materials:f.research.materialList(f.topic.id)},before);
  }finally{f.store.close();await cli.cleanup();}
@@ -117,5 +117,18 @@ test('inline citation typos are rejected across prose fields while valid old ref
    const d=draft(f.packet);mutate(d);assert.throws(()=>validateCodexDraft(d,f.packet),e=>e.code==='output');
   }
   const d=draft(f.packet);d.missingEvidence=[`核查 ${source}`];assert.deepEqual(validateCodexDraft(d,f.packet),d);
+ }finally{f.store.close();}
+});
+
+test('per-packet schema limits exact evidence IDs without mutating input or the legacy template',()=>{
+ const f=fixture();try{
+  const before=JSON.stringify(f.packet),template=JSON.stringify(CODEX_DRAFT_SCHEMA),schema=codexDraftSchema(f.packet),id=f.packet.input.evidence[0].id;
+  assert.deepEqual(schema.properties.sections.items.properties.sourceIds.items.enum,[id]);
+  assert.deepEqual(schema.properties.materialityReviews.items.properties.citations.items.properties.evidenceId.enum,[id]);
+  const other=structuredClone(f.packet);other.input.evidence[0].id='material:another';other.inputHash=digest(other.input);
+  assert.notEqual(digest(schema),digest(codexDraftSchema(other)));assert.deepEqual(schema.properties.sections.items.properties.sourceIds.items.enum,[id]);
+  const empty=structuredClone(f.packet);empty.input.evidence=[];empty.inputHash=digest(empty.input);const e=codexDraftSchema(empty);
+  assert.equal(e.properties.sections.items.properties.sourceIds.maxItems,0);assert.equal(e.properties.materialityReviews.items.properties.citations.maxItems,0);
+  assert.equal(JSON.stringify(e).includes('"enum":[]'),false);assert.equal(JSON.stringify(f.packet),before);assert.equal(JSON.stringify(CODEX_DRAFT_SCHEMA),template);
  }finally{f.store.close();}
 });

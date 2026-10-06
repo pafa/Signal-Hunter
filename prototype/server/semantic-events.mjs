@@ -40,7 +40,7 @@ export function validateComparison(output,packet,{requireTimeEvidence=false}={})
  }
  return structuredClone(output);
 }
-function validateComparisonCandidate(candidate,packet,model,{requireTimeEvidence=false}={}){
+export function validateComparisonCandidate(candidate,packet,model,{requireTimeEvidence=false}={}){
  if(![SEMANTIC_VERSION,MATERIAL_SEMANTIC_VERSION,EVENT_SEMANTIC_VERSION].includes(packet?.schema)||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>packetLimit(packet))throw new CodexResearchError('packet');
  const comparison=validateComparison(candidate?.comparison,packet,{requireTimeEvidence});
  if(candidate.status!=='candidate'||candidate.reviewStatus!=='unreviewed'||candidate.trace?.model!==model||candidate.trace?.inputHash!==packet.inputHash||typeof candidate.rawOutput!=='string'||digest(candidate.rawOutput)!==candidate.trace.outputHash)throw new CodexResearchError('output');

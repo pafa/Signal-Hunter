@@ -1,5 +1,5 @@
-import {publicationProfile,profileCandidates,matchesPageGeneration} from './publication-profiles.mjs';
-const schema='publication-date-2',limit=20;
+import {datePublicationProfile,profileCandidates,profileDateText,matchesPageGeneration} from './publication-profiles.mjs';
+const schema='publication-date-4',limit=20;
 const months=['january','february','march','april','may','june','july','august','september','october','november','december'];
 const day=(year,month,date)=>{const value=`${year}-${String(month).padStart(2,'0')}-${String(date).padStart(2,'0')}`;try{return new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value?value:null;}catch{return null;}};
 // Never ask Date.parse to guess the machine's timezone, date order or missing year.
@@ -12,18 +12,23 @@ export function parsePublicationDate(raw){
  if((m=/^([A-Za-z]+) (\d{1,2}), (\d{4})$/.exec(s))){const month=months.indexOf(m[1].toLowerCase())+1;return month?day(m[3],month,m[2]):null;}
  return null;
 }
-export function resolvePublicationDate(candidates,truncated=false){
+export function resolvePublicationDate(candidates,truncated=false,{profile='generic',format=schema}={}){
  if(truncated)return {status:'overflow',publishedAt:null};
  if(!candidates.length)return {status:'missing',publishedAt:null};
- const values=candidates.map(c=>parsePublicationDate(c.raw));
+ const unzoned=c=>c.source==='jsonld:datePublished'&&/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?$/.test(c.raw.trim());
+ const calendarOnly=format===schema&&['microsoft-source-1','microsoft-blog-1'].includes(profile)&&candidates.some(unzoned);
+ if(calendarOnly&&!candidates.some(c=>c.source==='microsoft:visible-date'))return {status:'invalid',publishedAt:null};
+ // The verified page heading corroborates only a calendar day. Appending Z
+ // here validates components, not the missing timezone; no instant is returned.
+ const values=candidates.map(c=>calendarOnly&&unzoned(c)?(parsePublicationDate(c.raw.trim()+'Z')?c.raw.trim().slice(0,10):null):parsePublicationDate(profileDateText(c,profile)));
  if(values.some(v=>v===null))return {status:'invalid',publishedAt:null};
  const days=values.filter(v=>v.length===10),instants=values.filter(v=>v.length>10);
  if(new Set(days).size>1||new Set(instants.map(v=>Date.parse(v))).size>1||days.length&&instants.some(v=>v.slice(0,10)!==days[0]))return {status:'conflict',publishedAt:null};
- return {status:'known',publishedAt:instants[0]||days[0]};
+ return {status:'known',publishedAt:calendarOnly?days[0]:instants[0]||days[0]};
 }
 const samePage=(value,url)=>{try{const a=new URL(value,url),b=new URL(url);a.hash='';b.hash='';return a.href===b.href;}catch{return false;}};
 export function collectPublicationDates(document,url){
- const candidates=[],excluded=[],profile=publicationProfile(url);let truncated=false;
+ const candidates=[],excluded=[],profile=datePublicationProfile(url);let truncated=false;
  const add=(source,raw)=>{if(typeof raw!=='string')return;if(candidates.length+excluded.length>=limit){truncated=true;return;}if(raw.length>200){truncated=true;return;}candidates.push({source,raw:raw.trim()});};
  const metaNames=new Set(['article:published_time','datepublished','pubdate','publishdate','publication_date','dc.date.issued','dcterms.issued','parsely-pub-date']);
  const generated=profile==='csrc-article-1'?[...document.querySelectorAll('meta[name]')].filter(n=>n.getAttribute('name').toLowerCase()==='others').map(n=>(n.getAttribute('content')||'').trim()):[];
@@ -54,18 +59,24 @@ export function collectPublicationDates(document,url){
 }
 export function publicationDateResult(collected){
  const candidates=[...collected.candidates];
- const resolved=resolvePublicationDate(candidates,collected.truncated);
+ const resolved=resolvePublicationDate(candidates,collected.truncated,{profile:collected.profile});
  return {publishedAt:resolved.publishedAt,publicationDateEvidence:{schema,status:resolved.status,candidates,truncated:collected.truncated,profile:collected.profile,excluded:collected.excluded}};
 }
 export function validatePublicationEvidence(value,publishedAt,url){
  const fail=()=>{throw new Error('来源日期读取依据无效');};
  const legacy=value?.schema==='publication-date-1';
- if(!value||Array.isArray(value)||Object.keys(value).sort().join(',')!==(legacy?'candidates,schema,status,truncated':'candidates,excluded,profile,schema,status,truncated')||!['publication-date-1',schema].includes(value.schema)||typeof value.truncated!=='boolean'||!Array.isArray(value.candidates)||value.candidates.length>limit)fail();
+ if(!value||Array.isArray(value)||Object.keys(value).sort().join(',')!==(legacy?'candidates,schema,status,truncated':'candidates,excluded,profile,schema,status,truncated')||!['publication-date-1','publication-date-2','publication-date-3',schema].includes(value.schema)||typeof value.truncated!=='boolean'||!Array.isArray(value.candidates)||value.candidates.length>limit)fail();
  if(!legacy){
-  if(value.profile!==publicationProfile(url)||!Array.isArray(value.excluded)||value.excluded.length+value.candidates.length>limit)fail();
+  if(value.profile!==datePublicationProfile(url,value.schema)||!Array.isArray(value.excluded)||value.excluded.length+value.candidates.length>limit)fail();
   for(const x of value.excluded)if(!x||Object.keys(x).sort().join(',')!=='context,raw,reason,source'||value.profile!=='csrc-article-1'||x.source!=='meta:pubdate'||x.reason!=='page-generation'||typeof x.raw!=='string'||x.raw.length>200||typeof x.context!=='string'||x.context.length>200||!matchesPageGeneration(x.raw,x.context))fail();
  }
  const candidates=value.candidates.map(c=>{if(!c||Array.isArray(c)||Object.keys(c).sort().join(',')!=='raw,source'||typeof c.source!=='string'||!c.source.trim()||c.source.length>160||typeof c.raw!=='string'||c.raw.length>200)fail();return {source:c.source,raw:c.raw};});
- const resolved=resolvePublicationDate(candidates,value.truncated);if(resolved.status!==value.status||resolved.publishedAt!==publishedAt)fail();
+ const profiled=['publication-date-3',schema].includes(value.schema);
+ if(profiled)for(const c of candidates){
+  if(c.source.startsWith('adobe:')&&(value.profile!=='adobe-news-1'||!['adobe:heading-date','adobe:card-date'].includes(c.source)))fail();
+  if(c.source.startsWith('amgen:')&&(value.profile!=='amgen-release-1'||c.source!=='amgen:wire-date'))fail();
+  if(value.schema===schema&&c.source.startsWith('microsoft:')&&(!['microsoft-source-1','microsoft-blog-1'].includes(value.profile)||!['microsoft:visible-date','microsoft:date-attribute'].includes(c.source)||c.source==='microsoft:date-attribute'&&value.profile!=='microsoft-blog-1'))fail();
+ }
+ const resolved=resolvePublicationDate(candidates,value.truncated,{profile:profiled?value.profile:'generic',format:value.schema});if(resolved.status!==value.status||resolved.publishedAt!==publishedAt)fail();
  return {schema:value.schema,status:value.status,candidates,truncated:value.truncated,...(!legacy?{profile:value.profile,excluded:value.excluded.map(x=>({...x}))}:{})};
 }

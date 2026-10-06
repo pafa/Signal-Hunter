@@ -149,8 +149,9 @@ for(const side of ['buy','sell'])for(const phase of ['during','after']){
    const otherBefore=f.accounts.steady.snapshot(),other=f.accounts.steady.process();
    assert.equal(other.orders.at(-1).filledQty,0,'second account cannot consume the committed quote again');
    for(const key of ['cashCents','feesCents','fills','lots','unsettled'])assert.deepEqual(other[key],otherBefore[key]);
-   const liquidity=f.store.db.prepare('SELECT payload FROM market_sim_liquidity').all().map(r=>JSON.parse(r.payload));
-   assert.equal(liquidity.find(r=>r.fingerprint===createHash('sha256').update(JSON.stringify(quote)).digest('hex'))[side],40);
+   const key=createHash('sha256').update(JSON.stringify({version:2,symbol:quote.symbol,source:quote.source,at:Date.parse(quote.asOf)})).digest('hex');
+   const liquidity=JSON.parse(f.store.db.prepare('SELECT payload FROM market_sim_liquidity WHERE key=?').get(key).payload);
+   assert.equal(liquidity.version,2);assert.equal(liquidity[side],40);
    f.accounts.aggressive.process();const stable=inventoryDatabase(path);f.accounts.aggressive.process();f.accounts.steady.process();
    assert.equal(compareInventories(stable,inventoryDatabase(path)).passed,true,'repeated checks append no duplicate fills or events');
    const events=f.store.db.prepare('SELECT * FROM market_sim_events_aggressive ORDER BY version').all();

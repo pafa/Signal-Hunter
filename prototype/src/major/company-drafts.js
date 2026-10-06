@@ -3,8 +3,15 @@ const validForm=form=>form&&typeof form.symbol==='string'&&typeof form.note==='s
 export const companyDraftKey=(topic,instance,symbol)=>`signal-hunter:company-draft:v1:${instance}:${topic.id}:${topic.createdAt||''}:${symbol||'new'}`;
 export function readCompanyDraft(key,storage){
  if(memory.has(key))return memory.get(key);
- try{const value=JSON.parse(storage?.getItem(key)||'null');if(value&&Number.isSafeInteger(value.base)&&value.base>0&&validForm(value.form)&&typeof value.editing==='boolean'){memory.set(key,value);return value;}}catch{}
+ try{const value=JSON.parse(storage?.getItem(key)||'null');if(value&&Number.isSafeInteger(value.base)&&value.base>0&&validForm(value.form)&&typeof value.editing==='boolean'&&(value.removeReason===undefined||typeof value.removeReason==='string')){memory.set(key,value);return value;}}catch{}
  return null;
 }
 export function writeCompanyDraft(key,value,storage){memory.set(key,value);try{storage.setItem(key,JSON.stringify(value));return true;}catch{return false;}}
 export function clearCompanyDraft(key,storage){memory.delete(key);try{storage?.removeItem(key);}catch{}}
+
+// The cached immutable snapshot identifies the submitted draft across remounts.
+// A later edit or explicit discard must survive an older request's reply.
+export function acknowledgeCompanyDraft(key,submitted,storage){
+ if(readCompanyDraft(key,storage)!==submitted)return false;
+ clearCompanyDraft(key,storage);return true;
+}

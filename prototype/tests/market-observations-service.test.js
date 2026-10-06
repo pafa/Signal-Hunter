@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import React from 'react';
+import React,{act} from 'react';
+import {JSDOM} from 'jsdom';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createServer} from 'vite';
 import {fileURLToPath} from 'node:url';
@@ -22,7 +23,7 @@ test('paused or recovery-gated observation task cannot consume market risks',asy
 test('market observation details render safe frozen inputs, account identity, unknown status and no phantom research version',async()=>{
  const f=marketReviewFixture(),vite=await createServer({configFile:false,root:fileURLToPath(new URL('../',import.meta.url)),server:{middlewareMode:true,watch:null},appType:'custom'});
  try{f.set({missing:true});await f.service.runOperation('observations');const {default:Inbox}=await vite.ssrLoadModule('/src/integrated/ObservationInbox.jsx');
- const html=renderToStaticMarkup(React.createElement(Inbox,{data:f.service.snapshot()}));assert.match(html,/双策略持仓巡检状态/);assert.match(html,/稳健长期池/);assert.match(html,/无法判断/);assert.match(html,/查看策略池巡检依据/);assert.doesNotMatch(html,/vnull/);assert.match(html,/不执行交易/);
+ const html=await renderLoadedInbox(Inbox,f.service.snapshot(),f.service.observations.page());assert.match(html,/双策略持仓巡检状态/);assert.match(html,/稳健长期池/);assert.match(html,/无法判断/);assert.match(html,/查看策略池巡检依据/);assert.doesNotMatch(html,/vnull/);assert.match(html,/不执行交易/);
  const {default:Details}=await vite.ssrLoadModule('/src/integrated/MarketObservationDetails.jsx');const input=f.service.observations.snapshot().items[0].input;input.evidence=[{id:'escape',claim:'<script>bad</script>',verification:'unverified'}];const safe=renderToStaticMarkup(React.createElement(Details,{input}));assert.match(safe,/&lt;script&gt;/);assert.doesNotMatch(safe,/<script>/);
  }finally{await vite.close();await f.close();}
 });
@@ -42,3 +43,19 @@ test('approval fingerprints bind observed peaks even when quotes and ledger vers
  assert.throws(()=>sim.decide(order.id,{version:sim.snapshot().version,requestId:crypto.randomUUID(),action:'approve',note:'Stale synthetic review',confirmSimulation:true,fingerprint:before.fingerprint}));assert.equal(sim.snapshot().orders.at(-1).status,'pending');
  }finally{await f.close();}
 });
+test('service connects cross-theme issuer review to actual paper fills and renders frozen overlap safely',async()=>{
+ const f=marketReviewFixture(),vite=await createServer({configFile:false,root:fileURLToPath(new URL('../',import.meta.url)),server:{middlewareMode:true,watch:null},appType:'custom'});
+ try{let topic=f.service.research.create({title:'<script>虚构第二主题</script>',summary:'Synthetic overlap'});topic=f.service.research.addCompany(topic.id,{version:topic.version,symbol:'AAPL.US',note:'Synthetic'});
+ const sim=f.service.marketSimulations.steady,command=extra=>({requestId:crypto.randomUUID(),version:sim.snapshot().version,...extra});
+ sim.propose(command({order:{topicId:topic.id,topicVersion:topic.version,symbol:'AAPL.US',side:'buy',qty:1,limitPrice:'101',budgetUSD:110,expiresAt:'2026-10-02T14:10:00Z',holdUntil:'2026-10-03T14:00:00Z',thesis:'Synthetic',trigger:'Synthetic',invalidation:'Synthetic'}}));const order=sim.snapshot().orders.at(-1);sim.decide(order.id,command({action:'approve',note:'Synthetic only',confirmSimulation:true,fingerprint:sim.review(order.id).fingerprint}));
+ const before=accountRows(f);await f.service.runOperation('observations');const item=f.service.observations.snapshot().items.find(i=>i.kind==='cross-theme-review');assert(item);assert.equal(item.input.metrics.buyOrderCount,1);assert.equal(item.input.metrics.lotCount,1);assert.deepEqual(accountRows(f),before);
+ const {default:Details}=await vite.ssrLoadModule('/src/integrated/CrossThemeObservation.jsx');const html=renderToStaticMarkup(React.createElement(Details,{input:item.input}));assert.match(html,/已批买单剩余数量/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>/);assert.match(html,/不调整仓位或执行交易/);
+ f.set({at:'2026-10-02T14:00:04Z'});sim.process();await f.service.runOperation('observations');const newer=f.service.observations.snapshot().items.filter(i=>i.kind==='cross-theme-review');assert.equal(newer.length,2);assert(newer.some(i=>i.input.metrics.lotCount===2&&i.input.metrics.buyOrderCount===0));assert.equal(item.input.metrics.buyOrderCount,1);
+ }finally{await vite.close();await f.close();}
+});
+
+async function renderLoadedInbox(Inbox,data,page){
+ const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/'}),names=['window','document','HTMLElement','fetch','IS_REACT_ACT_ENVIRONMENT'],before=new Map(names.map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)]));let root;
+ try{Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true,fetch:async path=>{assert.match(path,/^\/api\/observations\?/);return new Response(JSON.stringify(page),{headers:{'content-type':'application/json'}});}});dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};const {createRoot}=await import('react-dom/client');root=createRoot(document.getElementById('root'));await act(async()=>root.render(React.createElement(Inbox,{data})));return document.body.innerHTML;
+ }finally{if(root)await act(()=>root.unmount());for(const [k,d] of before)if(d)Object.defineProperty(globalThis,k,d);else delete globalThis[k];dom.window.close();}
+}

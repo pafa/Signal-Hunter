@@ -1,7 +1,7 @@
 import {publicSourceUrl} from './public-source-url.mjs';
 import {publicationProfile} from './publication-profiles.mjs';
-export const ARTICLE_SCOPE_VERSION='article-reading-scope-1';
-export const ARTICLE_SCOPE_INSTRUCTIONS='网页材料的extractionEvidence记录提取范围。attachments仅为网页中识别的附件入口，全部尚未读取；文件名、链接和格式提示不证明附件内容，不得补写未提供的附件、表格或法律条文。缺少关键附件时列入missingEvidence。没有附件记录、列表为空或旧材料缺少此字段，都不证明没有附件或已读完整来源。移除界面控件不等于全文完整性已验证。\n';
+export const ARTICLE_SCOPE_VERSION='article-reading-scope-2';
+export const ARTICLE_SCOPE_INSTRUCTIONS='网页材料的extractionEvidence记录提取范围。attachments仅为网页中识别的附件入口，全部尚未读取；文件名、链接和格式提示不证明附件内容，不得补写未提供的附件、表格或法律条文。缺少关键附件时列入missingEvidence。没有附件记录、列表为空或旧材料缺少此字段，都不证明没有附件或已读完整来源。移除界面控件不等于全文完整性已验证。public-article-5材料可能含HTML table块（html-table-text/1），r/c为提取器添加的1起始行列坐标，冒号表示合并单元格覆盖范围；单元格原文本用JSON字符串转义，空单元格虽省略文本但保留占位。按同列及覆盖范围核对表头、年份、币种和单位，不能把坐标、合并格、空格或嵌套表当作财务数值、零或新证据；不得把季度与年度相邻列混用。该结构来自保留的HTML，不证明CSS布局、会计口径或全文完整，旧材料扁平表格不补造列对应。\n';
 const schema='article-extraction-1',limit=30;
 const formats=new Set(['pdf','doc','docx','xls','xlsx','csv','ppt','pptx','txt','zip','unknown']);
 const formatHint=(href,label)=>{let path;try{path=decodeURIComponent(new URL(href).pathname);}catch{path=href;}return /\.(pdf|docx?|xlsx?|csv|pptx?|txt|zip)$/i.exec(path)?.[1].toLowerCase()||/\.(pdf|docx?|xlsx?|csv|pptx?|txt|zip)\s*$/i.exec(label)?.[1].toLowerCase()||'unknown';};

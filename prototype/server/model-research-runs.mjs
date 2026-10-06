@@ -4,16 +4,18 @@ import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,
 
 export function validateCandidate(result,packet,{model,topicId}){
  validatePacket(packet);
- validateCodexDraft({sections:result?.sections,missingEvidence:result?.missingEvidence},packet);
+ const output={sections:result?.sections,missingEvidence:result?.missingEvidence,...(result?.materialityReviews===undefined?{}:{materialityReviews:result.materialityReviews})};
+ validateCodexDraft(output,packet);
  if(result.status!=='candidate'||result.reviewStatus!=='unreviewed'||packet.input.topicId!==topicId||result.trace?.inputHash!==packet.inputHash||result.trace?.model!==model||result.trace?.topicVersion!==packet.input.topicVersion||result.trace?.topicId!==topicId||typeof result.rawOutput!=='string'||digest(result.rawOutput)!==result.trace.outputHash)throw new CodexResearchError('output');
  let raw;try{raw=validateCodexDraft(JSON.parse(result.rawOutput),packet);}catch{throw new CodexResearchError('output');}
- if(digest(raw)!==digest({sections:result.sections,missingEvidence:result.missingEvidence}))throw new CodexResearchError('output');
+ if(digest(raw)!==digest(output))throw new CodexResearchError('output');
 }
 
 export function openModelResearchRuns(store,research,{enabled=false,config={},runner=generateCodexDraft,now=()=>Date.now(),onStart=()=>{}}={}){
  const db=store.db,jobs=new Map();let closed=false;initializeModelLease(db);
  db.exec(`CREATE TABLE IF NOT EXISTS model_research_runs(id TEXT PRIMARY KEY,topic_id TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,expires_at INTEGER NOT NULL,payload TEXT NOT NULL);
- CREATE INDEX IF NOT EXISTS model_research_topic ON model_research_runs(topic_id,created_at);`);
+ CREATE INDEX IF NOT EXISTS model_research_topic ON model_research_runs(topic_id,created_at);
+ CREATE TABLE IF NOT EXISTS model_research_requests(request_id TEXT PRIMARY KEY,topic_id TEXT NOT NULL,topic_version INTEGER NOT NULL,run_id TEXT NOT NULL UNIQUE REFERENCES model_research_runs(id),input_hash TEXT NOT NULL);`);
  const expiredView=(run,expiresAt)=>run.status==='running'&&expiresAt<now()?{...run,status:'interrupted',failure:{code:'interrupted',message:'上次调用未完成；保留输入，可手动重新生成'}}:run;
  const read=id=>{const row=db.prepare('SELECT payload,expires_at FROM model_research_runs WHERE id=?').get(id);if(!row)throw new Error('模型研判记录不存在');return expiredView(JSON.parse(row.payload),row.expires_at);};
  const write=run=>db.prepare('UPDATE model_research_runs SET status=?,payload=? WHERE id=?').run(run.status,JSON.stringify(run),run.id);
@@ -23,23 +25,44 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
   for(const row of rows){const run=JSON.parse(row.payload);write({...run,status:'interrupted',finishedAt:new Date(now()).toISOString(),failure:{code:'interrupted',message:'上次调用未完成；保留输入，可手动重新生成'}});}
  }
  recover();
- const summary=run=>({id:run.id,topicId:run.topicId,topicVersion:run.packet.input.topicVersion,inputHash:run.packet.inputHash,status:run.status,createdAt:run.createdAt,finishedAt:run.finishedAt||null,model:run.model,effort:run.effort,failure:run.failure||null,acceptedVersion:run.acceptedVersion||null});
+ const summary=run=>({id:run.id,topicId:run.topicId,topicVersion:run.packet.input.topicVersion,inputHash:run.packet.inputHash,status:run.status,createdAt:run.createdAt,finishedAt:run.finishedAt||null,model:run.model,effort:run.effort,failure:run.failure||null,acceptedVersion:run.acceptedVersion||null,...(run.requestId?{requestId:run.requestId}:{})});
+ function priorRequest(topicId,version,requestId){
+  if(requestId===undefined)return null;
+  const row=db.prepare('SELECT * FROM model_research_requests WHERE request_id=?').get(requestId);
+  if(!row)return null;
+  if(row.topic_id!==topicId||row.topic_version!==version)throw new Error('模型生成请求标识已用于其他输入');
+  // Resolve the frozen original, even when today's topic, config or model changed.
+  // An incomplete receipt must never fall through into a replacement model call.
+  let run;try{
+   run=read(row.run_id);validatePacket(run.packet);
+   if(run.id!==row.run_id||run.topicId!==topicId||run.packet.input.topicId!==topicId||run.packet.input.topicVersion!==version||run.packet.inputHash!==row.input_hash||run.requestId!==requestId)throw new Error();
+  }catch{throw new Error('模型生成请求记录不完整，请核对运行记录');}
+  return summary(run);
+ }
  const api={
   status(){return {enabled:enabled&&!closed,provider:'local-codex-cli',model:config.model||null,effort:config.effort||'high'};},
   list(topicId){research.get(topicId);return db.prepare('SELECT payload,expires_at FROM model_research_runs WHERE topic_id=? ORDER BY rowid DESC LIMIT 50').all(topicId).map(row=>summary(expiredView(JSON.parse(row.payload),row.expires_at)));},
   get(topicId,id){const run=read(id);if(run.topicId!==topicId)throw new Error('模型研判不属于此研究');return run;},
-  start(topicId,{version}={},beforeCommit=()=>{}){
+  start(topicId,data={},beforeCommit=()=>{}){
+   if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(key=>!['version','requestId'].includes(key))||!Number.isSafeInteger(data.version)||data.version<1||Object.hasOwn(data,'requestId')&&(typeof data.requestId!=='string'||!/^[-a-zA-Z0-9]{16,80}$/.test(data.requestId)))throw new Error('模型生成请求参数无效');
+   const {version,requestId}=data;
    if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw new Error('恢复副本需先完成核对确认');
-   if(!enabled||closed)throw new Error('当前未启用本机 Codex 研判');
+   if(closed)throw new Error('当前未启用本机 Codex 研判');
+   const prior=priorRequest(topicId,version,requestId);if(prior)return prior;
+   if(!enabled)throw new Error('当前未启用本机 Codex 研判');
    if(!config.binary||!config.model)throw new Error('请先配置本机 Codex 路径与模型');
    const packet=validatePacket(research.packet(topicId));if(version!==packet.input.topicVersion)throw new Error('研究已更新，请刷新后再生成');
    if(research.get(topicId).status==='archived')throw new Error('归档研究不能开始模型研判');
    const timeoutMs=config.timeoutMs??180000;if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>600000)throw new Error('模型超时配置无效');
-   const run={id:randomUUID(),topicId,status:'running',packet,model:config.model,effort:config.effort||'high',createdAt:new Date(now()).toISOString()};
+   const run={id:randomUUID(),topicId,status:'running',packet,model:config.model,effort:config.effort||'high',createdAt:new Date(now()).toISOString(),...(requestId?{requestId}:{})};
    db.exec('BEGIN IMMEDIATE');try{
+    // Another process may have registered this identity since the first lookup.
+    const committed=priorRequest(topicId,version,requestId);if(committed){db.exec('COMMIT');return committed;}
     recover();if(db.prepare("SELECT 1 FROM model_research_runs WHERE status='running'").get())throw new Error('已有模型研判正在运行，请等待或取消后再试');
     claimModelLease(db,run.id,now(),timeoutMs+30000);
-    db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));onStart(run);beforeCommit(run);db.exec('COMMIT');
+    db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));
+    if(requestId)db.prepare('INSERT INTO model_research_requests VALUES(?,?,?,?,?)').run(requestId,topicId,version,run.id,packet.inputHash);
+    onStart(run);beforeCommit(run);db.exec('COMMIT');
    }catch(error){db.exec('ROLLBACK');throw error;}
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(result=>{

@@ -1,3 +1,4 @@
+import {observationSummary,observationPage} from './observation-history.mjs';
 import {openMarketObservations} from './market-observations.mjs';
 import {openObservationRules} from './observation-rules.mjs';
 import {hash} from './providers.mjs';
@@ -19,15 +20,19 @@ export function observationHits(topics,book,today){
  }
  return hits;
 }
-export function openObservationInbox(store,{clock=()=>new Date().toISOString(),getTopic,offline=false,getMarketSnapshots=()=>[]}={}){
+export function openObservationInbox(store,{clock=()=>new Date().toISOString(),getTopic,offline=false,getMarketSnapshots=()=>[],clustersForTopic}={}){
  const db=store.db;
  db.exec(`CREATE TABLE IF NOT EXISTS observation_todos(id TEXT PRIMARY KEY,payload TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS observation_receipts(id INTEGER PRIMARY KEY,todo_id TEXT NOT NULL,revision INTEGER NOT NULL,action TEXT NOT NULL,note TEXT NOT NULL,at TEXT NOT NULL);`);
- const market=openMarketObservations(db,{getSnapshots:getMarketSnapshots});
+ CREATE TABLE IF NOT EXISTS observation_receipts(id INTEGER PRIMARY KEY,todo_id TEXT NOT NULL,revision INTEGER NOT NULL,action TEXT NOT NULL,note TEXT NOT NULL,at TEXT NOT NULL);
+ CREATE INDEX IF NOT EXISTS observation_todos_created ON observation_todos(created_at DESC);
+ CREATE INDEX IF NOT EXISTS observation_todos_state ON observation_todos(state);`);
+ const market=openMarketObservations(db,{getSnapshots:getMarketSnapshots,clustersForTopic});
  const rules=openObservationRules(store,{clock,getTopic,offline});
  const transaction=fn=>{db.exec('BEGIN IMMEDIATE');try{const r=fn();db.exec('COMMIT');return r;}catch(e){db.exec('ROLLBACK');throw e;}};
  return {
   rules,
+  page:params=>observationPage(db,params),
+  summary(){return {...observationSummary(db),rules:rules.list(),marketChecks:market.checks()};},
   process(topics,book){const today=new Date(clock()).toLocaleDateString('en-CA',{timeZone:'Asia/Shanghai'}),hits=observationHits(topics,book,today);return transaction(()=>{let added=0;for(const hit of [...hits,...rules.evaluate(topics,book),...market.evaluate(topics,clock())])added+=Number(db.prepare("INSERT OR IGNORE INTO observation_todos VALUES(?,?,'pending',1,?,?)").run(hit.id,JSON.stringify(hit),clock(),clock()).changes);return {ok:true,added};});},
   snapshot(){const items=db.prepare('SELECT * FROM observation_todos ORDER BY created_at DESC,id').all().map(r=>({...JSON.parse(r.payload),state:r.state,revision:r.revision,createdAt:r.created_at,updatedAt:r.updated_at}));return {items,rules:rules.list(),marketChecks:market.checks(),pending:items.filter(i=>i.state!=='completed').length,policy:'已读仍待处理；回执不改变研究、风险或订单'};},
   receipts(id){return db.prepare('SELECT * FROM observation_receipts WHERE todo_id=? ORDER BY id').all(id);},

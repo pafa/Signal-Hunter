@@ -9,7 +9,7 @@ const html=extra=>`<html><head><title>合成公告</title></head><body><div clas
 const read=extra=>extractArticle(html(extra),url);
 const link=(href,label='附件')=>`<a href="${href}">${label}</a>`;
 test('cleaning removes only verified publisher controls and preserves business text, date and unread attachments',()=>{
- const a=read('<div id="files" style="display:none">'+link('files/plan.pdf','附件：计划.pdf')+'</div>');assert.ok(a.body.includes(body));assert.doesNotMatch(a.body,/界面字号专用文字|界面分享专用文字/);assert.equal(a.publishedAt,'2024-01-01');assert.equal(a.extractionEvidence.scanScope,'publisher-article-links');assert.deepEqual(a.extractionEvidence.removedControls,{fontSize:1,share:1});assert.deepEqual(a.extractionEvidence.attachments,[{url:new URL('files/plan.pdf',url).href,label:'附件：计划.pdf',formatHint:'pdf',status:'unread'}]);assert.equal(a.method,'public-article-4');
+ const a=read('<div id="files" style="display:none">'+link('files/plan.pdf','附件：计划.pdf')+'</div>');assert.ok(a.body.includes(body));assert.doesNotMatch(a.body,/界面字号专用文字|界面分享专用文字/);assert.equal(a.publishedAt,'2024-01-01');assert.equal(a.extractionEvidence.scanScope,'publisher-article-links');assert.deepEqual(a.extractionEvidence.removedControls,{fontSize:1,share:1});assert.deepEqual(a.extractionEvidence.attachments,[{url:new URL('files/plan.pdf',url).href,label:'附件：计划.pdf',formatHint:'pdf',status:'unread'}]);assert.equal(a.method,'public-article-7');
 });
 test('identical class names on other hosts and outside publisher control locations do not authorize removal',()=>{
  const a=extractArticle(html(''),generic);assert.deepEqual(a.extractionEvidence.removedControls,{fontSize:0,share:0});
@@ -46,5 +46,5 @@ test('scope changes append immutable material revisions and remain in frozen sem
  }finally{s.close();}
 });
 test('research and material-comparison prompts disclose unread scope without altering headline-only prompt',()=>{
- assert.ok(codexPrompt({}).includes(ARTICLE_SCOPE_INSTRUCTIONS));assert.equal(CODEX_PROMPT_VERSION,'codex-research-5');assert.ok(comparisonPrompt({schema:MATERIAL_SEMANTIC_VERSION,input:{}}).includes(ARTICLE_SCOPE_INSTRUCTIONS));assert.equal(comparisonPrompt({schema:SEMANTIC_VERSION,input:{}}).includes(ARTICLE_SCOPE_INSTRUCTIONS),false);
+ assert.ok(codexPrompt({}).includes(ARTICLE_SCOPE_INSTRUCTIONS));assert.equal(CODEX_PROMPT_VERSION,'codex-research-8');assert.ok(comparisonPrompt({schema:MATERIAL_SEMANTIC_VERSION,input:{}}).includes(ARTICLE_SCOPE_INSTRUCTIONS));assert.equal(comparisonPrompt({schema:SEMANTIC_VERSION,input:{}}).includes(ARTICLE_SCOPE_INSTRUCTIONS),false);
 });

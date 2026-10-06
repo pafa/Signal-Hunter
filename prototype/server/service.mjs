@@ -1,3 +1,5 @@
+import {openPriceCollection} from './price-collection.mjs';
+import {openStorageMonitor} from './storage-monitor.mjs';
 import {openForwardWindows} from './forward-windows.mjs';
 import {openForwardReviews} from './forward-reviews.mjs';
 import {openForwardEvaluations} from './forward-evaluations.mjs';
@@ -8,6 +10,7 @@ import {openCompanyEntityRuns} from './company-entity-runs.mjs';
 import {openMaterialEventRuns} from './material-event-runs.mjs';
 import {processMarketAccounts} from './market-execution.mjs';
 import {openEvaluationReview} from './evaluation-review.mjs';
+import {openEventPrices} from './event-prices.mjs';
 import {strategyProfiles} from '../shared/strategy-profiles.mjs';
 import {openMarketSimulation} from './market-simulation.mjs';
 import {openSemanticEvents} from './semantic-events.mjs';
@@ -17,6 +20,8 @@ import {marketFailure} from './market-diagnostics.mjs';
 import {openObservationInbox} from './observation-inbox.mjs';
 import {demoResearchSeeds,initializeDemoData} from './demo.mjs';
 import {fetchMinutes} from './providers.mjs';
+import {openHistoricalComparisons} from './historical-comparisons.mjs';
+import {openHistoricalRecall} from './historical-recall.mjs';
 import {openContinuity} from './event-continuity.mjs';
 import {openNewsIntake,newsQueries} from './news-intake.mjs';
 import {officialQueries,newsWindow} from './news-sources.mjs';
@@ -30,7 +35,8 @@ import {createProviderGate} from './provider-gate.mjs';
 import {dataCapabilities} from './data-capabilities.mjs';
 import {dailyHealth} from '../shared/market-clock.mjs';
 import {openModelResearchRuns} from './model-research-runs.mjs';
-export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCooldown=60000,now=()=>Date.now(),mode='legacy',instance=null,backupTask=null,modelConfig=null,modelRunner,sourceReader,semanticRunner,materialEventRunner,companyEntityRunner,marketInputs}={}){
+export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCooldown=60000,now=()=>Date.now(),mode='legacy',instance=null,backupTask=null,storageConfig=null,modelConfig=null,modelRunner,sourceReader,semanticRunner,materialEventRunner,companyEntityRunner,marketInputs}={}){
+  const storageMonitor=storageConfig?openStorageMonitor(store.db,{...storageConfig,now}):null;
   const offline=mode==='demo';
   const denyNetwork=()=>{throw new Error('离线演示不访问外部数据；请另行启动空白研究模式');};
   const clock=()=>new Date(now()).toISOString();
@@ -43,6 +49,8 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const research=openResearch(store,{clock,semanticEvents,eventClusters,securityDirectory,seed:mode!=='research'&&!restorePending(),...(offline?{seeds:demoResearchSeeds,sourceReader:denyNetwork}:sourceReader?{sourceReader}:{})});
   const paper=openPaper(store,research,{clock,seed:mode!=='research'&&!restorePending()});
   const evaluations=openEvaluationReview(store,{clock});
+  const eventPrices=openEventPrices(store,evaluations,{enabled:mode==='research',now});
+  const priceCollection=openPriceCollection(store,{enabled:mode==='research',now,rulesHash:research.screenings.rulesHash,isPaused:()=>!!scheduler.snapshot().pricecollection?.paused,fetchQuote:(symbol,context)=>refreshQuoteForLane(symbol,context,'pricecollection')});
   const marketSimulations=Object.fromEntries(Object.entries(strategyProfiles).map(([accountId,profile])=>[accountId,openMarketSimulation(store,research,{accountId,profile,enabled:!offline,clock,...(marketInputs?{getInputs:()=>marketInputs(accountId)}:{})})]));
   const marketSimulation=marketSimulations.aggressive;
   const forwardEvaluations=openForwardEvaluations(store,research,eventClusters,{enabled:mode==='research'&&!!modelConfig,config:modelConfig||{},now});
@@ -53,8 +61,8 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const researchPipeline=openResearchPipeline(store,research,modelResearch,{enabled:!offline&&!!modelConfig,config:modelConfig||{},now,materialEvents,batches:semanticBatches,clusters:eventClusters,semantic:semanticEvents,recall:newsId=>{continuity.process(research.list());return continuity.recall(newsId);}});
   const companyEntities=openCompanyEntityRuns(store,research,{enabled:!offline&&!!modelConfig,config:modelConfig||{},...(companyEntityRunner?{runner:companyEntityRunner}:{}),now});
   const intake=openNewsIntake(store,{clock});
-  const continuity=openContinuity(store,{clock});
-  const observations=openObservationInbox(store,{clock,getTopic:id=>research.get(id),offline,getMarketSnapshots:at=>offline?[]:Object.values(marketSimulations).map(m=>m.observationSnapshot(at))});
+  const continuity=openContinuity(store,{clock}),historicalRecall=openHistoricalRecall(store,{now,mode});
+  const observations=openObservationInbox(store,{clock,getTopic:id=>research.get(id),offline,clustersForTopic:topic=>eventClusters.forResearch(topic),getMarketSnapshots:at=>offline?[]:Object.values(marketSimulations).map(m=>m.observationSnapshot(at))});
   let newsJob=null;const quoteJobs=new Map();let lastNewsAttempt=0;const quoteAttempts=new Map();
   const dailyJobs=new Map(),dailyAttempts=new Map();
   const active=(name,context)=>{if(restorePending())throw new Error('恢复副本需先完成核对确认');context?.assertActive?.();if(scheduler.snapshot()[name]?.paused)throw new Error('任务已暂停，请先在运行控制中恢复');};
@@ -64,14 +72,15 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   if(offline&&!restorePending())initializeDemoData(store);
   const service={
     mode,instance,
-    research,researchPipeline,paper,observations,referenceFx,securityDirectory,modelResearch,materialEvents,companyEntities,semanticEvents,semanticBatches,eventClusters,evaluations,forwardEvaluations,forwardReviews,forwardWindows,marketSimulation,marketSimulations,
+    research,researchPipeline,paper,observations,referenceFx,securityDirectory,modelResearch,materialEvents,companyEntities,semanticEvents,semanticBatches,eventClusters,evaluations,eventPrices,priceCollection,forwardEvaluations,forwardReviews,forwardWindows,marketSimulation,marketSimulations,
     processEvents(){try{const changed=continuity.process(research.list());if(changed||store.checks().events?.state==='error')store.status('events',{state:'ok',receivedAt:clock()});return {ok:true,changed};}catch(error){store.status('events',{state:'error',attemptedAt:clock(),error:errorText(error)});return {error:errorText(error)};}},
     eventContinuity(params={}){return {...continuity.snapshot({...params,positions:paper.snapshot().positions,watchlist:store.watchlist()}),health:store.checks().events||{state:'pending'}};},
+    historicalRecall,historicalComparisons:openHistoricalComparisons(store,historicalRecall,semanticEvents,{now}),
     eventDetail(id){return continuity.detail(id);},
     decideEvent(id,data){continuity.process(research.list());return continuity.decide(id,data);},
     health(){store.db.prepare('SELECT 1').get();return {ok:true,mode,offline,instance,startedAt,uptimeSeconds:Math.max(0,Math.floor((now()-Date.parse(startedAt))/1000)),restoreReviewRequired:store.db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1'};},
     operations(){return {tasks:scheduler.snapshot(),history:scheduler.history()};},
-    controlOperation(name,action){return scheduler.control(name,action);},
+    controlOperation(name,action){if(name==='pricecollection'&&action==='resume')priceCollection.activate();return scheduler.control(name,action);},
     acknowledgeRestore(){
       if(!service.health().restoreReviewRequired)return;
       if(!Object.values(scheduler.snapshot()).every(t=>t.paused))throw new Error('Pause all tasks before acknowledging restore');
@@ -79,7 +88,8 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       try{store.db.prepare("UPDATE settings SET value='0' WHERE key='restore_review_required'").run();store.db.prepare("INSERT INTO operation_audit(name,action,at) VALUES('restore','acknowledge',?)").run(clock());store.db.exec('COMMIT');}
       catch(error){store.db.exec('ROLLBACK');throw error;}
     },
-    runOperation(name,input=null){if(offline&&!['backup','observations'].includes(name))denyNetwork();active(name);return scheduler.run(name,{force:true,input});},
+    runOperation(name,input=null){if(offline&&!['backup','observations','storage'].includes(name))denyNetwork();active(name);return scheduler.run(name,{force:true,input});},
+    newsCoverageReport(input){return intake.report(input);},
     newsIntakeDetail(id){return intake.detail(id);},
     async backfillNews(input){
       if(offline)denyNetwork();active('news');
@@ -94,7 +104,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
     },
     close(){return Promise.all([scheduler.stop(),referenceFx.close(),securityDirectory.close(),modelResearch.close(),materialEvents.close(),companyEntities.close(),semanticEvents.close()]);},
     syncWatches(){if(!restorePending())autoWatch=syncResearchWatches(store,research.list());return autoWatch;},
-    snapshot(){const topics=research.list(),news=store.news(),watchlist=store.watchlist(),book=paper.snapshot();const queue=continuity.queue({positions:book.positions,watchlist}),priorities=new Map(queue.map((n,i)=>[n.id,{priority:n.priority,rank:i}])),researchView=research.snapshot({topics,news});researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));return {researchPipeline:researchPipeline.snapshot(),observationInbox:observations.snapshot(),eventContinuity:{...continuity.summary(),health:store.checks().events||{state:'pending'}},runtime:{mode,offline,instance},paper:book,workflow:topics.map(t=>assessTopic(t,{book})),operations:scheduler.snapshot(),operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,clock(),{offline}),serviceHealth:service.health(),newsIntake:intake.snapshot(),autoWatch,settings:store.getSettings(),news,watchlist:watchlist.map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks:store.checks(),serverTime:clock(),newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:researchView};},
+    snapshot(){const topics=research.list(),news=store.news(),watchlist=store.watchlist(),book=paper.snapshot();const queue=continuity.queue({positions:book.positions,watchlist}),priorities=new Map(queue.map((n,i)=>[n.id,{priority:n.priority,rank:i}])),researchView=research.snapshot({topics,news});researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));return {priceCollection:priceCollection.snapshot(),storageMonitor:storageMonitor?.snapshot()??null,researchPipeline:researchPipeline.snapshot(),observationInbox:observations.summary(),eventContinuity:{...continuity.summary(),health:store.checks().events||{state:'pending'}},runtime:{mode,offline,instance},paper:book,workflow:topics.map(t=>assessTopic(t,{book})),operations:scheduler.snapshot(),operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,clock(),{offline}),serviceHealth:service.health(),newsIntake:intake.snapshot(),autoWatch,settings:store.getSettings(),news,watchlist:watchlist.map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks:store.checks(),serverTime:clock(),newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:researchView};},
     async refreshDaily(symbol,force=false,context){
       if(offline)denyNetwork();active('daily',context);
       if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅获取关注标的日线');
@@ -130,22 +140,23 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       }catch(error){active('news',context);store.status(backfill?'news-backfill':'news',{state:'error',attemptedAt,error:errorText(error),keywords});return {error:errorText(error)};}finally{newsJob=null;}})();
       return newsJob;
     },
-    async refreshQuote(symbol,context){
-      if(offline)denyNetwork();active('minutes',context);
-      if(!store.watchlist().some(w=>w.symbol===symbol))return {skipped:'not-watched'};
-      if(quoteJobs.has(symbol))return quoteJobs.get(symbol);
-      if(now()-Math.max(quoteAttempts.get(symbol)||0,Date.parse(store.checks()[symbol]?.attemptedAt)||0)<quoteCooldown)return {skipped:'cooldown'};
-      quoteAttempts.set(symbol,now());const attemptedAt=clock();
-      const job=(async()=>{try{
-        const quote=await fetchMinutes(symbol,scopedFetcher(context));active('minutes',context);const receivedAt=clock(),saved=store.saveQuote(quote,receivedAt);
-        if(!saved.activated){const message={'minute-regression':'分钟行情时间倒退','minute-future':'分钟行情含未来时间','minute-time-incomparable':'分钟行情来源时间无法比较'}[saved.reason]||'分钟行情未启用';const error=new Error(`${message}；已留档并保留原缓存`);error.kind=saved.reason;throw error;}
-        store.status(symbol,{state:'ok',attemptedAt,receivedAt,noNewBar:saved.noNewBar??false,snapshotHash:saved.snapshotHash});return {ok:true};
-      }catch(error){active('minutes',context);store.status(symbol,{state:'error',attemptedAt,error:errorText(error),failure:marketFailure(error)});return {error:errorText(error)};}finally{quoteJobs.delete(symbol);}})();quoteJobs.set(symbol,job);return job;
-    },
+    refreshQuote(symbol,context){return refreshQuoteForLane(symbol,context,'minutes');},
     tick(){if(restorePending())return Promise.resolve([{skipped:'restore-review-required'}]);research.process();service.processEvents();service.syncWatches();paper.expire();return scheduler.runAll();},
   };
   const providerFetch=createProviderGate(store,{fetcher,now});
   const scopedFetcher=context=>(url,options={})=>providerFetch(url,{...options,signal:context?.signal?AbortSignal.any([context.signal,...(options.signal?[options.signal]:[])]):options.signal},context);
-  const scheduler=createPersistentScheduler(store.db,{discovery:context=>offline?{skipped:'offline'}:researchPipeline.step(context),semantic:context=>offline?{skipped:'offline'}:semanticBatches.step(context),execution:context=>offline?{skipped:'offline'}:processMarketAccounts(marketSimulations,context),observations:context=>{context.assertActive();return observations.process(research.list(),paper.snapshot());},news:context=>offline?{skipped:'offline'}:service.refreshNews(context),daily:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),3,w=>service.refreshDaily(w.symbol,!!context.input?.manual,context)),minutes:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),2,w=>service.refreshQuote(w.symbol,context)),...(backupTask?{backup:backupTask}:{})},{now,initiallyPaused:['execution','semantic','discovery'],intervals:{discovery:10000,semantic:10000,execution:10000,observations:10000,news:newsCooldown,daily:60000,minutes:quoteCooldown,backup:3600000}});
+  async function refreshQuoteForLane(symbol,context,lane){
+      if(offline)denyNetwork();active(lane,context);
+      if(lane==='minutes'&&!store.watchlist().some(w=>w.symbol===symbol))return {skipped:'not-watched'};
+      if(quoteJobs.has(symbol))return lane==='minutes'?quoteJobs.get(symbol):{skipped:'symbol-busy'};
+      if(now()-Math.max(quoteAttempts.get(symbol)||0,Date.parse(store.checks()[symbol]?.attemptedAt)||0)<quoteCooldown)return {skipped:'cooldown'};
+      quoteAttempts.set(symbol,now());const attemptedAt=clock();
+      const job=(async()=>{try{
+        const quote=await fetchMinutes(symbol,scopedFetcher(context));active(lane,context);const receivedAt=clock(),saved=store.saveQuote(quote,receivedAt);
+        if(!saved.activated){const message={'minute-regression':'分钟行情时间倒退','minute-future':'分钟行情含未来时间','minute-time-incomparable':'分钟行情来源时间无法比较'}[saved.reason]||'分钟行情未启用';const error=new Error(`${message}；已留档并保留原缓存`);error.kind=saved.reason;throw error;}
+        store.status(symbol,{state:'ok',attemptedAt,receivedAt,noNewBar:saved.noNewBar??false,snapshotHash:saved.snapshotHash});return {ok:true};
+      }catch(error){active(lane,context);store.status(symbol,{state:'error',attemptedAt,error:errorText(error),failure:marketFailure(error)});return {error:errorText(error)};}finally{quoteJobs.delete(symbol);}})();quoteJobs.set(symbol,job);return job;
+    }
+  const scheduler=createPersistentScheduler(store.db,{pricecollection:context=>mode==='research'?priceCollection.step(context):{skipped:'offline-or-legacy'},discovery:context=>offline?{skipped:'offline'}:researchPipeline.step(context),semantic:context=>offline?{skipped:'offline'}:semanticBatches.step(context),execution:context=>offline?{skipped:'offline'}:processMarketAccounts(marketSimulations,context),observations:context=>{context.assertActive();return observations.process(research.list(),paper.snapshot());},news:context=>offline?{skipped:'offline'}:service.refreshNews(context),daily:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),3,w=>service.refreshDaily(w.symbol,!!context.input?.manual,context)),minutes:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),2,w=>service.refreshQuote(w.symbol,context)),...(backupTask?{backup:backupTask}:{}),...(storageMonitor?{storage:context=>storageMonitor.check(context)}:{})},{now,initiallyPaused:['pricecollection','execution','semantic','discovery','storage'],intervals:{pricecollection:10000,discovery:10000,semantic:10000,execution:10000,observations:10000,news:newsCooldown,daily:60000,minutes:quoteCooldown,backup:3600000,storage:3600000}});
   return service;
 }

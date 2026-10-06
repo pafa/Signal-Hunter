@@ -1,4 +1,5 @@
 import {safeErrorText} from '../../shared/safe-errors.mjs';
+import StorageStatus from './StorageStatus';
 import MarketSourceStatus from './MarketSourceStatus';
 import {securityIdentity} from '../../shared/securities.mjs';
 import {dailyHealth,marketClock,CALENDAR_VERSION} from '../../shared/market-clock.mjs';
@@ -9,6 +10,7 @@ import {time} from '../major/api';
 import {dataHealth} from './decision-model';
 import NewsCoverage from './NewsCoverage';
 import PipelineEventJobs from './PipelineEventJobs';
+import PriceCollection from './PriceCollection';
 export function HealthStrip({data,onOpen}){
  if(data?.runtime?.offline)return <div className="v7-health" aria-label="数据与研究状态"><span>离线演示 · 外部采集已关闭</span><button onClick={onOpen}>合成日线 {data.watchlist.length} 只 · 不评估交易日新鲜度 <b>查看状态 ↗</b></button></div>;
  const h=dataHealth(data),priority=(data?.workflow||[]).filter(w=>w.priorityRank<=4),expired=data?.paper?.orders.filter(o=>o.status==='expired').length||0;
@@ -20,8 +22,8 @@ function SourceDetails({data}){
  return <div><p className="m-note">采集成功只表示获取到了数据，不代表实时、完整或已核验。日线接收时间和交易所收盘日分别显示；行情不进入场景净值。</p><h3>新闻标题</h3><p>{h.rssState} · 最后成功 {time(h.rssAt)} · 最近尝试 {time(data.checks.news?.attemptedAt)}</p>{data.checks.news?.error&&<p className="m-warning">{safeErrorText(data.checks.news.error)} · 保留原有新闻</p>}<p className="m-note">日历 {CALENDAR_VERSION}：覆盖2026年普通股票，含常规休市与半日市；不判断个股停牌、临时休市或互联互通资格。证券按交易所及代码区分；A/H/ADR 的发行人关系只采用已有手工表，美股交易所和未映射关系仍待核验，不按名称合并。收盘后30分钟是本地研究缓冲，不能保证上游已给最终价。</p><h3>重点股票日线 · {h.dailyCount}/{h.total}</h3><table className="i-table"><thead><tr><th>证券</th><th>最近收盘日</th><th>接收时间</th><th>市场状态 / 应有收盘日</th><th>状态</th></tr></thead><tbody>{data.watchlist.map(w=><tr key={w.symbol}><td>{w.symbol}<small className="v8-security-id">{securityIdentity(w.symbol).currency} · {securityIdentity(w.symbol).venue}<br/>{securityIdentity(w.symbol).listing} · {securityIdentity(w.symbol).relationStatus}</small></td><td>{w.daily?.lastDate||'—'}</td><td>{time(w.daily?.receivedAt)}</td><td>{marketClock(w.symbol).label} · {dailyHealth(w.symbol,w.daily).expectedDate||'日历待补'}</td><td>{data.checks['daily:'+w.symbol]?.state==='error'?'更新失败，保留缓存':`${dailyHealth(w.symbol,w.daily).label}；供应商延迟未核验`}</td></tr>)}</tbody></table><p className="m-note">新闻、日线与分钟独立调度，同一任务未结束时不重复启动。无行情时不补造曲线；本地连接正常不等于上游数据正常。</p></div>;
 }
 
-export function Operations({data,onClose,onControl,onPipeline,busy}){
- const labels={discovery:'自动发现与研判',semantic:'Codex 比较批次',execution:'自动模拟执行',news:'新闻采集',daily:'日线采集',minutes:'分钟采集',observations:'观察与持仓检查',backup:'本地备份'};
+export function Operations({data,onClose,onControl,onPipeline,onPriceCollection,busy}){
+ const labels={pricecollection:'价格评估采集',discovery:'自动发现与研判',semantic:'Codex 比较批次',execution:'自动模拟执行',news:'新闻采集',daily:'日线采集',minutes:'分钟采集',observations:'观察与持仓检查',backup:'本地备份',storage:'容量与保留检查'};
  const stateText=s=>s.paused?'已暂停':s.recovering?'等待恢复':s.running?'执行中':s.blocked?'失败待处理':s.outcome==='partial'?'部分失败':s.outcome==='error'?'等待重试':s.outcome==='ok'?'已完成':s.outcome==='skipped'?'无需更新':'等待运行';
  return <Modal title="运行控制与数据状态" onClose={onClose}>
  <p className="m-note">{data.runtime.mode} · 服务启动 {time(data.serviceHealth?.startedAt)} · 任务与控制状态保存到本机。暂停保留已保存结果；此处不能批准订单。自动模拟执行启用后只处理已获本人批准的模拟订单，不连接真实交易。</p>
@@ -30,14 +32,18 @@ export function Operations({data,onClose,onControl,onPipeline,busy}){
  <b>{labels[name]||name}</b><strong>{stateText(s)}</strong>
  <small>最近完成 {time(s.completedAt)}</small><small>最近成功 {time(s.lastSuccessAt)}</small>
  {name==='discovery'&&<small>默认暂停；扫描初筛候选、保存来源正文、调用本机 Codex。失败保留，结果待复核，不自动采纳或创建订单。</small>}
+ {name==='pricecollection'&&<small>默认暂停；恢复后为新初筛保存起点与固定价格窗口。重启继续，缺价和错过窗口保留，不作为可成交报价。</small>}
+ {name==='storage'&&<small>默认暂停；启用后每小时检查数据库和备份、保存容量记录。只读检查，不自动删除。超过60秒中止本次扫描。</small>}
  {name==='execution'&&<small>默认暂停；启用后每10秒检查两个模拟池。仅处理本人已批准订单；暂停只停止自动检查，手动检查仍可用。</small>}
  {name==='semantic'&&<small>默认暂停；只推进本人建立的比较批次，每10秒至多启动一项。暂停停止后续调用，当前模型调用仍保存结果；失败需在批次中显式重试。</small>}
  <small>{s.paused?'恢复后继续':s.blocked?'连续失败达到上限，请检查后重试':s.running?'完成后安排下次检查':s.nextRunAt?`下次检查 ${time(s.nextRunAt)}`:'等待调度'}</small>
  {s.error&&<small className="m-warning">{safeErrorText(s.error)}</small>}
- <div className="ops-buttons"><Button disabled={busy} onClick={()=>onControl(name,{action:s.paused?'resume':'pause'})}>{s.paused?'恢复':'暂停'}</Button><Button disabled={busy||s.paused||s.running||data.runtime.offline&&name!=='backup'} onClick={()=>onControl(name,{action:'retry'})}>重新检查</Button></div>
+ <div className="ops-buttons"><Button disabled={busy||name==='pricecollection'&&(!data.priceCollection?.enabled||data.serviceHealth?.restoreReviewRequired)} onClick={()=>onControl(name,{action:s.paused?'resume':'pause'})}>{s.paused?'恢复':'暂停'}</Button><Button disabled={busy||s.paused||s.running||data.runtime.offline&&!['backup','storage'].includes(name)} onClick={()=>onControl(name,{action:'retry'})}>重新检查</Button></div>
  </section>)}</div>
  <p className="m-note">采集任务有限重试；全部失败达到上限后等待处理。离线演示始终禁止外部采集。定时检查与数据实时性是不同状态。模拟执行完成一次检查不代表已经成交；来源与等待原因见市场模拟账户。</p>
+ {data.priceCollection&&<PriceCollection key={`price-collection:${data.priceCollection.config?.version||0}`} collection={data.priceCollection} paused={data.operations?.pricecollection?.paused} onChange={onPriceCollection} busy={busy} restorePending={data.serviceHealth?.restoreReviewRequired}/>}
  {data.researchPipeline&&<ResearchPipeline key={data.researchPipeline.settings.version} pipeline={data.researchPipeline} onChange={onPipeline} busy={busy}/>}
+ <StorageStatus monitor={data.storageMonitor} serverTime={data.serverTime}/>
  <NewsCoverage data={data}/>
  <h3>上游来源</h3><div className="ops-scroll"><table className="i-table"><thead><tr><th>来源</th><th>状态</th><th>最近尝试</th><th>冷却至</th></tr></thead><tbody>{Object.entries(data.checks||{}).filter(([key])=>key.startsWith('source:')).map(([key,c])=><tr key={key}><td>{({'source:news.google.com':'Google News / Reuters 聚合','source:www.federalreserve.gov':'美联储官方 RSS','source:api.hkma.gov.hk':'金管局公开 API','source:www.csrc.gov.cn':'证监会公开列表','source:query1.finance.yahoo.com':'Yahoo 公共图表','source:query2.finance.yahoo.com':'Yahoo 公共图表','source:push2his.eastmoney.com':'东方财富公共来源','source:yahoo-public-chart':'Yahoo 公共图表','source:eastmoney-public':'东方财富公共来源'})[key]||'外部来源'}</td><td>{c.state==='ok'?'最近请求成功':'来源不可用'}<small>{safeErrorText(c.error)}</small></td><td>{time(c.attemptedAt)}</td><td>{c.retryAt?time(c.retryAt):'—'}</td></tr>)}</tbody></table>{!Object.keys(data.checks||{}).some(k=>k.startsWith('source:'))&&<p className="m-note">尚无外部来源请求记录；离线演示不会采集。</p>}</div>
  <MarketSourceStatus capabilities={data.dataCapabilities||[]}/>

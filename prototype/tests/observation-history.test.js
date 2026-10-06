@@ -1,0 +1,20 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {openStore} from '../server/store.mjs';import {createService} from '../server/service.mjs';import {createHandler} from '../server/index.mjs';
+const id=i=>i.toString(16).padStart(64,'0');
+function seed(store,n){const insert=store.db.prepare('INSERT INTO observation_todos VALUES(?,?,?,?,?,?)');for(let i=1;i<=n;i++){const at='2026-10-01T00:00:00Z';insert.run(id(i),JSON.stringify({id:id(i),title:'Synthetic '+i,kind:'due',reason:'Synthetic',symbols:[],input:{frozen:'x'.repeat(1000)}}),i%3===0?'completed':i%3===1?'pending':'read',1,at,at);}}
+async function fixture(run){const s=openStore(':memory:'),service=createService(s,{mode:'demo'});try{await run(s,service);}finally{await service.close();s.close();}}
+test('all retained todos are reachable without duplicates, later inserts stay outside the browsing boundary, and reads preserve frozen payloads',()=>fixture((s,service)=>{
+ seed(s,123);const before=s.db.prepare('SELECT * FROM observation_todos').all(),page=service.observations.page({state:'all'});assert.equal(page.items.length,50);assert.equal(page.total,123);assert.equal(page.items[0].id,id(123));
+ s.db.prepare('INSERT INTO observation_todos SELECT ?,?,state,revision,created_at,updated_at FROM observation_todos LIMIT 1').run(id(124),JSON.stringify({id:id(124),title:'later',symbols:[]}));
+ const seen=[...page.items.map(x=>x.id)];let current=page;while(current.nextCursor){current=service.observations.page({state:'all',before:current.nextCursor,ceiling:page.ceiling});assert.equal(current.total,123);seen.push(...current.items.map(x=>x.id));}
+ assert.equal(new Set(seen).size,123);assert(!seen.includes(id(124)));assert.deepEqual(s.db.prepare('SELECT * FROM observation_todos WHERE id!=?').all(id(124)),before);assert.equal(service.observations.page({state:'all'}).total,124);
+}));
+test('pending includes read, completion and reopening retain receipts and payload, stale versions are refused, and summary omits historical bodies',()=>fixture((s,service)=>{
+ seed(s,120);const inbox=service.observations,before=s.db.prepare('SELECT payload FROM observation_todos WHERE id=?').get(id(1)).payload;
+ assert.equal(inbox.page().total,80);assert.equal(inbox.page({state:'completed'}).total,40);assert.equal(service.snapshot().observationInbox.items,undefined);assert.equal(service.snapshot().observationInbox.total,120);assert(!JSON.stringify(service.snapshot().observationInbox).includes('frozen'));
+ inbox.respond(id(1),{revision:1,action:'complete',note:'Done'});assert.equal(inbox.page().total,79);assert.equal(inbox.page({state:'completed'}).total,41);assert.throws(()=>inbox.respond(id(1),{revision:1,action:'reopen',note:'Stale'}),/待办已更新/);inbox.respond(id(1),{revision:2,action:'reopen',note:'Follow up'});assert.equal(inbox.summary().pending,80);assert.equal(inbox.receipts(id(1)).length,2);assert.equal(s.db.prepare('SELECT payload FROM observation_todos WHERE id=?').get(id(1)).payload,before);
+}));
+test('pagination rejects invalid cursors, bounds and unknown fields without leaving a transaction open; API keeps origins and read-only semantics',()=>fixture(async(s,service)=>{
+ seed(s,60);for(const p of [[],null,{state:'deleted'},{before:'1'},{before:'61',ceiling:'60'},{ceiling:'61'},{ceiling:'1.5'},{ceiling:'-1'},{ceiling:'9007199254740992'},{extra:'x'}]){assert.throws(()=>service.observations.page(p),/待办分页参数无效/);assert.equal(s.db.isTransaction,false);}
+ const handler=createHandler(s,service),call=async(url,origin)=>{let status,body;await handler({method:'GET',url,headers:{host:'127.0.0.1:4179',...(origin?{origin}:{})}},{writeHead:v=>status=v,end:b=>body=JSON.parse(b)});return {status,body};};
+ const before=s.db.prepare('SELECT total_changes() n').get().n,ok=await call('/api/observations?state=all');assert.equal(ok.status,200);assert.equal(ok.body.items.length,50);assert.equal(ok.body.total,60);assert.equal((await call('/api/observations?ceiling=no')).body.error,'待办分页参数无效');assert.equal((await call('/api/observations','https://foreign.example')).status,403);assert.equal(s.db.prepare('SELECT total_changes() n').get().n,before);
+}));

@@ -3,7 +3,7 @@ import {time} from '../major/api';
 const dollars=n=>n==null?'未知':`USD ${(n/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 export function MarketObservationStatus({checks=[]}){
  const accounts=[...new Set(checks.map(c=>c.accountId))];
- return accounts.length>0&&<aside aria-label="双策略持仓巡检状态">{accounts.map(id=>{const rows=checks.filter(c=>c.accountId===id);return <p key={id}>{id==='aggressive'?'激进热点池':'稳健长期池'} · {rows.filter(c=>c.status==='hit').length} 项当前命中 · {rows.filter(c=>c.status==='unknown').length} 项无法判断 · 检查 {time(rows.map(c=>c.checkedAt).sort().at(-1))}</p>;})}<small>当前状态与历史待办分开。行情未知不表示风险已解除；完成回执不平仓或恢复买入。</small></aside>;
+ return accounts.length>0&&<aside aria-label="双策略持仓巡检状态">{accounts.map(id=>{const rows=checks.filter(c=>c.accountId===id);return <p key={id}>{id==='cross-theme'?'跨主题共同风险':id==='aggressive'?'激进热点池':'稳健长期池'} · {rows.filter(c=>c.status==='hit').length} 项当前命中 · {rows.filter(c=>c.status==='unknown').length} 项无法判断 · 检查 {time(rows.map(c=>c.checkedAt).sort().at(-1))}</p>;})}<small>当前状态与历史待办分开。行情未知不表示风险已解除；完成回执不平仓或恢复买入。</small></aside>;
 }
 export default function MarketObservationDetails({input}){
  const m=input.metrics;

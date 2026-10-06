@@ -115,3 +115,21 @@ test('official subscriptions and raw snapshots survive restart and research pres
 test('only exact owned intake errors survive public diagnostic projection',()=>{
  for(const message of newsIntakeErrors){assert.equal(safeErrorText(message),message);assert.equal(safeErrorText(message+' /private/token-secret'),'任务失败，请检查来源或运行配置');}
 });
+
+test('HTTP error bodies and status receipts are retained without parsing or committing news',()=>fixture(async(s,intake)=>{
+ const body='<html>synthetic upstream failure</html>',r=await intake.run(query('hkma'),async()=>new Response(body,{status:502,headers:{'content-type':'text/html','retry-after':'60','date':'Fri, 02 Oct 2026 12:00:00 GMT','set-cookie':'not part of retained metadata'}}));
+ assert.equal(r.state,'error');assert.equal(r.coverage,'incomplete');assert.equal(r.ingestCommitted,false);assert.equal(r.pages,0);assert.equal(s.news().length,0);
+ const p=intake.detail(r.id).pages[0];assert.equal(p.responseHash,hash(body));assert.equal(p.receivedAt,at);assert.equal(p.payload.httpStatus,502);assert.equal(p.payload.responseHeaders['retry-after'],'60');assert.equal(p.payload.responseHeaders['content-type'],'text/html');assert.equal(p.payload.responseHeaders['set-cookie'],undefined);assert.equal(s.db.prepare('SELECT body FROM news_source_responses WHERE hash=?').get(p.responseHash).body,body);
+}));
+test('successful-page receipts survive a later HTTP error and both exact response bodies remain',()=>fixture(async(s,intake)=>{
+ const good=page(0),bad='synthetic rate limit';let calls=0;const r=await intake.run(query('hkma'),async()=>++calls===1?new Response(good,{headers:{'content-type':'application/json'}}):new Response(bad,{status:429,headers:{'retry-after':'120'}}));
+ assert.equal(r.state,'partial');assert.equal(r.acceptedCount,100);assert.equal(r.added,100);assert.equal(s.db.prepare('SELECT count(*) n FROM news_source_responses').get().n,2);
+ const receipts=intake.detail(r.id).pages;assert.equal(receipts[0].payload.httpStatus,200);assert.equal(receipts[0].payload.state,'committed');assert.equal(receipts[1].payload.httpStatus,429);assert.equal(receipts[1].payload.state,'partial');assert.equal(receipts[1].responseHash,hash(bad));assert.equal(s.db.prepare('SELECT body FROM news_source_responses WHERE hash=?').get(hash(good)).body,good);
+}));
+test('oversized HTTP errors fail without storing a truncated body or committing normalized news',()=>fixture(async(s,intake)=>{
+ const r=await intake.run(query('hkma'),async()=>new Response('x'.repeat(2_000_001),{status:503}));assert.equal(r.state,'error');assert.equal(r.ingestCommitted,false);assert.equal(s.db.prepare('SELECT count(*) n FROM news_source_responses').get().n,0);assert.equal(intake.detail(r.id).pages[0].responseHash,null);assert.match(r.error,/大小限制/);
+}));
+
+test('an empty HTTP error still records status and an exact empty response without pretending to be an empty feed',()=>fixture(async(s,intake)=>{
+ const r=await intake.run(query('hkma'),async()=>new Response(null,{status:503}));assert.equal(r.state,'error');assert.equal(r.ingestCommitted,false);const p=intake.detail(r.id).pages[0];assert.equal(p.payload.httpStatus,503);assert.equal(p.responseHash,hash(''));assert.equal(s.db.prepare('SELECT body,bytes FROM news_source_responses WHERE hash=?').get(p.responseHash).body,'');assert.equal(s.db.prepare('SELECT bytes FROM news_source_responses WHERE hash=?').get(p.responseHash).bytes,0);
+}));

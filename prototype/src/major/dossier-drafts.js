@@ -1,5 +1,17 @@
 const memory=new Map(),listeners=new Map(),confirmed=new Map();
-export const dossierDraftKey=topic=>`signal-hunter:dossier-draft:v1:${topic.id}:${topic.createdAt||''}`;
+export const legacyDossierDraftKey=topic=>`signal-hunter:dossier-draft:v1:${topic.id}:${topic.createdAt||''}`;
+export const dossierDraftKey=(topic,instance='legacy')=>'signal-hunter:dossier-draft:v2:'+JSON.stringify([instance,topic.id,topic.createdAt||'']);
+// Old keys have no dataset identity: preserve the original and require an explicit
+// user decision before copying their contents into a dataset-scoped draft.
+export function readLegacyDossierDraft(topic,storage){
+ let raw;try{raw=storage?.getItem(legacyDossierDraftKey(topic));}catch{return null;}
+ if(!raw)return null;
+ try{
+  const value=JSON.parse(raw),strings=v=>Array.isArray(v)&&v.every(x=>typeof x==='string');
+  if(!value||!Number.isSafeInteger(value.base)||value.base<1||typeof value.reason!=='string'||!['draft','complete'].includes(value.status)||!Array.isArray(value.sections)||!value.sections.length||!value.sections.every(s=>s&&typeof s.id==='string'&&typeof s.title==='string'&&strings(s.paragraphs)&&(s.sourceIds===undefined||strings(s.sourceIds))))return {invalid:true};
+  return {draft:normalizeDossierDraft(value)};
+ }catch{return {invalid:true};}
+}
 export function normalizeDossierDraft(value){
  return {...value,generation:Number.isSafeInteger(value.generation)?value.generation:0,sections:(value.sections||[]).map(s=>({...s,paragraphs:Array.isArray(s.paragraphs)?s.paragraphs:[''],sourceIds:Array.isArray(s.sourceIds)?s.sourceIds:[]}))};
 }
