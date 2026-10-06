@@ -5,7 +5,8 @@ import {collectEvaluationSources} from './evaluation-baseline.mjs';
 import {evaluationTime} from '../shared/evaluation.mjs';
 import {instrument} from '../shared/securities.mjs';
 import {providerMinuteTimestamp} from '../shared/provider-time.mjs';
-import {EVENT_PRICE_VERSION,EVENT_PRICE_POLICY,EVENT_PRICE_WINDOWS,eventPriceErrors} from '../shared/event-prices.mjs';
+import {EVENT_PRICE_VERSION,EVENT_PRICE_POLICY,EVENT_PRICE_WINDOWS,DAILY_PRICE_VERSION,DAILY_PRICE_POLICY,eventPriceErrors} from '../shared/event-prices.mjs';
+import {dailyPriceObservations,dailyPriceRows} from './daily-event-prices.mjs';
 const fail=i=>{throw Error(eventPriceErrors[i]);};
 const root=fileURLToPath(new URL('../../',import.meta.url));
 let loadedHash=null;try{loadedHash=digest(collectEvaluationSources(root));}catch{}
@@ -98,10 +99,11 @@ export function openEventPrices(store,evaluations,{enabled=false,now=Date.now}={
  const db=store.db;db.exec('CREATE TABLE IF NOT EXISTS event_price_reports(id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,request_id TEXT NOT NULL UNIQUE,request_hash TEXT NOT NULL,payload TEXT NOT NULL)');
  const guard=()=>{if(!enabled)fail(5);if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw Error('恢复副本需先完成核对确认');};
  const api={
-  list(batchId){evaluations.report(batchId);const all=db.prepare("SELECT id,batch_id AS batchId,json_extract(payload,'$.asOf') AS asOf,json_extract(payload,'$.hash') AS hash,json_extract(payload,'$.benchmarks') AS benchmarks,json_extract(payload,'$.summary') AS summary FROM event_price_reports WHERE batch_id=? ORDER BY rowid DESC").all(batchId);return {enabled,reports:all.map(r=>({...r,benchmarks:JSON.parse(r.benchmarks),summary:JSON.parse(r.summary)}))};},
+  list(batchId){evaluations.report(batchId);const all=db.prepare("SELECT id,batch_id AS batchId,json_extract(payload,'$.asOf') AS asOf,json_extract(payload,'$.format') AS format,json_extract(payload,'$.hash') AS hash,json_extract(payload,'$.benchmarks') AS benchmarks,json_extract(payload,'$.summary') AS summary FROM event_price_reports WHERE batch_id=? ORDER BY rowid DESC").all(batchId);return {enabled,reports:all.map(r=>({...r,benchmarks:JSON.parse(r.benchmarks),summary:JSON.parse(r.summary)}))};},
   get(batchId,id){const p=checked(db.prepare('SELECT id,payload FROM event_price_reports WHERE id=? AND batch_id=?').get(id,batchId));return p;},
   freeze(batchId,data){
-   guard();if(!data||Object.keys(data).sort().join(',')!=='benchmarks,requestId'||typeof data.requestId!=='string'||!/^[-a-zA-Z0-9_]{8,80}$/.test(data.requestId)||!data.benchmarks||Array.isArray(data.benchmarks)||typeof data.benchmarks!=='object'||Object.keys(data.benchmarks).some(k=>!['USD','HKD','CNY'].includes(k)))fail(0);
+   guard();if(!data||!['benchmarks,requestId','basis,benchmarks,requestId'].includes(Object.keys(data).sort().join(','))||data.basis!==undefined&&!['minute','daily'].includes(data.basis)||typeof data.requestId!=='string'||!/^[-a-zA-Z0-9_]{8,80}$/.test(data.requestId)||!data.benchmarks||Array.isArray(data.benchmarks)||typeof data.benchmarks!=='object'||Object.keys(data.benchmarks).some(k=>!['USD','HKD','CNY'].includes(k)))fail(0);
+   const daily=data.basis==='daily';
    const benchmarks={};for(const [currency,value] of Object.entries(data.benchmarks)){let spec;try{if(typeof value!=='string')throw Error();spec=instrument(value);}catch{fail(0);}if(spec.currency!==currency)fail(0);benchmarks[currency]=spec.symbol;}
    const requestHash=digest({batchId,data});let report;
    db.exec('BEGIN IMMEDIATE');try{
@@ -114,11 +116,11 @@ export function openEventPrices(store,evaluations,{enabled=false,now=Date.now}={
      const asOf=iso(now()),symbols=new Set([...b.samples.flatMap(s=>(s.triage?.companies||[]).map(c=>c.symbol).filter(s=>typeof s==='string')),...Object.values(benchmarks)]);
      if(stamp(b.sealedAt)===null||stamp(asOf)<stamp(b.sealedAt))fail(0);
      const archives=[];let bytes=Buffer.byteLength(JSON.stringify({cohort,sources}));
-     for(const symbol of [...symbols].sort())for(const row of db.prepare('SELECT * FROM quote_snapshots WHERE symbol=? ORDER BY id').iterate(symbol)){
+     for(const symbol of [...symbols].sort())for(const row of db.prepare(daily?'SELECT * FROM daily_snapshots WHERE symbol=? ORDER BY received_at,hash':'SELECT * FROM quote_snapshots WHERE symbol=? ORDER BY id').iterate(symbol)){
       bytes+=Buffer.byteLength(row.payload);if(archives.length>=20000||bytes>64*1024*1024)fail(3);archives.push({...row});
      }
-     const obs=eventPriceObservations(archives,asOf),result=eventPriceRows(b.samples,cohort.report.labelSnapshot,obs.points,benchmarks,asOf);
-     const value={id:randomUUID(),batchId,asOf,format:EVENT_PRICE_VERSION,policy:EVENT_PRICE_POLICY,benchmarks,cohort,archives,archiveDiagnostics:obs.diagnostics,sources,sourceHash:digest(sources),...result,forwardEligible:false,limitations:['事后固定窗口描述，不是可成交报价、因果效应或独立前向效果','基于冻结初筛的提及证券，身份/影响方向未独立确认；全部层级与无证券样本保留','自然日不是交易日；休市、缺价、未到期和不同来源不填零','分钟标签口径仍需供应商核验；后续分钟仅作为已结束观察依据，不保证最终修订','未复权价格不含分红、拆合股调整、FX、费用或滑点，不是投资总回报','参照标的由本次配置选择，未证明行业代表性；相减是百分点差而非因果超额收益','同事件簇及转载可能相关；不把逐条或多证券数量当作独立样本']};
+     const obs=daily?dailyPriceObservations(archives,asOf):eventPriceObservations(archives,asOf),result=daily?dailyPriceRows(b.samples,cohort.report.labelSnapshot,obs,benchmarks,asOf):eventPriceRows(b.samples,cohort.report.labelSnapshot,obs.points,benchmarks,asOf);
+     const value={id:randomUUID(),batchId,asOf,format:daily?DAILY_PRICE_VERSION:EVENT_PRICE_VERSION,policy:daily?DAILY_PRICE_POLICY:EVENT_PRICE_POLICY,benchmarks,cohort,archives,archiveDiagnostics:obs.diagnostics,sources,sourceHash:digest(sources),...result,forwardEligible:false,limitations:daily?['仅为供应商日线的事后价格描述，不是可成交收益、因果效应或独立前向质量','起点固定为判断当地日期后的下个市场交易日收盘，再计算1/5/20个交易日；不是信号当日成交','按当前已维护日历计数；停牌、缺价和未知日历不顺延，不以数据行数替代交易日','各价格保留首次有效档案及实际收取时间；历史补采不代表当时系统已拥有行情','供应商close的复权语义及公司行动完整性未独立核验；来源报告的窗口内公司行动使价格结果未知','回撤仅来自完整每日收盘序列，不代表盘中回撤、组合净值或涨停排队成交能力','不含分红、FX、费用、滑点；基准须显式选择并同市场同源同日期，代表性未核验','全部初筛层级、无证券、亏损及未知保留；同事件或转载不视为独立样本']:['事后固定窗口描述，不是可成交报价、因果效应或独立前向效果','基于冻结初筛的提及证券，身份/影响方向未独立确认；全部层级与无证券样本保留','自然日不是交易日；休市、缺价、未到期和不同来源不填零','分钟标签口径仍需供应商核验；后续分钟仅作为已结束观察依据，不保证最终修订','未复权价格不含分红、拆合股调整、FX、费用或滑点，不是投资总回报','参照标的由本次配置选择，未证明行业代表性；相减是百分点差而非因果超额收益','同事件簇及转载可能相关；不把逐条或多证券数量当作独立样本']};
      report={...value,hash:digest(value)};if(Buffer.byteLength(JSON.stringify(report))>64*1024*1024)fail(3);
      db.prepare('INSERT INTO event_price_reports VALUES(?,?,?,?,?)').run(report.id,batchId,data.requestId,requestHash,JSON.stringify(report));
     }
