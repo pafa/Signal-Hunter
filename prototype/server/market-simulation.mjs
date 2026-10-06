@@ -1,3 +1,4 @@
+import {executionFees} from './market-fees.mjs';
 import {compareMarketTime} from './market-time.mjs';
 import {executionLiquidity} from './market-liquidity.mjs';
 import {withMarketObservationPeaks} from './market-observations.mjs';
@@ -130,10 +131,10 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
      if(qty<=0){wait('当前可用数量不足，保留未成交余量');continue;}
      const execution=o.side==='buy'&&b.profile?.entry==='cn-main-board-limit-up'?String(q.limitUpPrice):priceWithSlippage(o.side==='buy'?q.ask:q.bid,b.config.slippageBps,q.tickSize,o.side),px=decimal(execution),limit=decimal(o.limitPrice);
      if(px<=0n||(o.side==='buy'?px>limit:px<limit)){wait('不利滑点后的价格未满足限价');continue;}
-     const gross=amount(qty,execution,q.fx.usdPerUnit),charge=fee(gross,b.config.feeBps),net=o.side==='buy'?gross+charge:gross-charge;
+     const gross=amount(qty,execution,q.fx.usdPerUnit);let charges;try{charges=executionFees(q,{qty,price:execution,side:o.side,at,feeBps:b.config.feeBps,accrual:o.feeAccrual});}catch{wait('费用方案不可核验，保留未成交余量');continue;}const charge=charges.totalCents,net=o.side==='buy'?gross+charge:gross-charge;
      if(net<0){wait('费用超过卖出金额');continue;}
      if(o.side==='buy'&&(net>o.budgetCents-o.spentCents||net>b.cashCents)){wait('成交费用或汇率变化超出预算');continue;}
-     const fill={id:randomUUID(),liquidityVersion:2,orderId:o.id,topicId:o.topicId,topicVersion:o.topicVersion,symbol:o.symbol,side:o.side,qty,price:execution,fx:q.fx,grossCents:gross,feeCents:charge,netCents:net,at,marketSnapshot:q,approvalFingerprint:o.approval.fingerprint};
+     const fill={id:randomUUID(),liquidityVersion:2,orderId:o.id,topicId:o.topicId,topicVersion:o.topicVersion,symbol:o.symbol,side:o.side,qty,price:execution,fx:q.fx,grossCents:gross,feeCents:charge,feeBreakdown:charges,netCents:net,at,marketSnapshot:q,approvalFingerprint:o.approval.fingerprint};
      if(o.side==='buy'){
       b.cashCents-=net;o.spentCents+=net;b.lots.push({id:fill.id,symbol:o.symbol,topicId:o.topicId,topicVersion:o.topicVersion,issuerId:q.issuerId,qty,costCents:net,openedAt:at,entryPrice:execution,peakPrice:execution,sellableAt:q.sellableAt,holdUntil:o.holdUntil});
      }else{
@@ -144,7 +145,7 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
       if(needed)throw new Error('市场模拟内部可卖量不一致');b.lots=b.lots.filter(l=>l.qty>0);fill.costCents=basis;fill.realizedCents=net-basis;fill.allocations=allocations;b.realizedCents+=net-basis;
       if(compareMarketTime(q.settlesAt,at)<=0)b.cashCents=sum([b.cashCents,net]);else b.unsettled.push({fillId:fill.id,amountCents:net,at:q.settlesAt,rulesVersion:q.rulesVersion});
      }
-     b.feesCents+=charge;b.fills.push(fill);o.filledQty+=qty;o.status=o.filledQty===o.qty?'filled':'partial';o.waitReason=null;
+     if(charges.accrual)o.feeAccrual=charges.accrual;b.feesCents+=charge;b.fills.push(fill);o.filledQty+=qty;o.status=o.filledQty===o.qty?'filled':'partial';o.waitReason=null;
      b.liquidity[liquidityKey]={version:2,fingerprint,buy:used?.buy||0,sell:used?.sell||0};b.liquidity[liquidityKey][o.side]+=qty;
      query('INSERT INTO market_sim_liquidity VALUES(?,?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload').run(liquidityKey,JSON.stringify(b.liquidity[liquidityKey]));
      updates.push({kind:'fill',fillId:fill.id,orderId:o.id,qty,status:o.status});changed=true;

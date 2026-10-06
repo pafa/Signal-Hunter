@@ -2,18 +2,9 @@ import {marketTime,isMarketInstant,compareMarketTime} from './market-time.mjs';
 import {instrument} from '../shared/securities.mjs';
 import {marketConfigFields,marketErrors} from '../shared/market-simulation.mjs';
 export const marketFail=i=>{throw new Error(marketErrors[i]);};
-const max=BigInt(Number.MAX_SAFE_INTEGER);
-function safe(n){if(n>max||n< -max)marketFail(12);return Number(n);}
-export function decimal(value){
- const s=String(value);if(!/^(0|[1-9]\d{0,10})(\.\d{1,6})?$/.test(s))marketFail(12);
- const [whole,fraction='']=s.split('.');return BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0'));
-}
-const rounded=(a,b)=>(a+b/2n)/b;
-// All account amounts are integer USD cents. Price and FX multiplication uses decimal integers.
-export function amount(qty,price,fx='1'){if(!Number.isSafeInteger(qty)||qty<0)marketFail(12);return safe(rounded(BigInt(qty)*decimal(price)*decimal(fx),10000000000n));}
-export const cents=value=>amount(1,value);
-export const fee=(gross,bps)=>safe(rounded(BigInt(gross)*decimal(bps),10000000000n));
-export const sum=values=>safe(values.reduce((n,v)=>n+BigInt(v),0n));
+import {amount,cents,decimal,fee,sum} from './market-money.mjs';
+export {amount,cents,decimal,fee,sum} from './market-money.mjs';
+import {executionFees} from './market-fees.mjs';
 export function validateConfig(data){
  if(!data||Object.keys(data).sort().join(',')!==Object.keys({...marketConfigFields,allowOvernight:0}).sort().join(','))marketFail(3);
  for(const k of Object.keys(marketConfigFields)){const n=data[k];if(typeof n!=='number'||!Number.isFinite(n)||n<0||n>(k.endsWith('Pct')?100:k.endsWith('Bps')?1000:k==='maxHoldDays'?365:k==='maxOrderMinutes'?10080:3600))marketFail(3);decimal(n);if(!k.endsWith('Pct')&&!k.endsWith('Bps')&&(!Number.isSafeInteger(n)||n<1))marketFail(3);}
@@ -40,6 +31,7 @@ export function quoteIssues(symbol,q,config,at,{execution=false,allowLimitUp=fal
  if(f?.executable===false||f?.kind==='reference-fx')bad('参考汇率不能作为成交或账本FX');
  if(!f?.id||!f.source||!isMarketInstant(f.asOf)||!isMarketInstant(f.receivedAt)||!isMarketInstant(f.validUntil)||compareMarketTime(f.asOf,f.receivedAt)>0||compareMarketTime(f.receivedAt,at)>0||compareMarketTime(f.validUntil,at)<0)bad('FX缺失、过期或含未来数据');
  try{if(decimal(f?.usdPerUnit)<=0n||spec.currency==='USD'&&decimal(f.usdPerUnit)!==1000000n)bad('FX币种口径无效');}catch{bad('FX精度无效');}
+ if(q.executionFeed===true){try{executionFees(q,{qty:1,price:q.ask,side:'buy',at,feeBps:config.feeBps});}catch{bad('费用方案未核验或不在生效窗口');}}
  if(execution){
   if(q.tradable!==true||q.halted!==false||(q.priceLimitState!=='normal'&&!(allowLimitUp&&q.priceLimitState==='limit-up')))bad('休市、停牌、涨跌停或交易状态未知');
   if(!isMarketInstant(q.sessionOpen)||!isMarketInstant(q.sessionClose)||compareMarketTime(at,q.sessionOpen)<0||compareMarketTime(at,q.sessionClose)>=0)bad('不在已核验交易时段');
@@ -55,7 +47,11 @@ export function issuerIssues(symbol,issuerId,q){
  return typeof issuerId!=='string'||!issuerId.trim()||q?.issuerId!==issuerId?[`${symbol}：行情发行人与原持仓或批准依据不一致或缺失`]:[];
 }
 export function lotQuoteIssues(lot,q,config,at){return [...quoteIssues(lot.symbol,q,config,at),...issuerIssues(lot.symbol,lot.issuerId,q)];}
-const approvalIssuerIssues=(order,q)=>working(order)?issuerIssues(order.symbol,order.approval?.evidence?.quotes?.[order.symbol]?.issuerId,q):[];
+const approvalIssuerIssues=(order,q)=>{
+ if(!working(order))return [];const original=order.approval?.evidence?.quotes?.[order.symbol];
+ const changed=original?.executionFeed||q?.executionFeed?original?.executionFeed!==q?.executionFeed||original?.source!==q?.source||original?.rulesVersion!==q?.rulesVersion||original?.authorization?.configurationHash!==q?.authorization?.configurationHash:false;
+ return [...issuerIssues(order.symbol,original?.issuerId,q),...(changed?[`${order.symbol}：执行来源权限或规则版本与原批准依据不同，需重新申请`]:[]),...(JSON.stringify(original?.fees??null)!==JSON.stringify(q?.fees??null)?[`${order.symbol}：费用方案与原批准依据不同，需重新申请`]:[])];
+};
 export function valuation(book,quotes,at){
  const missing=[],positions=book.lots.map(l=>{
   const q=quotes[l.symbol],issues=lotQuoteIssues(l,q,book.config,at);missing.push(...issues);
@@ -90,7 +86,7 @@ export function assessOrder(book,order,quotes,at){
   reasons.push(...v.missing);
   for(const o of buys){
    const bq=quotes[o.symbol],issues=[...quoteIssues(o.symbol,bq,book.config,at),...approvalIssuerIssues(o,bq)];if(issues.length){reasons.push(...issues);continue;}
-   const remaining=o.qty-o.filledQty,gross=amount(remaining,o.limitPrice,bq.fx.usdPerUnit),charge=fee(gross,book.config.feeBps),cost=gross+charge;
+   const remaining=o.qty-o.filledQty,gross=amount(remaining,o.limitPrice,bq.fx.usdPerUnit);let charge;try{charge=executionFees(bq,{qty:remaining,price:o.limitPrice,side:'buy',at,feeBps:book.config.feeBps,accrual:o.feeAccrual}).totalCents;}catch{reasons.push(`${o.symbol}：费用方案未核验、过期或发生变化`);continue;}const cost=gross+charge;
    if(cost>o.budgetCents-o.spentCents)reasons.push(`${o.symbol}：限价与费用超过剩余USD预算`);
    costs.push(cost);projected.push({symbol:o.symbol,topicId:o.topicId,valueCents:amount(remaining,bq.mark,bq.fx.usdPerUnit)});
   }

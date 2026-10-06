@@ -14,7 +14,7 @@ const ref=($ref,...path)=>({$ref,path}),topic=ref('topic','createdTopicId'),topi
 function setup(){
  const directory=mkdtempSync(join(tmpdir(),'pipeline-pair-')),sources=collectEvaluationSources(root),roots={};
  for(const role of ['baseline','candidate']){roots[role]=join(directory,role);for(const [file,v] of Object.entries(sources)){mkdirSync(dirname(join(roots[role],file)),{recursive:true});writeFileSync(join(roots[role],file),v.text);}symlinkSync(join(root,'prototype/node_modules'),join(roots[role],'prototype/node_modules'),'dir');}
- const changed=join(roots.candidate,'prototype/server/market-simulation.mjs');writeFileSync(changed,readFileSync(changed,'utf8').replace('fee(gross,b.config.feeBps)','fee(gross,b.config.feeBps+1)'));
+ const changed=join(roots.candidate,'prototype/server/market-simulation.mjs'),original=readFileSync(changed,'utf8'),anchor='feeBps:b.config.feeBps';assert.ok(original.includes(anchor),'fee perturbation must change the candidate');writeFileSync(changed,original.replace(anchor,'feeBps:b.config.feeBps+1'));
  const binary=join(directory,'fake-codex.mjs');writeFileSync(binary,`#!${process.execPath}
 import fs from 'node:fs';const args=process.argv.slice(2),value=k=>args[args.indexOf(k)+1];
 if(args.includes('--version')){console.log('codex-cli 0.160.0-fixture');process.exit(0);}
