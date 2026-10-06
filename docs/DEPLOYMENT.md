@@ -40,6 +40,8 @@ npm run service:config -- linux ./signal-hunter.service demo
 
 命令拒绝覆盖已有配置。配置包含当前 Node、源码和数据库的绝对路径，属于本机生成物，勿纳入源码发布。长期目录应固定，移动后重新生成。macOS 配置不保证注销后或机器睡眠时继续运行；Linux 注销后的运行也依赖用户服务设置。
 
+使用本机Codex的研究实例生成服务配置前，需要在该命令环境中显式提供`SIGNAL_CODEX_BIN`、`SIGNAL_CODEX_MODEL`及需要保留的`SIGNAL_CODEX_EFFORT`、`SIGNAL_CODEX_TIMEOUT_MS`。生成器将这四项配置写入私有服务文件，避免从前台切换到系统服务后丢失模型设置；不会复制其他进程环境或凭据。生成配置仍不安装、启用服务或模型任务。
+
 macOS 在核对候选后，可使用 launchctl bootstrap gui/<用户数字ID> <配置绝对路径>；停止用 bootout 指定同一服务。Linux 在核对后把文件放入用户 systemd 配置目录，执行 daemon-reload 后启用。安装和真实主机重启验收是独立步骤，本批未替用户启用服务。
 
 ## 运行控制

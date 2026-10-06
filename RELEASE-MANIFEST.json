@@ -74,8 +74,8 @@
       "sha256": "d8bcfef6287f47ca7073adbf8d9a8b7f3db5ec4ed05ec69a22d5384d01c57ec2"
     },
     "docs/BACKLOG.md": {
-      "bytes": 411381,
-      "sha256": "5d9e988153bc49af48aad4c7b93d1ae7095a7dd8986aa55642d2988cbcc89359"
+      "bytes": 413963,
+      "sha256": "b61929a8b60c7675a63d69e69889ccdac1b0f3d3b9b81b2ddab3a3dd86b3cce8"
     },
     "docs/BRANDING.md": {
       "bytes": 990,
@@ -86,12 +86,12 @@
       "sha256": "ecb3e73eeb588bde28ccbd073062fa62f7da8454f3ecf1f469e3db962c5819d8"
     },
     "docs/DECISIONS.md": {
-      "bytes": 82911,
-      "sha256": "442599a293912d868e3ff2b11ccda536f1b1b9806752ea727d1d6f305b7a3845"
+      "bytes": 83426,
+      "sha256": "48407c3a667526b9c8eaa507b31b8ba0e5fe1a22c8e14d27f9d7d3f2133ff14a"
     },
     "docs/DEPLOYMENT.md": {
-      "bytes": 109019,
-      "sha256": "dfd83a3a2e981744e0214ff434a070315582a21fa0ffa8d7b8c3688cc816fe4b"
+      "bytes": 109440,
+      "sha256": "e34bc5e55303e65e47d738021cb48de9fbe7c25b3175ba57d0fb7ab51a3972e4"
     },
     "docs/EVALUATION-PROTOCOL.md": {
       "bytes": 46856,
@@ -274,8 +274,8 @@
       "sha256": "90ce54a7ca6f68e5bdbf62593d212bccfdc4c79aa47961fb1650832faae657c0"
     },
     "prototype/scripts/service-config.mjs": {
-      "bytes": 2572,
-      "sha256": "fc2a378116c6cf61503ada91cc25f6dcede637be538a6086450d8a9fd371a9fb"
+      "bytes": 2899,
+      "sha256": "c77196fa13d3ee2cfe90cb4dd5c0162bc4a603dc514d7700e4b032d69f0f6a18"
     },
     "prototype/scripts/source-comparison-worker.mjs": {
       "bytes": 2269,
@@ -1522,8 +1522,8 @@
       "sha256": "c6ff2a68bf54b48cb0a27f8e929c154733144991fec14b36d0dcff79c9267639"
     },
     "prototype/tests/instance-profile.test.js": {
-      "bytes": 7495,
-      "sha256": "bcdda834a7b20392bdd06eca4152e3771e6e1c85446bbcc8558abd70ab16acaf"
+      "bytes": 8172,
+      "sha256": "ae8b10b7730294f320d6778c308ad6e373389a3d6b3b2af7cc75f71389c3997a"
     },
     "prototype/tests/market-account-flow.test.js": {
       "bytes": 10237,
@@ -1854,8 +1854,8 @@
       "sha256": "45d69a073ff946029a2116a579ca70a30d4a5249a30c227ce8d9429cd9b59b2a"
     },
     "prototype/tests/source-comparison.test.js": {
-      "bytes": 9919,
-      "sha256": "0726e4abd29d7ddd9d4375081fd7bdf111811df786919fa50e87242b9db44546"
+      "bytes": 10602,
+      "sha256": "362223445dea2b1df5ff68e26d665594bfa6ecd88cf47decc3f79e364b641052"
     },
     "prototype/tests/source-drafts-ui.test.js": {
       "bytes": 7063,

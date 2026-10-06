@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,chmodSync,readdirSync,cpSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync,chmodSync,readdirSync,cpSync,realpathSync,lstatSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -73,10 +73,16 @@ test('CLI selects source plans explicitly and reports them without invoking cand
 
 test('installed dependency content changes cannot reuse the frozen candidate environment',async()=>{
  const f=setup();try{
-  const installed=join(f.directory,'deps/node_modules');mkdirSync(dirname(installed),{recursive:true});cpSync(join(root,'prototype/node_modules'),installed,{recursive:true,verbatimSymlinks:true,filter:path=>!path.includes('/node_modules/.vite')});
+  const dependencyAlias=join(f.directory,'dependency-alias');symlinkSync(join(root,'prototype/node_modules'),dependencyAlias,'dir');
+  const sourceManifest=join(dependencyAlias,'jsdom/package.json'),originalManifest=readFileSync(sourceManifest);
+  // Resolve the root alias before copying; keep internal package links intact.
+  // Copying the alias itself would make this drift fixture edit shared dependencies.
+  const installed=join(f.directory,'deps/node_modules');mkdirSync(dirname(installed),{recursive:true});cpSync(realpathSync(dependencyAlias),installed,{recursive:true,verbatimSymlinks:true,filter:path=>!path.includes('/node_modules/.vite')});
+  assert.equal(lstatSync(installed).isDirectory(),true);assert.notEqual(realpathSync(installed),realpathSync(dependencyAlias));
   for(const path of Object.values(f.roots)){rmSync(join(path,'prototype/node_modules'));symlinkSync(installed,join(path,'prototype/node_modules'),'dir');}
   await f.save();const manifest=join(installed,'jsdom/package.json');writeFileSync(manifest,readFileSync(manifest,'utf8')+'\n');
   await assert.rejects(runSourceComparison(join(f.directory,'plan')),/environment-changed/);assert.deepEqual(readdirSync(join(f.directory,'plan')),['plan.json']);
+  assert.deepEqual(readFileSync(sourceManifest),originalManifest,'dependency drift must remain inside the isolated fixture');
  }finally{f.close();}
 });
 test('concurrent invocation is excluded and cancellation preserves the unstarted candidate slot',async()=>{
