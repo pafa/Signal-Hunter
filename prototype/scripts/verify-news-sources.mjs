@@ -12,7 +12,7 @@ try{
  const input=args.length?newsWindow({sourceId:'hkma',from:args[1],to:args[3]},new Date().toISOString()):null;
  const directory=resolve(output);mkdirSync(directory,{mode:0o700});
  store=openStore(join(directory,'research.sqlite'));chmodSync(join(directory,'research.sqlite'),0o600);assertDatabaseMode(store,'research');
- store.setSettings({newsDiscoveryEnabled:false,newsTrackingEnabled:false,newsFedEnabled:!input,newsHkmaEnabled:true,newsCsrcEnabled:!input});
+ store.setSettings({newsDiscoveryEnabled:false,newsTrackingEnabled:false,newsFedEnabled:!input,newsHkmaEnabled:true,newsCsrcEnabled:!input,newsNvidiaEnabled:!input});
  service=createService(store,{mode:'research'});
  const result=input?await service.backfillNews(input):await service.runOperation('news');
  const snapshot=service.snapshot();

@@ -11,8 +11,8 @@ export function newsWindow(input,at){
  return {sourceId:input.sourceId,from:input.from,to:input.to};
 }
 export function officialQueries(settings,at=new Date().toISOString(),window=null){
- const from=window?.from||new Date(Date.parse(at)-6*86400000).toISOString().slice(0,10),to=window?.to||at.slice(0,10);
- return OFFICIAL_NEWS_SOURCES.filter(s=>!window||s.id===window.sourceId).map(s=>({...s,enabled:settings[s.setting]===true,keywords:'',kind:window?'backfill':'latest',window:{from,to},adapterVersion:NEWS_ADAPTER_VERSION}));
+ const to=window?.to||at.slice(0,10);
+ return OFFICIAL_NEWS_SOURCES.filter(s=>!window||s.id===window.sourceId).map(s=>({...s,enabled:settings[s.setting]===true,keywords:'',kind:window?'backfill':'latest',window:{from:window?.from||new Date(Date.parse(at)-((s.lookbackDays||7)-1)*86400000).toISOString().slice(0,10),to},adapterVersion:NEWS_ADAPTER_VERSION}));
 }
 export function sourcePageUrl(query,page){
  const source=OFFICIAL_NEWS_SOURCES.find(s=>s.id===query.id);if(!source)throw new Error('未知新闻来源');
@@ -27,11 +27,11 @@ function normalize(source,{title,link,date},rejections,index){
  if(typeof title!=='string'||!title.trim()||title.length>2000)return reject('invalid-title');
  if(typeof link!=='string'||!link.trim())return reject('invalid-link');
  let url;try{url=new URL(link,source.url);}catch{return reject('invalid-link');}
- const host={fed:'www.federalreserve.gov',hkma:'www.hkma.gov.hk',csrc:'www.csrc.gov.cn'}[source.id];
+ const host={fed:'www.federalreserve.gov',hkma:'www.hkma.gov.hk',csrc:'www.csrc.gov.cn',nvidia:'nvidianews.nvidia.com'}[source.id];
  if(url.protocol!=='https:'||url.hostname!==host||url.port||url.username||url.password)return reject('untrusted-link');
  url.hash='';
  let publishedAt,datePrecision;
- if(source.id==='fed'){
+ if(['fed','nvidia'].includes(source.id)){
   if(typeof date!=='string'||!/(?:GMT|UTC|[+-]\d{4})\s*$/.test(date)||!Number.isFinite(Date.parse(date)))return reject('invalid-publication-time');
   publishedAt=new Date(date).toISOString();datePrecision='instant';
  }else{
@@ -43,7 +43,7 @@ function normalize(source,{title,link,date},rejections,index){
 export function parseOfficialPage(query,text,page=1){
  const source=OFFICIAL_NEWS_SOURCES.find(s=>s.id===query.id);if(!source)throw new Error('未知新闻来源');
  let entries,hasMore=false,limit=null;
- if(source.id==='fed'){
+ if(['fed','nvidia'].includes(source.id)){
   if(/<!DOCTYPE|<!ENTITY/i.test(text)||XMLValidator.validate(text)!==true)throw new Error('官方RSS格式无效');
   const feed=parser.parse(text);if(!feed.rss?.channel)throw new Error('官方来源未返回RSS');
   entries=array(feed.rss.channel.item).map(x=>({title:x.title,link:x.link,date:x.pubDate}));

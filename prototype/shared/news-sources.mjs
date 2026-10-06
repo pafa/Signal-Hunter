@@ -1,8 +1,9 @@
-export const NEWS_ADAPTER_VERSION='official-headlines-1';
+export const NEWS_ADAPTER_VERSION='official-headlines-2';
 export const OFFICIAL_NEWS_SOURCES=[
  {id:'fed',setting:'newsFedEnabled',label:'美联储新闻稿',publisher:'Federal Reserve Board',provider:'fed-rss',url:'https://www.federalreserve.gov/feeds/press_all.xml',documentation:'https://www.federalreserve.gov/feeds/feeds.htm',history:false,scope:'美联储新闻稿；RSS仅保留近期条目'},
  {id:'hkma',setting:'newsHkmaEnabled',label:'香港金管局新闻稿',publisher:'Hong Kong Monetary Authority',provider:'hkma-api',url:'https://api.hkma.gov.hk/public/press-releases',documentation:'https://apidocs.hkma.gov.hk/documentation/press-releases/',history:true,scope:'金管局新闻稿；日期查询，每次最多3页、300条'},
  {id:'csrc',setting:'newsCsrcEnabled',label:'中国证监会要闻',publisher:'中国证监会',provider:'csrc-public-list',url:'https://www.csrc.gov.cn/searchList/a1a078ee0bc54721ab6b148884c784a8',documentation:'https://www.csrc.gov.cn/csrc/c100028/common_xq_list.shtml',history:false,scope:'证监会要闻最新18条；不是上市公司公告全集'},
+ {id:'nvidia',setting:'newsNvidiaEnabled',label:'NVIDIA官方新闻稿',publisher:'NVIDIA',provider:'nvidia-press-rss',url:'https://nvidianews.nvidia.com/cats/press_release.xml',documentation:'https://nvidianews.nvidia.com/rss',history:false,lookbackDays:14,scope:'官方新闻稿RSS可见条目，14日观察窗口；不是完整历史；公告为公司自述'},
 ];
 export const newsIntakeErrors=[
  '覆盖报告窗口无效，请选择不晚于今天的连续1至31个UTC日期','覆盖报告记录过多，请缩小日期窗口',
