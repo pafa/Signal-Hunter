@@ -84,7 +84,9 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
    }catch(error){
     context.assertActive();guard();
     if(error.message==='已有模型研判正在运行，请等待或取消后再试')return {skipped:'model-busy'};
-    transaction(()=>{const latest=read(row.id);if(latest.run_id)return;setState(latest,'failed',{reason:'自动准备未完成；检查来源、研究版本或模型配置后重试'});});
+    const unavailable=error.code==='SOURCE_READ_UNAVAILABLE';
+    transaction(()=>{const latest=read(row.id);if(latest.run_id)return;setState(latest,'failed',{reason:unavailable?'原文读取失败；保留新闻及读取失败记录，本篇不调用模型，队列继续下一篇':'自动准备未完成；检查来源、研究版本或模型配置后重试'});});
+    if(unavailable)return {skipped:'source-unavailable',itemId:row.id,itemStatus:'failed'};
     return {error:'自动研究准备失败，原新闻和已有研究保留'};
    }
   }

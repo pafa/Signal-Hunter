@@ -22,6 +22,7 @@
     "service:config": "node scripts/service-config.mjs",
     "storage:preview": "node scripts/storage-preview.mjs",
     "market:verify": "node scripts/verify-market-sources.mjs",
+    "execution:verify": "node scripts/verify-execution-feed.mjs",
     "research:codex": "node scripts/codex-research.mjs",
     "research:compare": "node scripts/compare-models.mjs",
     "semantic:evaluate": "node scripts/evaluate-semantics.mjs",

@@ -134,7 +134,11 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    if(sourceJobs.has(id))throw new Error('本事件的来源正在读取，请等待结果');
    if(sourceJobs.size>=2)throw new Error('已有两份来源正在读取，请稍后重试');
    sourceJobs.add(id);
-   try{return linkMaterial(id,data,await sourceReader(url),'public-web',beforeWrite);}
+   try{
+    let material;
+    try{material=await sourceReader(url);}catch(error){const unavailable=new Error(String(error?.message||error));unavailable.code='SOURCE_READ_UNAVAILABLE';throw unavailable;}
+    return linkMaterial(id,data,material,'public-web',beforeWrite);
+   }
    catch(error){materials.attempt(id,{state:'failed',url,method:'public-web',error:String(error.message).slice(0,300)});throw error;}
    finally{sourceJobs.delete(id);}
   },

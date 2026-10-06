@@ -42,6 +42,16 @@ test('failed models require retry and keep the previous immutable run',async()=>
  let fail=true;const f=fixture({runner:async p=>{if(fail)throw Error('fixture failure');return output(p);}});try{f.add();await f.step();await f.finish();let i=f.queue.snapshot().items[0];assert.equal(i.status,'failed');await f.step();assert.equal(f.calls,1);fail=false;f.queue.retry(i.id);await f.step();await f.finish();const next=f.queue.snapshot().items[0];assert.equal(next.attempts.length,2);assert.equal(next.status,'candidate');assert.equal(f.service.modelResearch.get(i.topicId,i.runId).status,'failed');assert.equal(f.reads,1);
  }finally{await f.close();}
 });
+test('three unreadable articles do not block the next readable item or consume model allowance',async()=>{
+ const f=fixture({reader:async url=>{if(!url.endsWith('/readable'))throw Error('Synthetic source cannot be read');return {url,title:'Readable synthetic article',sourceName:'Synthetic',body:'完整合成材料。'.repeat(100),scope:'extracted-text'};}});
+ try{
+  for(const id of ['bad-1','bad-2','bad-3','readable'])f.add(id);f.service.controlOperation('discovery','resume');
+  for(let n=0;n<3;n++){assert.equal((await f.service.runOperation('discovery')).outcome,'skipped');assert.equal(f.service.operations().tasks.discovery.blocked,false);}
+  assert.equal(f.calls,0);assert.equal(f.queue.snapshot().counts.failed,3);assert.equal(f.queue.snapshot().callsInLast24Hours,0);
+  await f.service.runOperation('discovery');await f.finish();assert.equal(f.calls,1);assert.equal(f.queue.snapshot().counts.candidate,1);assert.equal(f.queue.snapshot().counts.failed,3);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM research_source_attempts WHERE json_extract(payload,'$.state')='failed'").get().n,3);
+ }finally{await f.close();}
+});
 test('pause during source reading prevents late material and model writes, leaving an explicit interrupted item',async()=>{
  let release;const f=fixture({reader:url=>new Promise(resolve=>{release=()=>resolve({url,title:'合成',sourceName:'合成',body:'合成来源正文'.repeat(50),scope:'extracted-text'});})});try{f.add();const step=f.step();for(let n=0;!release&&n<50;n++)await new Promise(r=>setImmediate(r));assert(release,'source reader reached');f.service.controlOperation('discovery','pause');release();await step;const i=f.queue.snapshot().items[0];assert.equal(i.status,'interrupted');assert.equal(f.calls,0);assert.equal(f.service.research.materialList(i.topicId).materials.length,0);
  }finally{release?.();await f.close();}

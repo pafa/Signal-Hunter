@@ -1,3 +1,4 @@
+import {loadExecutionConfig} from './execution-inputs.mjs';
 import {historyRecallErrors} from '../shared/historical-recall.mjs';
 import {safeErrorText,safeDiagnosticPayload} from '../shared/safe-errors.mjs';
 import {runtimeConfig,assertDatabaseMode,checkDatabaseFile} from './runtime.mjs';
@@ -71,6 +72,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/reference-fx'){reply(200,service.referenceFx.status());return;}
     if(req.method==='GET'&&url.pathname==='/api/reference-fx/convert'){const data=Object.fromEntries(url.searchParams);if(Object.keys(data).some(k=>!['snapshotId','currency','amount'].includes(k)))throw new Error('参考汇率输入或快照无效');reply(200,service.referenceFx.convert(data));return;}
     if(req.method==='GET'&&url.pathname==='/api/security-directory'){reply(200,{...service.securityDirectory.status({market:url.searchParams.get('market')||'US'}),search:service.securityDirectory.search(Object.fromEntries(url.searchParams))});return;}
+    if(req.method==='GET'&&url.pathname==='/api/execution-feed'){reply(200,service.executionInputs.status());return;}
     if(req.method==='GET'&&url.pathname==='/api/health'){reply(200,service.health());return;}
     if(req.method==='GET'&&url.pathname==='/api/paper/history'){reply(200,service.paper.history());return;}
     if(req.method==='GET'&&url.pathname==='/api/bars'){const symbol=url.searchParams.get('symbol');if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅查看关注标的');const quote=store.quote(symbol);const rows=quote?store.db.prepare('SELECT provider_time AS time,close FROM quote_bars WHERE symbol=? AND provider=? AND timezone=? ORDER BY provider_time DESC LIMIT 6000').all(symbol,quote.provider||'legacy',quote.providerTimezone||'unverified'):[];reply(200,rows.reverse());return;}
@@ -114,6 +116,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='PATCH'&&url.pathname==='/api/price-collection'){service.priceCollection.configure(data);reply(200,updatedSnapshot());return;}
     if(req.method==='PATCH'&&url.pathname==='/api/research-pipeline'){service.researchPipeline.configure(data);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&/^\/api\/research-pipeline\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retry(url.pathname.split('/')[3]);reply(200,updatedSnapshot());return;}
+    if(req.method==='POST'&&url.pathname==='/api/execution-feed/refresh'){if(Object.keys(data).length)throw Error('执行输入只允许服务端配置，不能由浏览器提交报价');reply(200,service.executionInputs.refresh());return;}
     if(req.method==='POST'&&url.pathname==='/api/reference-fx/refresh'){reply(200,await service.referenceFx.refresh(data));return;}
     if(req.method==='POST'&&url.pathname==='/api/security-directory/refresh'){reply(202,service.securityDirectory.refresh(data));return;}
     if(req.method==='POST'&&url.pathname==='/api/forward-windows'){reply(201,service.forwardWindows.freeze(data));return;}
@@ -135,7 +138,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
       if(!keys||Object.keys(data).some(k=>!keys.includes(k)))throw new Error('市场模拟执行数据必须由服务端适配器提供');
       if(orderMatch)reply(200,m.decide(orderMatch[1],data));
       else if(part==='orders')reply(200,m.propose(data));
-      else if(part==='process')reply(200,m.process());
+      else if(part==='process'){service.executionInputs.refresh();reply(200,m.process());}
       else reply(200,m[part](data));return;
     }
     if(req.method==='POST'&&/^\/api\/research\/[^/]+\/material-events(?:\/[-a-z0-9]{36}\/(?:cancel|decision))?$/.test(url.pathname)){
@@ -215,12 +218,13 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
 
 if(process.argv[1]&&existsSync(process.argv[1])&&realpathSync(process.argv[1])===realpathSync(fileURLToPath(import.meta.url))){
   const config=runtimeConfig();
+  const executionConfig=process.env.SIGNAL_EXECUTION_CONFIG?loadExecutionConfig(process.env.SIGNAL_EXECUTION_CONFIG):null;
   checkDatabaseFile(config);
   const store=openStore(config.dbPath);
   try{assertDatabaseMode(store,config.mode);}catch(error){store.close();throw error;}
   const staticHandler=config.production?createStaticHandler(fileURLToPath(new URL('../dist',import.meta.url))):null;
   const modelConfig=process.env.SIGNAL_CODEX_BIN&&process.env.SIGNAL_CODEX_MODEL?{binary:process.env.SIGNAL_CODEX_BIN,model:process.env.SIGNAL_CODEX_MODEL,effort:process.env.SIGNAL_CODEX_EFFORT||'high',timeoutMs:Number(process.env.SIGNAL_CODEX_TIMEOUT_MS||180000)}:null;
-  const service=createService(store,{mode:config.mode,instance:config.instance,modelConfig,storageConfig:{databasePath:config.dbPath,backupRoot:resolve(dirname(config.dbPath),'backups')},backupTask:async()=>{
+  const service=createService(store,{mode:config.mode,instance:config.instance,executionConfig,modelConfig,storageConfig:{databasePath:config.dbPath,backupRoot:resolve(dirname(config.dbPath),'backups')},backupTask:async()=>{
     const result=await createBackup(config.dbPath,resolve(dirname(config.dbPath),'backups'));
     store.status('backup',{state:'ok',receivedAt:result.createdAt,directory:result.directory,sha256:result.sha256});return {ok:true};
   }}),server=http.createServer(createHandler(store,service,{...config,staticHandler}));

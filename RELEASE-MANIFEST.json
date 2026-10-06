@@ -74,8 +74,8 @@
       "sha256": "d8bcfef6287f47ca7073adbf8d9a8b7f3db5ec4ed05ec69a22d5384d01c57ec2"
     },
     "docs/BACKLOG.md": {
-      "bytes": 417440,
-      "sha256": "90ea79958740ddf6e1ec3a18862d46a1d4e7eae3a331c6035ef01f27d63bac83"
+      "bytes": 421525,
+      "sha256": "359784f303ed9ec2d214b130db19fe0f23a3b4f8deae8594a7269f0a881a4543"
     },
     "docs/BRANDING.md": {
       "bytes": 990,
@@ -86,12 +86,12 @@
       "sha256": "ecb3e73eeb588bde28ccbd073062fa62f7da8454f3ecf1f469e3db962c5819d8"
     },
     "docs/DECISIONS.md": {
-      "bytes": 84652,
-      "sha256": "ef724504880f9d00a4019f577b8a1616786b63686d47a8d379b51f59e28b36ab"
+      "bytes": 86384,
+      "sha256": "adf4bee7867d992d1bf6b0126bb05d3acead497361fa93f9c0411769ad9346ec"
     },
     "docs/DEPLOYMENT.md": {
-      "bytes": 111609,
-      "sha256": "e613f5bb8ce30466fa2d6a7a9cf0838fe91c57f5bce9b5a446c10021b2f670c5"
+      "bytes": 113546,
+      "sha256": "f75280a5682e848641241d3a29593ec450ec6f024ef59c63f2a8e9525873bbdf"
     },
     "docs/EVALUATION-PROTOCOL.md": {
       "bytes": 46856,
@@ -102,8 +102,8 @@
       "sha256": "4cf78ba0729fbb84b7f9c0bdf177faa859271d19088e3c7bdd2044803068c26b"
     },
     "docs/MARKET-SIMULATION.md": {
-      "bytes": 10247,
-      "sha256": "9afb838efcd106301a047a2c8ff19b1291b52ed93b8d8579627b45b454f23bbb"
+      "bytes": 15793,
+      "sha256": "541297705a10149a96088ab228491250038f51c3173de617abf28130e5b4f997"
     },
     "docs/OPEN-SOURCE.md": {
       "bytes": 3188,
@@ -170,8 +170,8 @@
       "sha256": "1858451cf6e8482e7de1e3e355486a8759df96d5a8f8c8119188ebfde7549532"
     },
     "prototype/package.json": {
-      "bytes": 1835,
-      "sha256": "ccc2844de5b4aa58908e2855c85a8fa312b928aaa4385c391bdad88023557247"
+      "bytes": 1901,
+      "sha256": "021390f8d09ad0e5317b6c60c730a5742bfe7235b89990192019ca1b954b47a5"
     },
     "prototype/public/major-event-design.html": {
       "bytes": 55626,
@@ -274,8 +274,8 @@
       "sha256": "90ce54a7ca6f68e5bdbf62593d212bccfdc4c79aa47961fb1650832faae657c0"
     },
     "prototype/scripts/service-config.mjs": {
-      "bytes": 2899,
-      "sha256": "c77196fa13d3ee2cfe90cb4dd5c0162bc4a603dc514d7700e4b032d69f0f6a18"
+      "bytes": 2925,
+      "sha256": "5db0e74cac42fab79419a2cc7bc299202e29f9263eb3da387af132f219da6b32"
     },
     "prototype/scripts/source-comparison-worker.mjs": {
       "bytes": 2269,
@@ -288,6 +288,10 @@
     "prototype/scripts/storage-preview.mjs": {
       "bytes": 524,
       "sha256": "92e0cb618294331431afea9608832acb8597a1be320b0570cdc45a2c8ee2607d"
+    },
+    "prototype/scripts/verify-execution-feed.mjs": {
+      "bytes": 1637,
+      "sha256": "3a7e0040f998be7c33d7440b5e9ba92f2a33d6d94593e47821a6b4c6714778a6"
     },
     "prototype/scripts/verify-market-sources.mjs": {
       "bytes": 1545,
@@ -397,6 +401,10 @@
       "bytes": 2874,
       "sha256": "6c8edffdb892e1b2801df15566bd2f6f1204d101b1c5df70f71bfb36f998d8dd"
     },
+    "prototype/server/execution-inputs.mjs": {
+      "bytes": 7948,
+      "sha256": "5363a4fa4187e9793a946a7614738f24d02abf19dd2756090a5578d605926070"
+    },
     "prototype/server/forward-evaluations.mjs": {
       "bytes": 12757,
       "sha256": "b7b78042096defd44b9f64a45c4a243234c73d1e334e9137aad5c97a9bc1f18f"
@@ -426,8 +434,8 @@
       "sha256": "b4d841e532125e403ad051e7f7e461414e251d72326f9e196fc7d762da25c1f2"
     },
     "prototype/server/index.mjs": {
-      "bytes": 30035,
-      "sha256": "e1522eb5ef607cca9ab58614ad0cedf0bdfea119622edde855291fcaad55554a"
+      "bytes": 30629,
+      "sha256": "ce7eb152fa0e75ff4dbdf5118c91525a88ad1df3d2282b17092fb17f2616b820"
     },
     "prototype/server/instance-profile.mjs": {
       "bytes": 3969,
@@ -441,21 +449,29 @@
       "bytes": 1159,
       "sha256": "336734dc6d57c27a897fe6600a358d0ff7bb7986816bce9e025a9034bd7a6a50"
     },
+    "prototype/server/market-fees.mjs": {
+      "bytes": 4236,
+      "sha256": "7023536dd71094dd24326602b29abf91a43a43c660da344745890855a180c72f"
+    },
     "prototype/server/market-liquidity.mjs": {
       "bytes": 3707,
       "sha256": "fab6198993a9151204122d1438230b51b53700ef1900994991133be92d9c0d39"
+    },
+    "prototype/server/market-money.mjs": {
+      "bytes": 941,
+      "sha256": "5a10da8387f8c560c14c5e74a2f06e1c9c2dc6723ac72963ef6e8a5f79735cc9"
     },
     "prototype/server/market-observations.mjs": {
       "bytes": 10545,
       "sha256": "7df66caca0003eb8d38f40b2fad3ef3252b06666e1041370c9438791cb783ae3"
     },
     "prototype/server/market-sim-risk.mjs": {
-      "bytes": 10024,
-      "sha256": "d8ae10b7603efd2787a2549747cd0ab5383cbf5e72ce5d8799c69585d5baecbc"
+      "bytes": 10330,
+      "sha256": "babe470d0a89c904199de6c7a1023828ccd862bae50b96411b625668d5e3562e"
     },
     "prototype/server/market-simulation.mjs": {
-      "bytes": 16522,
-      "sha256": "8c797a6375d5ca4d9136e47746e4275e439354c8c5a0ce3f485e738489fed419"
+      "bytes": 16834,
+      "sha256": "742018e9017f52f0541a183d463fa6704071b060a9021b3e00ebebcc48ebf41a"
     },
     "prototype/server/market-time.mjs": {
       "bytes": 1432,
@@ -606,16 +622,16 @@
       "sha256": "e49f124ecd82dc1543aa01e76b49614ab5bf96e229895cae303d772f7770d6a7"
     },
     "prototype/server/research-pipeline.mjs": {
-      "bytes": 12859,
-      "sha256": "8344717f642f56a9f2616f2acf311ce9cc0659978e562972f61fa20b4c6264dd"
+      "bytes": 13130,
+      "sha256": "8435d1263c51483191dd05dfb84c886f88d634e4f0f7d4b9aed8d004cab571cc"
     },
     "prototype/server/research-seeds.mjs": {
       "bytes": 11466,
       "sha256": "5ab8d78c3eed4b53ce1f15f4ea10a1ea72ab3f2a71eb0fcddab64e155ea28a7b"
     },
     "prototype/server/research.mjs": {
-      "bytes": 34324,
-      "sha256": "ecd35b596450d672f66c42d467adc24473150a8bd7f40f5c8183b6b7e483a4a1"
+      "bytes": 34513,
+      "sha256": "ab881e754ef24c844f923af4592243be6caf7e9d829e0368ed91cd928f2c3424"
     },
     "prototype/server/risk-rules.mjs": {
       "bytes": 2731,
@@ -670,8 +686,8 @@
       "sha256": "802cd76aa63798e7f4fcf2436cc785353775a312a968e99d3e84f7201befbd0c"
     },
     "prototype/server/service.mjs": {
-      "bytes": 19056,
-      "sha256": "bc464560dca5d57fe4d241c5dc9effdb8c14711b6860f9012464728c95a5c5c7"
+      "bytes": 19470,
+      "sha256": "121b2dcfde9e0a3c0547c25e351952fd369f54783f64995ce7bca149d59fb234"
     },
     "prototype/server/source-comparison.mjs": {
       "bytes": 12767,
@@ -1449,9 +1465,21 @@
       "bytes": 3195,
       "sha256": "033e230ef8c312b3ccdd06de3b24e0c64213a1f6cd1bcf264a6e0fc0b1007637"
     },
+    "prototype/tests/execution-feed-flow.test.js": {
+      "bytes": 7691,
+      "sha256": "2a1c3ef7b1bd8bd1b92dc11f59f1b35015ab3958303d0e2116f66253303a5b4a"
+    },
+    "prototype/tests/execution-inputs.test.js": {
+      "bytes": 5714,
+      "sha256": "88cfb4bb95b97fd1de836072979fdf8e2cbb5169877e5bbf2c6a5d98e5506e33"
+    },
     "prototype/tests/fixtures/daily-anomaly.mjs": {
       "bytes": 639,
       "sha256": "0fa06fe024462014f8bf4bd2a4f2e85d0bc198e37004c4280ae6379f240b671a"
+    },
+    "prototype/tests/fixtures/execution-feed.mjs": {
+      "bytes": 2375,
+      "sha256": "09cc3abd8087a1e89dd33cc722e6f778e0a286172a720aba965a09834d3a30cb"
     },
     "prototype/tests/fixtures/market-review.mjs": {
       "bytes": 3390,
@@ -1494,8 +1522,8 @@
       "sha256": "6b4a5c8f982b2d82cd06167c8626375cfb320f444dcfe8e17865729cd1274fc4"
     },
     "prototype/tests/helpers/pipeline-fixture.js": {
-      "bytes": 7816,
-      "sha256": "51b87c1721ebe29fc4e80d4d48b6d8e4539a468e54778544368dc4928c766576"
+      "bytes": 7922,
+      "sha256": "870b44f0811f6d91c4acb26d0a64aeeead0fc3e608bfd3b720b0a42648bda6ac"
     },
     "prototype/tests/historical-body.test.js": {
       "bytes": 7811,
@@ -1522,8 +1550,8 @@
       "sha256": "c6ff2a68bf54b48cb0a27f8e929c154733144991fec14b36d0dcff79c9267639"
     },
     "prototype/tests/instance-profile.test.js": {
-      "bytes": 8172,
-      "sha256": "ae8b10b7730294f320d6778c308ad6e373389a3d6b3b2af7cc75f71389c3997a"
+      "bytes": 8259,
+      "sha256": "84f5517e2c2a1d1e5814a0e44cf71f2e24d553e91ec30823f132d03725d7e75d"
     },
     "prototype/tests/market-account-flow.test.js": {
       "bytes": 10237,
@@ -1536,6 +1564,10 @@
     "prototype/tests/market-execution.test.js": {
       "bytes": 14724,
       "sha256": "06eef30f4c97f0a7553be76351994b72c29454158e01d70b496c651185cfdf52"
+    },
+    "prototype/tests/market-fees.test.js": {
+      "bytes": 3675,
+      "sha256": "ef8d7a6ed5b26733a9e763a01f5cb1ef0b5be96649cee3e4d2b5b4a43312843c"
     },
     "prototype/tests/market-liquidity.test.js": {
       "bytes": 3994,
@@ -1774,8 +1806,8 @@
       "sha256": "da2949dde6223d3635113bb79985d55936c9495e067475293714b0f8cc2b928f"
     },
     "prototype/tests/research-pipeline.test.js": {
-      "bytes": 21640,
-      "sha256": "6b79fee1767c8dd9e9fb73a6fe38194b45a49be322dbb1e334db6956b4011da6"
+      "bytes": 22783,
+      "sha256": "a95e5bd0b4f30ce42b19e921947ae6be7a41a22b7741ecfae716f0a111752cc1"
     },
     "prototype/tests/research-read-scale.test.js": {
       "bytes": 5184,
