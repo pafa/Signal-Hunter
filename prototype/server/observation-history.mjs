@@ -6,16 +6,17 @@ export function observationSummary(db){
 }
 export function observationPage(db,params={}){
  const bad=()=>{throw new Error('待办分页参数无效');};
- if(!params||typeof params!=='object'||Array.isArray(params)||Object.keys(params).some(k=>!['state','before','ceiling'].includes(k)))bad();
+ if(!params||typeof params!=='object'||Array.isArray(params)||Object.keys(params).some(k=>!['state','before','ceiling','id'].includes(k)))bad();
+ if(params.id!==undefined&&(typeof params.id!=='string'||!/^[a-f0-9]{64}$/.test(params.id)))bad();
  const state=params.state??'pending';if(!['all','pending','completed'].includes(state))bad();
  for(const key of ['before','ceiling'])if(params[key]!==undefined&&(!/^\d+$/.test(String(params[key]))||!Number.isSafeInteger(Number(params[key]))))bad();
  if(params.before!==undefined&&params.ceiling===undefined)bad();
  db.exec('BEGIN');try{
  const summary=observationSummary(db),max=Number(summary.revision.split(':')[0]),ceiling=params.ceiling===undefined?max:Number(params.ceiling);if(ceiling>max)bad();
  let cursor=null;if(params.before!==undefined){cursor=db.prepare('SELECT rowid,created_at FROM observation_todos WHERE rowid=? AND rowid<=?').get(Number(params.before),ceiling);if(!cursor)bad();}
- const filter=state==='all'?'':state==='pending'?" AND state!='completed'":" AND state='completed'",base=' FROM observation_todos WHERE rowid<=?'+filter;
- const total=db.prepare('SELECT COUNT(*) n'+base).get(ceiling).n;
- const rows=db.prepare('SELECT rowid,*'+base+(cursor?' AND (created_at<? OR (created_at=? AND rowid<?))':'')+' ORDER BY created_at DESC,rowid DESC LIMIT 51').all(ceiling,...(cursor?[cursor.created_at,cursor.created_at,cursor.rowid]:[]));
+ const filter=state==='all'?'':state==='pending'?" AND state!='completed'":" AND state='completed'",base=' FROM observation_todos WHERE rowid<=?'+filter+(params.id?' AND id=?':'');const args=[ceiling,...(params.id?[params.id]:[])];
+ const total=db.prepare('SELECT COUNT(*) n'+base).get(...args).n;
+ const rows=db.prepare('SELECT rowid,*'+base+(cursor?' AND (created_at<? OR (created_at=? AND rowid<?))':'')+' ORDER BY created_at DESC,rowid DESC LIMIT 51').all(...args,...(cursor?[cursor.created_at,cursor.created_at,cursor.rowid]:[]));
  db.exec('COMMIT');return {items:rows.slice(0,50).map(decode),total,state,ceiling,nextCursor:rows.length>50?String(rows[49].rowid):null,revision:summary.revision,retention:summary.retention};
  }catch(error){db.exec('ROLLBACK');throw error;}
 }

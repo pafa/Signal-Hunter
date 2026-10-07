@@ -142,8 +142,9 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    catch(error){materials.attempt(id,{state:'failed',url,method:'public-web',error:String(error.message).slice(0,300)});throw error;}
    finally{sourceJobs.delete(id);}
   },
-  newsPage({q='',bucket='all',before,ceiling,limit=30}={}){
+  newsPage({q='',bucket='all',stage='all',before,ceiling,limit=30}={}){
    if(typeof q!=='string'||q.length>120||!['all','review','clue','quiet','pending','rumor'].includes(bucket))throw new Error('新闻检索参数无效');
+   if(!['all','new','body','model','review','failed','active'].includes(stage))throw Error('新闻进度筛选无效');
    const maxRow=db.prepare('SELECT MAX(rowid) n FROM news').get().n||0;
    const upper=ceiling===undefined?maxRow:Number(ceiling),cursor=before===undefined?upper+1:Number(before),size=Number(limit);
    if(![upper,cursor,size].every(Number.isSafeInteger)||upper<0||cursor<1||size<1||size>100)throw new Error('新闻分页参数无效');
@@ -151,11 +152,17 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    if(q.trim()){clauses.push("instr(lower(json_extract(n.payload,'$.title')),lower(?))>0");args.push(q.trim());}
    if(bucket==='pending')clauses.push('t.news_id IS NULL');
    else if(bucket!=='all'){clauses.push(`json_extract(t.payload,'$.${bucket==='rumor'?'messageStatus':'bucket'}')=?`);args.push(bucket);}
+   if(stage==='new')clauses.push('NOT EXISTS(SELECT 1 FROM research_pipeline_items p WHERE p.news_id=n.id AND p.revision=n.revision)');
+   else if(stage==='active')clauses.push("EXISTS(SELECT 1 FROM research_topics r WHERE json_extract(r.payload,'$.sourceNewsId')=n.id AND json_type(r.payload,'$.dossier')='object' AND json_extract(r.payload,'$.status')='active')");
+   else if(stage!=='all'){
+    const states={body:['queued','preparing'],model:['ready','running'],review:['candidate','needs-review'],failed:['failed','interrupted','invalidated','cancelled']}[stage];
+    clauses.push(`EXISTS(SELECT 1 FROM research_pipeline_items p LEFT JOIN model_research_runs m ON m.id=p.run_id WHERE p.news_id=n.id AND p.revision=n.revision AND (CASE WHEN m.status='running' AND m.expires_at<${Date.parse(clock())} THEN 'interrupted' WHEN m.status IS NULL AND p.status='preparing' AND NOT EXISTS(SELECT 1 FROM operation_tasks o WHERE o.name='discovery' AND o.paused=0 AND o.lease_until>${Date.parse(clock())} AND o.token=json_extract(p.payload,'$.token')) THEN 'interrupted' ELSE coalesce(m.status,p.status) END) IN (${states.map(()=>'?').join(',')}))`);args.push(...states);
+   }
    const from='FROM news n LEFT JOIN triage t ON t.news_id=n.id AND t.news_revision=n.revision AND t.rules_version=? WHERE '+clauses.join(' AND ');
    const total=db.prepare('SELECT COUNT(*) n '+from).get(...args).n;
    const rows=db.prepare('SELECT n.id,n.rowid cursor,t.payload triage,t.processed_at '+from+' AND n.rowid<? ORDER BY n.rowid DESC LIMIT ?').all(...args,cursor,size+1);
    const items=rows.slice(0,size).map(r=>({...store.newsById(r.id),triage:r.triage?JSON.parse(r.triage):{bucket:'pending',category:'等待初筛',companies:[]},processedAt:r.processed_at||null}));
-   return {items,total,screeningSamples:screenings.stats(),ceiling:upper,nextCursor:rows.length>size?rows[size-1].cursor:null,rulesVersion:RULES_VERSION,order:'首次入库倒序；筛选使用当前修订，新入库记录在重新检索时纳入'};
+   return {items,total,newsTotal:db.prepare('SELECT count(*) n FROM news').get().n,stage,screeningSamples:screenings.stats(),ceiling:upper,nextCursor:rows.length>size?rows[size-1].cursor:null,rulesVersion:RULES_VERSION,order:'首次入库倒序；筛选使用当前修订，新入库记录在重新检索时纳入'};
   },
   createFromNews(data,{revisionOf=undefined,beforeWrite=()=>{},requireNew=false}={}){
    const n=store.newsById(data.newsId);

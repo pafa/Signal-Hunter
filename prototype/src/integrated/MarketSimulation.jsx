@@ -1,6 +1,6 @@
 import {strategyProfiles} from '../../shared/strategy-profiles.mjs';
 import React,{useEffect,useRef,useState} from 'react';
-import {Button,Modal} from '../major/Primitives';
+import {Button,WorkspaceFrame} from '../major/Primitives';
 import {request,time} from '../major/api';
 import {marketConfigFields as fields,marketOrderStates as states} from '../../shared/market-simulation.mjs';
 import './market-simulation.css';
@@ -10,14 +10,14 @@ const readDraft=key=>{try{return JSON.parse(sessionStorage.getItem(key))||{};}ca
 export function MarketAccountSummary({book}){
  return <div className="market-account-summary">{[['已结算现金',book.settledCashCents],['未结算卖出款',book.unsettledCashCents],['已批买单预算',book.reservedCents],['可用现金',book.availableCashCents],['当前净值',book.navCents],['已实现收益',book.realizedCents],['累计费用',book.feesCents]].map(([label,v])=><div key={label}><small>{label} · USD</small><strong>{money(v)}</strong></div>)}{book.missing?.length>0&&<p className="m-warning">部分持仓缺少有效估值，净值与未实现收益保留未知。{book.missing.join('；')}</p>}</div>;
 }
-export default function MarketSimulation({data,onClose}){
- const [accountId,setAccountId]=useState('aggressive');
- return <MarketAccount key={`${data?.runtime?.instance?.id||'unknown'}:${accountId}`} accountId={accountId} onAccount={setAccountId} data={data} onClose={onClose}/>;
+export default function MarketSimulation({data,onClose,embedded=false,initialAccount='aggressive',initialOrder=''}){
+ const [accountId,setAccountId]=useState(initialAccount);
+ return <MarketAccount key={`${data?.runtime?.instance?.id||'unknown'}:${accountId}`} initialOrder={initialOrder} embedded={embedded} accountId={accountId} onAccount={setAccountId} data={data} onClose={onClose}/>;
 }
-function MarketAccount({data,onClose,accountId,onAccount}){
+function MarketAccount({data,onClose,accountId,onAccount,embedded,initialOrder}){
  const preset=strategyProfiles[accountId],endpoint=path=>`/api/market-simulation${path}?account=${accountId}`;
  const key=`signal.market-simulation-draft:${data?.runtime?.instance?.id||'unknown'}:${accountId}`;
- const [draft,setDraft]=useState(()=>({...preset.suggestedConfig,allowOvernight:String(preset.suggestedConfig.allowOvernight),initialUSD:preset.allocationUSD,...readDraft(key)})),[book,setBook]=useState(null),[history,setHistory]=useState([]),[selected,setSelected]=useState(''),[review,setReview]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[note,setNote]=useState(''),[record,setRecord]=useState(null),[confirm,setConfirm]=useState(false),[notice,setNotice]=useState(''),[historyError,setHistoryError]=useState('');
+ const [draft,setDraft]=useState(()=>({...preset.suggestedConfig,allowOvernight:String(preset.suggestedConfig.allowOvernight),initialUSD:preset.allocationUSD,...readDraft(key)})),[book,setBook]=useState(null),[history,setHistory]=useState([]),[selected,setSelected]=useState(initialOrder),[review,setReview]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[note,setNote]=useState(''),[record,setRecord]=useState(null),[confirm,setConfirm]=useState(false),[notice,setNotice]=useState(''),[historyError,setHistoryError]=useState('');
  const flight=useRef(false),active=useRef(true),sequence=useRef(0),configGeneration=useRef(0);
  useEffect(()=>{active.current=true;return()=>{active.current=false;sequence.current++;};},[]);
  const profile=book?.profile||preset;
@@ -67,7 +67,7 @@ function MarketAccount({data,onClose,accountId,onAccount}){
   try{const b=await act('orders',{order:{topicId,topicVersion:topic.version,symbol:draft.symbol||topic.companies[0]?.symbol,side:draft.side||'buy',qty:Number(draft.qty),limitPrice:draft.limitPrice,budgetUSD:Number(draft.budgetUSD),expiresAt:localISO(draft.expiresAt),holdUntil:localISO(draft.holdUntil),thesis:draft.thesis,trigger:draft.trigger,invalidation:draft.invalidation}});if(b&&active.current)setSelected(b.orders.at(-1).id);}catch(e){if(active.current)setError(e.message);}
  }
  const configuredValues=book?.config&&Object.entries(fields).map(([k,label])=>`${label}：${book.config[k]}`).join(' · ');
- return <Modal title="市场模拟 · 50/50 双策略账户" onClose={onClose}><section className="market-simulation" aria-label="市场模拟">
+ return <WorkspaceFrame embedded={embedded} title="市场模拟 · 50/50 双策略账户" onClose={onClose}><section className="market-simulation" aria-label="市场模拟">
   <div className="market-actions" aria-label="策略池选择">{Object.values(strategyProfiles).map(p=><Button key={p.id} disabled={busy} primary={accountId===p.id} onClick={()=>onAccount(p.id)}>{p.name} · 50万 USD</Button>)}</div><h3>{profile.name}</h3><p>{profile.description} 建议首次建仓占本池 {profile.initialPositionPct}%（{(profile.allocationUSD*profile.initialPositionPct/100).toLocaleString('zh-CN')} USD）；这是设计起点，逐笔申请仍需填写数量与预算。</p><p>单票退出复核线 {profile.risk.hardStopPct}%；浮盈达到 {profile.risk.trailingArmPct}% 后，较已记录高点回撤 {profile.risk.trailingDrawdownPct}% 触发复核。策略池回撤 {profile.risk.poolWarningPct}% 预警，{profile.risk.poolStopPct}% 暂停新增买入。触发不等于已经卖出或保证损失上限。</p>
   <p>与原“结构演练”账本分开。每笔申请需本人批准；仅在服务端具备有效报价、数量、交易规则和 FX 时才可能模拟成交。当前不会调用券商接口。</p>
   {error&&<p className="m-warning" role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}{historyError&&<p className="m-warning" role="status">{historyError}。已保存的操作无需重新提交，可稍后刷新账户读取历史。</p>}
@@ -101,5 +101,5 @@ function MarketAccount({data,onClose,accountId,onAccount}){
     <details><summary>不可变账本记录（最近 {history.length} 版）</summary><div className="market-actions">{history.map(h=><Button key={h.version} disabled={busy} onClick={()=>foreground(async ticket=>{const value=await request(endpoint(`/history/${h.version}`));if(current(ticket))setRecord(value);})}>v{h.version} · {h.kind}</Button>)}</div>{record&&<div><p>v{record.version} · {time(record.at)} · {record.hash}</p><pre>{JSON.stringify(record.detail,null,2)}</pre></div>}</details>
    </>}
   </>}
- </section></Modal>;
+ </section></WorkspaceFrame>;
 }

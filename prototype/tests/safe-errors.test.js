@@ -22,7 +22,7 @@ test('real handler projects data, operation, health and mutation responses',asyn
 });
 test('operations hides source, task, news and history errors even with an unsanitized legacy response',async()=>{
  const server=await createServer({configFile:false,root:fileURLToPath(new URL('../',import.meta.url)),server:{middlewareMode:true,watch:null},appType:'custom'});
- try{const {Operations}=await server.ssrLoadModule('/src/integrated/Operations.jsx');const data={runtime:{mode:'research'},watchlist:[],checks:{news:{error:errors[0]},'source:https://fixture.invalid?token=FIXTURE_PRIVATE':{error:errors[1]}},operations:{news:{error:errors[2]}},operationHistory:[{name:'news',summary:{error:errors[3]}}],newsIntake:{recent:[{id:'fixture',error:errors[0]}]}};
+ try{const {Operations}=await server.ssrLoadModule('/src/integrated/Operations.jsx');const {default:NewsCoverage}=await server.ssrLoadModule('/src/integrated/NewsCoverage.jsx');const data={runtime:{mode:'research'},watchlist:[],checks:{news:{error:errors[0]},'source:https://fixture.invalid?token=FIXTURE_PRIVATE':{error:errors[1]}},operations:{news:{error:errors[2]}},operationHistory:[{name:'news',summary:{error:errors[3]}}],newsIntake:{recent:[{id:'fixture',error:errors[0]}]}};
  const html=renderToStaticMarkup(React.createElement(Operations,{data}));assert.doesNotMatch(html,/FIXTURE_PRIVATE|fixture.invalid|Bearer|password=/);assert.match(html,/任务失败/);
  }finally{await server.close();}
 });
@@ -34,13 +34,13 @@ test('unexpected handler failures return a category instead of exception text',a
 test('HTTP projection followed by real Operations rendering preserves every safe category',async()=>{
  const cases=[['timeout','上游请求超时'],['network','上游连接失败'],['http','上游 HTTP 请求失败'],['format','响应格式异常'],['no-data','未返回有效数据'],['all-sources-failed','主源与备用源均失败']];
  const server=await createServer({configFile:false,root:fileURLToPath(new URL('../',import.meta.url)),server:{middlewareMode:true,watch:null},appType:'custom'});
- try{const {Operations}=await server.ssrLoadModule('/src/integrated/Operations.jsx');
+ try{const {Operations}=await server.ssrLoadModule('/src/integrated/Operations.jsx');const {default:NewsCoverage}=await server.ssrLoadModule('/src/integrated/NewsCoverage.jsx');
  for(const [kind,label] of cases){
  const error={kind,message:errors[0],attempts:[{kind:'timeout',message:errors[1]}]};
  const data={runtime:{mode:'research'},watchlist:[],checks:{news:{error},'source:news.google.com':{error}},operations:{news:{error}},operationHistory:[{name:'news',summary:{error}}],newsIntake:{queries:[{id:'discovery',label:'广泛发现',last:{error}}],recent:[{id:'fixture',error}]}};
  let body;await createHandler({},{snapshot:()=>data})({method:'GET',url:'/api/data',headers:{host:'127.0.0.1:4179'}},{writeHead:()=>{},end:text=>{body=text;}});
  const projected=JSON.parse(body);assert.equal(projected.operations.news.error,label);assert.equal(safeErrorText(safeErrorText(error)),label);
- const html=renderToStaticMarkup(React.createElement(Operations,{data:projected}));assert.equal(html.split(label).length-1,6);assert.doesNotMatch(html,/FIXTURE_PRIVATE|fixture.invalid|Bearer|password=/);
+ const html=renderToStaticMarkup(React.createElement(Operations,{data:projected}));assert.equal(html.split(label).length-1,4);const sourceHtml=renderToStaticMarkup(React.createElement(NewsCoverage,{data:projected}));assert.equal(sourceHtml.split(label).length-1,2);assert.doesNotMatch(sourceHtml,/FIXTURE_PRIVATE|Bearer/);assert.doesNotMatch(html,/FIXTURE_PRIVATE|fixture.invalid|Bearer|password=/);
  // A safe label with appended raw details is never accepted verbatim.
  assert.notEqual(safeErrorText(label+' '+errors[0]),label+' '+errors[0]);
  }

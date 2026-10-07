@@ -26,7 +26,7 @@ export function createDeferredView(load,{title,mode='inline'}){
  return function DeferredView(props){
   const [{View,attempt},setRequest]=useState(()=>({View:cachedView,attempt:0}));
   function retry(){cachedView=lazy(load);const nextView=cachedView;setRequest(current=>({View:nextView,attempt:current.attempt+1}));}
-  const fallbackProps={title,mode,onClose:props.onClose};
+  const fallbackProps={title,mode:props.embedded?'inline':mode,onClose:props.onClose};
   return <LoadBoundary key={attempt} fallback={<Fallback {...fallbackProps} onRetry={retry}/>}>
    <Suspense fallback={<Fallback {...fallbackProps}/>}><View {...props}/></Suspense>
   </LoadBoundary>;

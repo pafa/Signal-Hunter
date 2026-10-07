@@ -1,5 +1,5 @@
 import React,{useState} from 'react';
-import {Modal,Button} from '../major/Primitives';
+import {Modal,Button,Spark} from '../major/Primitives';
 import {time,stanceNames} from '../major/api';
 import {companyResearch} from '../../shared/company-view.mjs';
 import {COMPANY_ANALYSIS_FIELDS,DIRECTIONS} from '../../shared/company-directory.mjs';
@@ -13,6 +13,7 @@ export default function CompanyDossier({symbol,topicId,data,onClose,onTopic,onEd
  <div className="dossier-identity"><b>{symbol}</b><span>{d.identity.market} · {d.identity.currency} · {({XSHG:'上海证券交易所',XSHE:'深圳证券交易所',XHKG:'香港交易所'})[d.identity.venue]||'交易所待核对'}</span><span>收盘 {number(w?.daily?.points?.filter(p=>p.close>0).at(-1)?.close)} {d.identity.currency} · {w?.daily?.lastDate||'无日线'}</span></div>
  <p className="m-note">{d.identity.identityBasis}；{cap?.daily.label||'尚无行情能力记录'}。场景持仓仍按冻结演练价格计值。</p>
  {d.relatedListings.length>0&&<p className="dossier-listings">同发行人已关联证券：{d.relatedListings.map(c=><Button key={c.symbol} onClick={()=>onCompany(c.symbol)}>{c.name} · {c.symbol}</Button>)}<small>只使用已有发行人映射；行业联动不等于同等受益。</small></p>}
+ <details className="company-minute"><summary>高级：分钟行情与接收时间（研究缓存）</summary>{w?.quote?<><Spark quote={w.quote} large/><p>{w.quote.points.length} 个分钟收盘点 · 供应商时间 {w.quote.providerTime} · 接收 {time(w.quote.receivedAt)}</p><p>{w.quote.marketTimezone} / {w.quote.providerTimezone==='unverified'?'供应商时区待核验':w.quote.providerTimezone}；最新柱可能尚未结束，不能作为可执行报价。</p></>:<p>暂无分钟缓存；不会补造曲线。</p>}</details>
  <nav className="i-segment dossier-tabs" aria-label="公司研究内容">{[['analysis','公司影响'],['evidence','证据与反证'],['portfolio','持仓与申请']].map(([v,l])=><button key={v} aria-pressed={tab===v} className={tab===v?'on':''} onClick={()=>setTab(v)}>{l}</button>)}</nav>
  {tab!=='portfolio'&&<><label className="dossier-select">研究上下文<select value={record?.topicId||''} onChange={e=>setSelection(e.target.value)}>{d.research.map(t=><option key={t.topicId} value={t.topicId}>{t.title} · v{t.version}{t.status==='archived'?' · 已归档':''}</option>)}</select></label>
  {record?<><div className="dossier-actions"><b>{DIRECTIONS[record.relation.direction]||'方向待评估'}</b><small>v{record.version} · {time(record.updatedAt)}</small><Button onClick={()=>onTopic(record.topicId)}>打开事件研究</Button><Button disabled={record.status!=='active'} onClick={()=>onEdit(record.topicId,symbol)}>完善公司分析</Button></div>

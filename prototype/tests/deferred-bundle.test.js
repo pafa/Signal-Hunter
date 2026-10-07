@@ -17,8 +17,9 @@ test('production default entry excludes deferred workspaces and panels; every ch
  const initialCss=[...new Set([...initial].flatMap(name=>[...chunks.get(name).viteMetadata.importedCss]))].map(name=>String(assets.get(name).source)).join('\n');
  assert.match(initialCss,/\.v10-library-button/,'the unopened news library entry retains its initial styles');
  for(const chunk of chunks.values())for(const name of chunk.viteMetadata.importedCss)assert.ok(assets.has(name),`Missing stylesheet ${name}`);
+ for(const suffix of ['/App.jsx','/terminal/Terminal.jsx','/major/MajorWorkbench.jsx'])assert.equal([...chunks.values()].some(c=>Object.keys(c.modules).some(id=>id.endsWith(suffix))),false,`${suffix} is retired`);
  assert.ok(initialModules.some(id=>id.endsWith('/integrated/IntegratedWorkbench.jsx')),'default workspace stays eager');
- for(const suffix of ['/App.jsx','/terminal/Terminal.jsx','/major/MajorWorkbench.jsx','/major/TopicDetail.jsx','/terminal/DataDesk.jsx','/major/NewsLibrary.jsx','/major/NewsInspector.jsx','/integrated/CompanyDossier.jsx']){
+ for(const suffix of ['/major/TopicDetail.jsx','/terminal/DataDesk.jsx','/major/NewsLibrary.jsx','/major/NewsInspector.jsx','/integrated/CompanyDossier.jsx']){
   assert.equal(initialModules.some(id=>id.endsWith(suffix)),false,`${suffix} must not be in initial JS`);
   assert.ok([...chunks.values()].some(chunk=>Object.keys(chunk.modules).some(id=>id.endsWith(suffix))),`${suffix} must remain available`);
  }

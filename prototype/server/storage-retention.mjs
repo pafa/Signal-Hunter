@@ -1,3 +1,4 @@
+import {backupDataset} from './backup-dataset.mjs';
 import {lstat,readdir,readFile,statfs} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -13,7 +14,7 @@ export function retentionPolicy(input={}){
 }
 async function regular(path){const stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink())throw new Error('不是普通文件');return stat;}
 async function fingerprint(path,signal){const hash=createHash('sha256');for await(const chunk of createReadStream(path,{signal}))hash.update(chunk);return hash.digest('hex');}
-export async function previewStorageRetention(databasePath,backupRoot,{policy:input={},now=Date.now(),signal}={}){
+export async function previewStorageRetention(databasePath,backupRoot,{policy:input={},now=Date.now(),signal,classifyDatasets=false}={}){
  signal?.throwIfAborted();
  const policy=retentionPolicy(input);if(!Number.isFinite(now))throw new Error('预览时间无效');
  const database=resolve(databasePath),root=resolve(backupRoot),dbStat=await regular(database),warnings=[],snapshots=[];
@@ -21,12 +22,14 @@ export async function previewStorageRetention(databasePath,backupRoot,{policy:in
  for(const suffix of ['-wal','-shm'])try{databaseBytes+=(await regular(database+suffix)).size;}catch(error){if(error.code!=='ENOENT')warnings.push({kind:'database-sidecar-unreadable',file:database+suffix});}
  let freeBytes=null;try{const fs=await statfs(dirname(database));freeBytes=fs.bavail*fs.bsize;}catch{warnings.push({kind:'free-space-unavailable'});}
  let entries=[];try{const stat=await lstat(root);if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error('备份根路径必须是普通目录');entries=await readdir(root,{withFileTypes:true});}catch(error){if(error.code!=='ENOENT')throw error;warnings.push({kind:'backup-root-missing'});}
+ let sourceIdentity=null;if(classifyDatasets)try{sourceIdentity=backupDataset(database);}catch{}
+ const categories={sameDataset:0,otherDataset:0,identityUnknown:0,fingerprintMismatch:0,unknownFormat:0,unreadable:0};
  let observedBackupBytes=0,unmeasuredEntries=0;
  signal?.throwIfAborted();
  for(const entry of entries){
   signal?.throwIfAborted();
   const directory=join(root,entry.name);
-  if(!entry.isDirectory()||entry.isSymbolicLink()||!entry.name.startsWith('snapshot-')){unmeasuredEntries++;continue;}
+  if(!entry.isDirectory()||entry.isSymbolicLink()||!entry.name.startsWith('snapshot-')){unmeasuredEntries++;categories.unknownFormat++;continue;}
   const record={directory,bytes:0,createdAt:null,verified:false,candidate:false,reason:'unverified'};
   try{
    const names=await readdir(directory);if(names.some(name=>!['manifest.json','workbench.sqlite'].includes(name)))throw new Error('备份目录含未知文件');
@@ -36,14 +39,16 @@ export async function previewStorageRetention(databasePath,backupRoot,{policy:in
    if(manifest.format!==1||manifest.database!=='workbench.sqlite'||!Number.isFinite(created)||created>now||!/^[a-f0-9]{64}$/.test(manifest.sha256??''))throw new Error('清单或时间无效');
    if(await fingerprint(file,signal)!==manifest.sha256)throw new Error('备份指纹不匹配');
    record.createdAt=new Date(created).toISOString();record.verified=true;record.reason='retained';
-  }catch(error){signal?.throwIfAborted();record.reason=error.message;unmeasuredEntries++;}
+   let identity=null;if(classifyDatasets)identity=backupDataset(file);
+   record.category=identity&&sourceIdentity?(JSON.stringify(identity)===JSON.stringify(sourceIdentity)?'sameDataset':'otherDataset'):'identityUnknown';categories[record.category]++;
+  }catch(error){signal?.throwIfAborted();record.reason=error.message;record.category=error.message==='备份指纹不匹配'?'fingerprintMismatch':error.code&&['EACCES','EPERM','ENOENT'].includes(error.code)?'unreadable':'unknownFormat';categories[record.category]++;unmeasuredEntries++;}
   snapshots.push(record);
  }
  signal?.throwIfAborted();
  const verified=snapshots.filter(s=>s.verified).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||a.directory.localeCompare(b.directory));
- verified.forEach((snapshot,index)=>{snapshot.candidate=index>=policy.keepNewest&&now-Date.parse(snapshot.createdAt)>policy.maxAgeDays*86400000;snapshot.reason=snapshot.candidate?'older-than-age-and-newest-reserve':index<policy.keepNewest?'newest-reserve':'within-age';});
+ verified.forEach((snapshot,index)=>{snapshot.candidate=(!classifyDatasets||snapshot.category==='sameDataset')&&index>=policy.keepNewest&&now-Date.parse(snapshot.createdAt)>policy.maxAgeDays*86400000;snapshot.reason=snapshot.candidate?'older-than-age-and-newest-reserve':index<policy.keepNewest?'newest-reserve':'within-age';});
  if(unmeasuredEntries)warnings.push({kind:'partial-capacity-measurement',entries:unmeasuredEntries});
  if(observedBackupBytes>policy.maxBackupBytes)warnings.push({kind:'backup-capacity-exceeded'});
  if(freeBytes!==null&&freeBytes<policy.minFreeBytes)warnings.push({kind:'low-free-space'});
- return {dryRun:true,automaticDeletion:false,policy,database,databaseBytes,backupRoot:root,observedBackupBytes,capacityComplete:unmeasuredEntries===0,freeBytes,snapshots,candidateBytes:verified.filter(s=>s.candidate).reduce((sum,s)=>sum+s.bytes,0),warnings,limitations:['Preview performs no deletion or migration. Unknown or invalid entries are always retained.','SHA verification does not replace database integrity and restore verification.','Capacity counts only measured files and may change during concurrent backup activity.']};
+ return {dryRun:true,automaticDeletion:false,policy,database,databaseBytes,backupRoot:root,observedBackupBytes,capacityComplete:unmeasuredEntries===0,categories,freeBytes,snapshots,candidateBytes:verified.filter(s=>s.candidate).reduce((sum,s)=>sum+s.bytes,0),warnings,limitations:['Preview performs no deletion or migration. Unknown or invalid entries are always retained.','SHA verification does not replace database integrity and restore verification.','Capacity counts only measured files and may change during concurrent backup activity.']};
 }

@@ -1,3 +1,5 @@
+import {workbenchQueue} from './workbench-queue.mjs';
+import {openActivityJournal} from './activity-journal.mjs';
 import {openExecutionInputs} from './execution-inputs.mjs';
 import {openPriceCollection} from './price-collection.mjs';
 import {openStorageMonitor} from './storage-monitor.mjs';
@@ -82,6 +84,8 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
     eventDetail(id){return continuity.detail(id);},
     decideEvent(id,data){continuity.process(research.list());return continuity.decide(id,data);},
     health(){store.db.prepare('SELECT 1').get();return {ok:true,mode,offline,instance,startedAt,uptimeSeconds:Math.max(0,Math.floor((now()-Date.parse(startedAt))/1000)),restoreReviewRequired:store.db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1'};},
+    activity:params=>journal.page(params),
+    workbenchQueue:params=>workbenchQueue(store.db,params,now()),
     operations(){return {tasks:scheduler.snapshot(),history:scheduler.history()};},
     controlOperation(name,action){if(name==='pricecollection'&&action==='resume')priceCollection.activate();return scheduler.control(name,action);},
     acknowledgeRestore(){
@@ -160,6 +164,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
         store.status(symbol,{state:'ok',attemptedAt,receivedAt,noNewBar:saved.noNewBar??false,snapshotHash:saved.snapshotHash});return {ok:true};
       }catch(error){active(lane,context);store.status(symbol,{state:'error',attemptedAt,error:errorText(error),failure:marketFailure(error)});return {error:errorText(error)};}finally{quoteJobs.delete(symbol);}})();quoteJobs.set(symbol,job);return job;
     }
-  const scheduler=createPersistentScheduler(store.db,{pricecollection:context=>mode==='research'?priceCollection.step(context):{skipped:'offline-or-legacy'},discovery:context=>offline?{skipped:'offline'}:researchPipeline.step(context),semantic:context=>offline?{skipped:'offline'}:semanticBatches.step(context),execution:context=>{if(offline)return {skipped:'offline'};executionInputs.refresh(context);return processMarketAccounts(marketSimulations,context);},observations:context=>{context.assertActive();return observations.process(research.list(),paper.snapshot());},news:context=>offline?{skipped:'offline'}:service.refreshNews(context),daily:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),3,w=>service.refreshDaily(w.symbol,!!context.input?.manual,context)),minutes:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),2,w=>service.refreshQuote(w.symbol,context)),...(backupTask?{backup:backupTask}:{}),...(storageMonitor?{storage:context=>storageMonitor.check(context)}:{})},{now,initiallyPaused:['pricecollection','execution','semantic','discovery','storage'],intervals:{pricecollection:10000,discovery:10000,semantic:10000,execution:10000,observations:10000,news:newsCooldown,daily:60000,minutes:quoteCooldown,backup:3600000,storage:3600000}});
+  const scheduler=createPersistentScheduler(store.db,{pricecollection:context=>mode==='research'?priceCollection.step(context):{skipped:'offline-or-legacy'},discovery:context=>offline?{skipped:'offline'}:researchPipeline.step(context),semantic:context=>offline?{skipped:'offline'}:semanticBatches.step(context),execution:context=>{if(offline)return {skipped:'offline'};executionInputs.refresh(context);return processMarketAccounts(marketSimulations,context);},observations:context=>{context.assertActive();const result=observations.process(research.list(),paper.snapshot());return result.added?result:{skipped:'no-change'};},news:context=>offline?{skipped:'offline'}:service.refreshNews(context),daily:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),3,w=>service.refreshDaily(w.symbol,!!context.input?.manual,context)),minutes:context=>offline?{skipped:'offline'}:pool(context.input?.symbols?context.input.symbols.map(symbol=>({symbol})):store.watchlist(),2,w=>service.refreshQuote(w.symbol,context)),...(backupTask?{backup:backupTask}:{}),...(storageMonitor?{storage:context=>storageMonitor.check(context)}:{})},{now,idleBackoff:['discovery','semantic','observations'],initiallyPaused:['pricecollection','execution','semantic','discovery','storage'],intervals:{pricecollection:10000,discovery:10000,semantic:10000,execution:10000,observations:10000,news:newsCooldown,daily:60000,minutes:quoteCooldown,backup:3600000,storage:3600000}});
+  const journal=openActivityJournal(store.db,{now,instance,tasks:scheduler.snapshot});
   return service;
 }

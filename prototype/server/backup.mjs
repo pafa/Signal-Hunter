@@ -48,9 +48,9 @@ export function restoreBackup(directory,targetPath){
   const db=new DatabaseSync(staged);
   try{
    db.exec('BEGIN IMMEDIATE');
+   db.prepare("INSERT INTO settings(key,value) VALUES('restore_review_required','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run();
    if(actual.counts.operation_tasks!==undefined)db.exec("UPDATE operation_tasks SET paused=1,token=NULL,lease_until=NULL,state='waiting'");
    if(actual.counts.operation_runs!==undefined)db.exec("UPDATE operation_runs SET outcome='interrupted' WHERE outcome='running'");
-   db.prepare("INSERT INTO settings(key,value) VALUES('restore_review_required','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run();
    db.exec('COMMIT');
   }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}finally{db.close();}
   const verification=compareInventories(expected,inventoryDatabase(staged));

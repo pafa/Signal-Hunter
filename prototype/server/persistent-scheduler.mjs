@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {summarizeResults} from './scheduler.mjs';
 
 // Persistent background lanes. Market execution, if registered, is simulation only.
-export function createPersistentScheduler(db, tasks, {now=Date.now, intervals={}, leaseMs=90000, maxFailures=3, initiallyPaused=[]}={}) {
+export function createPersistentScheduler(db, tasks, {now=Date.now, intervals={}, leaseMs=90000, maxFailures=3, initiallyPaused=[],idleBackoff=[]}={}) {
  db.exec(`CREATE TABLE IF NOT EXISTS operation_tasks(
   name TEXT PRIMARY KEY, paused INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'waiting',
   token TEXT, lease_until INTEGER, next_run INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
@@ -62,8 +62,10 @@ export function createPersistentScheduler(db, tasks, {now=Date.now, intervals={}
    const cancelled=controller.signal.aborted||!!current.paused;
    const failed=summary.outcome==='error',failures=failed?current.failures+1:summary.outcome==='skipped'?current.failures:0;
    const state=cancelled?'waiting':failed&&failures>=maxFailures?'blocked':'waiting';
-   const wait=failed?Math.max(intervals[name]??60000,Math.min(30000*2**(failures-1),900000)):(intervals[name]??60000);
-   const result=cancelled?{outcome:'cancelled',error:'已暂停/取消；已提交结果保留'}:summary;
+   const quiet=idleBackoff.includes(name)&&summary.outcome==='skipped'&&summary.skipReasons?.every(r=>['no-queued-items','no-change','model-disabled','offline','call-limit'].includes(r.reason));
+   const quietChecks=quiet?(JSON.parse(current.summary).quietChecks||0)+1:0;
+   const wait=quiet?Math.min(60000,Math.max(intervals[name]??10000,30000*quietChecks)):failed?Math.max(intervals[name]??60000,Math.min(30000*2**(failures-1),900000)):(intervals[name]??60000);
+   const result=cancelled?{outcome:'cancelled',error:'已暂停/取消；已提交结果保留'}:{...summary,...(quiet?{quietChecks}:{})};
    db.prepare('UPDATE operation_tasks SET token=NULL,lease_until=NULL,state=?,failures=?,next_run=?,completed_at=?,last_success_at=?,summary=? WHERE name=?')
     .run(state,failures,now()+wait,iso(),!cancelled&&summary.succeeded>0?iso():current.last_success_at,JSON.stringify(result),name);
    db.prepare('UPDATE operation_runs SET completed_at=?,outcome=?,summary=? WHERE token=?')
