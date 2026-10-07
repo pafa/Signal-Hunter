@@ -26,6 +26,8 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const url=new URL(req.url,'http://127.0.0.1:4179');
     if(!url.pathname.startsWith('/api/')&&staticHandler){staticHandler(req,res);return;}
     if(service.instance?.id&&(req.headers['x-signal-instance']||['POST','PATCH','DELETE'].includes(req.method))&&req.headers['x-signal-instance']!==service.instance.id){reply(409,{error:'数据集已切换或尚未核对，请刷新页面后再继续'});return;}
+    if(req.method==='GET'&&url.pathname==='/api/workbench-queue'){reply(200,service.workbenchQueue(Object.fromEntries(url.searchParams)));return;}
+    if(req.method==='GET'&&url.pathname==='/api/activity'){reply(200,service.activity(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/forward-windows'){reply(200,service.forwardWindows.list());return;}
     if(req.method==='GET'&&/^\/api\/forward-windows\/[-a-f0-9]{36}$/.test(url.pathname)){reply(200,service.forwardWindows.get(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/forward-evaluations'){reply(200,{...service.forwardEvaluations.list(),records:service.forwardEvaluations.records()});return;}
@@ -76,6 +78,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/health'){reply(200,service.health());return;}
     if(req.method==='GET'&&url.pathname==='/api/paper/history'){reply(200,service.paper.history());return;}
     if(req.method==='GET'&&url.pathname==='/api/bars'){const symbol=url.searchParams.get('symbol');if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅查看关注标的');const quote=store.quote(symbol);const rows=quote?store.db.prepare('SELECT provider_time AS time,close FROM quote_bars WHERE symbol=? AND provider=? AND timezone=? ORDER BY provider_time DESC LIMIT 6000').all(symbol,quote.provider||'legacy',quote.providerTimezone||'unverified'):[];reply(200,rows.reverse());return;}
+    if(req.method==='GET'&&/^\/api\/research-pipeline\/items\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.researchPipeline.get(url.pathname.split('/')[4]));return;}
     if(req.method==='GET'&&url.pathname==='/api/research-pipeline'){reply(200,service.researchPipeline.snapshot());return;}
     if(req.method==='GET'&&url.pathname==='/api/data'){const {body,headers}=workbenchResponse(service.snapshot(),req.headers['x-signal-topics-hash']);sendJson(200,body,headers);return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/screening$/.test(url.pathname)){reply(200,screeningSamplePage(store.db,url.pathname.split('/')[3],service.research.screenings.rulesHash,Object.fromEntries(url.searchParams)));return;}

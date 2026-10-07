@@ -50,10 +50,16 @@ A first walkthrough:
 
 1. Select a fictional theme in the event radar and inspect its thesis, evidence, and counter-evidence.
 2. Compare the related companies using the chart grid or common-base view, and inspect relationship evidence.
-3. Switch to the portfolio view, labelled “组合巡检”, to inspect proposals, reserved cash, and positions; approve or reject a demo proposal.
+3. Open “组合” (Portfolio), then expand the advanced scenario book to inspect proposals, reserved cash, and positions; approve or reject a demo proposal.
 4. Review the saved research and decision versions to see how the workflow preserves earlier judgments.
 
 Demo changes persist across restarts. Run `npm run health` from another terminal in `prototype` to check the web app, API, and proxy. See the [operations guide](prototype/README.md) for port conflicts, backups, and starting a fresh demo.
+
+## Workspace navigation
+
+The primary navigation is Workspace / Portfolio / Evaluation (工作台 / 组合 / 评估). The workspace combines a complete paginated news inbox, research and charts, and a persistent activity sidebar. Saved activity shows actual collection results, model stages, failures, wait reasons and scheduled work. It is an audit of observable actions, not model internal reasoning. Repeated idle checks are folded in the display; the original records remain stored. Unified tasks open the existing review and approval forms.
+
+Research detail has five groups: summary, evidence, company and prices, action, and history. Scenario books and minute charts are advanced sections. Sources, task controls, budgets and backups are under Settings. Legacy UI links redirect to the unified workspace without changing the dataset or runtime mode. See [the backlog](docs/BACKLOG.md) for the candidate's deployment status.
 
 ## Start your own research
 
@@ -108,7 +114,7 @@ Priority reflects research urgency and held-company exposure, not materiality or
 | Available | Boundary |
 | --- | --- |
 | Title-rule screening, news search, and manual missed-event review | Rule-based cross-report candidates only; no full-text semantic clustering or validated detection accuracy |
-| Versioned evidence, material, research, claims, and counter-evidence | Analysis is primarily manual; material packs support human or conversational review without automatic model invocation |
+| Versioned evidence, material, research, claims, and counter-evidence | Research instances can use configured local Codex for reviewable candidates; offline demos do not call a model |
 | A-share / Hong Kong / US company relationships and automatic following | The company catalog is limited; identities, exposure, and cross-market mappings need review |
 | Daily chart grids, common-base comparison, and minute-data observation | Public sources may be delayed or incomplete; adjustment, calendar, and provider differences need validation |
 | Proposals, human decisions, risk checks, and position review | Frozen scenario prices, fixed FX, and simplified fees; observed quotes do not drive book NAV |

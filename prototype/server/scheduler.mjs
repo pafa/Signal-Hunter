@@ -11,6 +11,6 @@ export function createScheduler(tasks,{clock=()=>new Date().toISOString()}={}){
 }
 export function summarizeResults(result){
  const values=Array.isArray(result)?result:[result],failed=values.filter(r=>r?.error),skipped=values.filter(r=>r?.skipped).length,succeeded=values.length-failed.length-skipped;
- return {outcome:failed.length?(succeeded?'partial':'error'):succeeded?'ok':'skipped',succeeded,failed:failed.length,skipped,error:failed.length?[...new Set(failed.map(r=>String(r.error)))].join('；').slice(0,160):null};
+ return {outcome:failed.length?(succeeded?'partial':'error'):succeeded?'ok':'skipped',succeeded,failed:failed.length,skipped,...(skipped?{skipReasons:[...new Set(values.filter(r=>r?.skipped).map(r=>String(r.skipped)))].map(reason=>({reason,count:values.filter(r=>String(r?.skipped)===reason).length}))}:{}),error:failed.length?[...new Set(failed.map(r=>String(r.error)))].join('；').slice(0,160):null};
 }
 export async function pool(items,concurrency,fn){let cursor=0;const results=new Array(items.length);await Promise.all(Array.from({length:Math.min(concurrency,items.length)},async()=>{while(cursor<items.length){const i=cursor++;try{results[i]=await fn(items[i]);}catch(error){results[i]={error:String(error.message)};}}}));return results;}

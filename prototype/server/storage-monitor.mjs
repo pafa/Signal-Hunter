@@ -18,9 +18,9 @@ export function openStorageMonitor(db,{databasePath,backupRoot,policy:input={},n
   const startedAt=new Date(now()).toISOString(),deadline=AbortSignal.timeout(timeoutMs),signal=AbortSignal.any([context.signal,deadline]);
   let outcome,report;
   try{
-   const result=await previewStorageRetention(databasePath,backupRoot,{policy,now:now(),signal});
+   const result=await previewStorageRetention(databasePath,backupRoot,{policy,now:now(),signal,classifyDatasets:true});
    context.assertActive();signal.throwIfAborted();
-   outcome='ok';report={version:'storage-monitor/1',scopeId,policy,databaseBytes:result.databaseBytes,backupBytes:result.observedBackupBytes,freeBytes:result.freeBytes,capacityComplete:result.capacityComplete,
+   outcome='ok';report={version:'storage-monitor/1',scopeId,policy,categories:result.categories,databaseBytes:result.databaseBytes,backupBytes:result.observedBackupBytes,freeBytes:result.freeBytes,capacityComplete:result.capacityComplete,
     verifiedBackups:result.snapshots.filter(s=>s.verified).length,unverifiedBackups:result.snapshots.filter(s=>!s.verified).length,
     candidateBackups:result.snapshots.filter(s=>s.candidate).length,candidateBytes:result.candidateBytes,
     warnings:result.warnings.map(w=>({kind:w.kind,...(w.entries===undefined?{}:{entries:w.entries})}))};

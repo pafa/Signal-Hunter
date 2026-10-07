@@ -6,8 +6,8 @@ import './event-continuity.css';
 
 import {eventLinkKinds as kinds,eventLinkStates as states,priorityLabels} from '../../shared/event-labels.mjs';
 
-export default function EventContinuity({onClose,onNews,onTopic,mutate,busy}){
- const [semantic,setSemantic]=useState(false);
+export default function EventContinuity({initialSemantic=false,onClose,onNews,onTopic,mutate,busy}){
+ const [semantic,setSemantic]=useState(initialSemantic);
  const [filter,setFilter]=useState('pending'),[q,setQ]=useState(''),[search,setSearch]=useState(''),[offset,setOffset]=useState(0),[refresh,setRefresh]=useState(0),[data,setData]=useState(null),[selected,setSelected]=useState(''),[detail,setDetail]=useState(null),[notes,setNotes]=useState({}),[error,setError]=useState(''),[loading,setLoading]=useState(false);
  useEffect(()=>{let live=true;setLoading(true);setError('');request(`/api/events?${new URLSearchParams({state:filter,q:search,offset,limit:30})}`).then(r=>{if(live){setData(r);setSelected(id=>r.items.some(i=>i.id===id)?id:r.items[0]?.id||'');}}).catch(e=>{if(live)setError(e.message);}).finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[filter,search,offset,refresh]);
  useEffect(()=>{let live=true;setDetail(null);if(selected)request(`/api/events/${selected}`).then(r=>{if(live)setDetail(r);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[selected,refresh]);

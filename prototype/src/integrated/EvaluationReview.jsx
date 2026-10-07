@@ -1,5 +1,5 @@
 import React,{useEffect,useState} from 'react';
-import {Button,Modal} from '../major/Primitives';
+import {Button,WorkspaceFrame} from '../major/Primitives';
 import {request,time} from '../major/api';
 import {evaluationVerdicts} from '../../shared/evaluation-review.mjs';
 import {CLAIM_KINDS,OUTCOMES} from '../../shared/claims.mjs';
@@ -37,9 +37,9 @@ function Report({report,samples,onExport,busy}){
   <Button disabled={busy} onClick={onExport}>导出到本机（含冻结输入与标注）</Button>
  </section>;
 }
-export default function EvaluationReview({data,onClose}){
+export default function EvaluationReview({data,onClose,embedded=false}){
  const dataset=data?.runtime?.instance?.id||'unknown',key=`signal.evaluation-create:${dataset}`;
- const [forwardOpen,setForwardOpen]=useState(false);
+ const [forwardOpen,setForwardOpen]=useState(true);
  const [catalog,setCatalog]=useState(null),[batch,setBatch]=useState(null),[sampleId,setSampleId]=useState(''),[draft,setDraft]=useState(()=>({title:'',start:localDate(new Date(Date.now()-7*86400000)),end:localDate(new Date()),...read(key)})),[busy,setBusy]=useState(false),[error,setError]=useState(''),[dirty,setDirty]=useState(false),[confirm,setConfirm]=useState(false);
  useEffect(()=>{let live=true;request('/api/evaluations').then(r=>{if(live)setCatalog(r);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[]);
  useEffect(()=>{try{sessionStorage.setItem(key,JSON.stringify(draft));}catch{}},[key,draft]);
@@ -49,10 +49,10 @@ export default function EvaluationReview({data,onClose}){
  async function annotate(label){const b=await mutate(`/${batch.id}/annotate`,{label});if(b)setSampleId(b.samples.find(s=>!b.labels[s.id])?.id||label.sampleId);return b;}
  async function download(){setBusy(true);setError('');try{const doc=await request(`/api/evaluations/${batch.id}/export`),blob=new Blob([JSON.stringify(doc,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`evaluation-${batch.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError(e.message);}finally{setBusy(false);}}
  const sample=batch?.samples.find(s=>s.id===sampleId),change=(k,v)=>setDraft(d=>({...d,[k]:v}));
- return <Modal title="研究评估 · 冻结样本与人工标注" onClose={onClose}><section className="evaluation-review" aria-label="研究评估">
+ return <WorkspaceFrame embedded={embedded} title="研究评估 · 冻结样本与人工标注" onClose={onClose}><section className="evaluation-review" aria-label="研究评估">
   <p>完整冻结时间窗中的全部初筛层级，先标注、后揭示规则结果。新闻数量不等于独立事件数；当前用于诊断改进，不自动调参或批准交易。</p>{error&&<p role="alert" className="m-warning">{error}</p>}
-  <details onToggle={e=>{if(e.currentTarget.open)setForwardOpen(true);}}><summary>前向调用档案 · 基线与版本</summary>{forwardOpen&&<ForwardEvaluations/>}</details>
-  <details open={!batch}><summary>建立新的评估批次</summary><form className="m-form" onSubmit={create}><div className="evaluation-form-grid"><label>批次名称<input required maxLength={100} value={draft.title} onChange={e=>change('title',e.target.value)}/></label><label>冻结的初筛规则<select required value={draft.rulesHash||catalog?.rules[0]?.hash||''} onChange={e=>change('rulesHash',e.target.value)}>{catalog?.rules.map(r=><option key={r.hash} value={r.hash}>{r.hash.slice(0,12)} · {time(r.activated_at)}</option>)}</select></label><label>判断窗口起点（本机时间）<input type="datetime-local" required value={draft.start} onChange={e=>change('start',e.target.value)}/></label><label>窗口终点（不含，本机时间）<input type="datetime-local" required value={draft.end} onChange={e=>change('end',e.target.value)}/></label></div><p>冻结后不追加新新闻，也不按结果挑选样本。最多 5000 条，超过时需缩短窗口，不能静默截取。</p><Button primary type="submit" disabled={busy||!catalog?.rules.length}>冻结整批样本</Button></form></details>
+  <details open onToggle={e=>{if(e.currentTarget.open)setForwardOpen(true);}}><summary>前向调用档案 · 基线与版本</summary>{forwardOpen&&<ForwardEvaluations/>}</details>
+  <details><summary>高级：建立回溯评估批次</summary><form className="m-form" onSubmit={create}><div className="evaluation-form-grid"><label>批次名称<input required maxLength={100} value={draft.title} onChange={e=>change('title',e.target.value)}/></label><label>冻结的初筛规则<select required value={draft.rulesHash||catalog?.rules[0]?.hash||''} onChange={e=>change('rulesHash',e.target.value)}>{catalog?.rules.map(r=><option key={r.hash} value={r.hash}>{r.hash.slice(0,12)} · {time(r.activated_at)}</option>)}</select></label><label>判断窗口起点（本机时间）<input type="datetime-local" required value={draft.start} onChange={e=>change('start',e.target.value)}/></label><label>窗口终点（不含，本机时间）<input type="datetime-local" required value={draft.end} onChange={e=>change('end',e.target.value)}/></label></div><p>冻结后不追加新新闻，也不按结果挑选样本。最多 5000 条，超过时需缩短窗口，不能静默截取。</p><Button primary type="submit" disabled={busy||!catalog?.rules.length}>冻结整批样本</Button></form></details>
   <div className="evaluation-actions" aria-label="评估批次列表">{catalog?.batches.map(b=><Button key={b.id} disabled={busy} primary={batch?.id===b.id} onClick={()=>choose(b.id)}>{b.title} · {b.reviewed}/{b.total} · {b.state==='sealed'?'已封存':'标注中'}</Button>)}</div>
   {batch&&<><h3>{batch.title}</h3><p>{time(batch.start)} ≤ 判断时间 &lt; {time(batch.end)} · 冻结 {time(batch.frozenAt)} · v{batch.version}<br/>输入指纹 {batch.inputHash}</p>
    {batch.state==='sealed'?<><Report report={batch.report} samples={batch.samples} busy={busy} onExport={download}/><EventPrices key={batch.id} batchId={batch.id}/></>:<>
@@ -61,5 +61,5 @@ export default function EvaluationReview({data,onClose}){
     </div><div className="evaluation-seal"><label><input type="checkbox" checked={confirm} onChange={e=>setConfirm(e.target.checked)}/>我已核对全部标签；封存后不得改写，可另建批次保留更正</label><Button primary disabled={busy||dirty||!confirm||batch.reviewed!==batch.total} onClick={()=>mutate(`/${batch.id}/seal`,{confirm:true})}>封存标签并揭示统计</Button><p>已标注 {batch.reviewed}/{batch.total}{dirty?' · 请先保存或放弃当前标签改动':''}</p></div>
    </>}
   </>}
- </section></Modal>;
+ </section></WorkspaceFrame>;
 }

@@ -13,3 +13,5 @@ export function Spark({quote,large=false}){
  return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={large?'m-chart':'m-spark'} role="img" aria-label={`${quote.name} ${quote.symbol} 一分钟收盘走势`}>{large&&<path d="M0 20H600M0 60H600M0 100H600" stroke="#263347" fill="none"/>}<polyline points={points.map((p,i)=>`${i*w/Math.max(1,points.length-1)},${h-4-(p.close-min)/range*(h-8)}`).join(' ')} fill="none" stroke="currentColor" strokeWidth={large?2:1.4}/></svg>;
 }
 export function Empty({title,children}){return <div className="m-empty"><svg viewBox="0 0 32 38" aria-hidden="true"><path d="M5 1h15l8 8v27H5zM19 1v10h9M10 19h12M10 25h9" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg><strong>{title}</strong><p>{children}</p></div>;}
+
+export function WorkspaceFrame({embedded=false,title,onClose,children}){return embedded?<section className="workspace-page" aria-label={title}><header><h2>{title}</h2></header>{children}</section>:<Modal title={title} onClose={onClose}>{children}</Modal>;}

@@ -1,3 +1,4 @@
+import NewsReading from './NewsReading';
 import HistoricalRecall from './HistoricalRecall';
 import ScreeningReview from './ScreeningReview';
 import {relatedCandidates} from '../../shared/research-links.mjs';
@@ -21,7 +22,7 @@ function NewsContent({news:input,topics,mutate,busy,onTarget,onCreated}){
  <header className="m-topic-head"><div><h1>{news.title}</h1><p>{news.publisher||'新闻来源'} · 标题与原文入口 · v{news.revision}</p></div></header>
  <div className="m-detail-scroll"><p className="m-note">发布 {time(news.publishedAt)} · 原文首次收取 {time(news.articleFirstSeen||news.firstSeen)}<br/>本版可用 {time(news.revisionFirstSeen)} · 初筛 {time(news.processedAt)} · {news.triage.rulesVersion}</p>
  <Button type="button" disabled={busy||refreshing} onClick={refreshNews}>{refreshing?'刷新中…':'刷新新闻版本'}</Button>{error&&<p role="alert">{error}</p>}<a href={news.url} target="_blank" rel="noreferrer">打开新闻来源 ↗</a>
- <div className="m-triage-result"><h3>{news.triage.category}</h3><p>{news.triage.messageStatus==='rumor'?'传闻 · ':news.triage.messageStatus==='denial-reported'?'否认报道 · ':news.triage.messageStatus==='proposed'?'拟议阶段 · ':'未证实标题 · '}{news.triage.stage}</p>{news.triage.reasons?.map(r=><p key={r}>{r}</p>)}<p>量级线索：{news.triage.magnitudeHints?.join(' · ')||'标题未提供可识别数值'}；相对业务规模待核验。</p><small>仅凭标题分流，未阅读全文，也未生成买卖信号。</small></div>
+ <NewsReading news={news} busy={busy} mutate={mutate} onRefresh={setRefreshed}/><div className="m-triage-result"><h3>{news.triage.category}</h3><p>{news.triage.messageStatus==='rumor'?'传闻 · ':news.triage.messageStatus==='denial-reported'?'否认报道 · ':news.triage.messageStatus==='proposed'?'拟议阶段 · ':'未证实标题 · '}{news.triage.stage}</p>{news.triage.reasons?.map(r=><p key={r}>{r}</p>)}<p>量级线索：{news.triage.magnitudeHints?.join(' · ')||'标题未提供可识别数值'}；相对业务规模待核验。</p><small>仅凭标题分流，未阅读全文，也未生成买卖信号。</small></div>
  <details onToggle={e=>setHistoryOpen(e.currentTarget.open)}><summary>历史类比 · 查看同机制的更早案例</summary>{historyOpen&&<HistoricalRecall key={`${news.id}:${news.revision}`} news={news} busy={busy}/>}</details>
  <ScreeningReview news={news} mutate={mutate} busy={busy}/><div className="v9-news-create"><h3>{existing?'已有来源事件':'这是一个新的事件？'}</h3><p>保留本版标题与来源，建立观察草稿。明确命中的实体作为待核关系进入关注；未识别公司时保持为空，可继续人工补充。</p><Button primary disabled={busy} onClick={create}>{existing?'打开已有事件草稿':'从此新闻建立事件草稿'}</Button>{existing&&<small>修订标题可在下方加入已有事件；不会重复创建。</small>}</div>
  <h3>或关联到已有研究</h3><div className="source-news-list">{relatedCandidates(news,topics).map(c=><button key={c.topicId} disabled={busy} onClick={()=>setTarget(c.topicId)}><strong>{c.title}</strong><small>{c.reasons.join('；')} · 候选关联，待核对</small></button>)}</div>
