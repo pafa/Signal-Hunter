@@ -27,7 +27,7 @@ function normalize(source,{title,link,date},rejections,index){
  if(typeof title!=='string'||!title.trim()||title.length>2000)return reject('invalid-title');
  if(typeof link!=='string'||!link.trim())return reject('invalid-link');
  let url;try{url=new URL(link,source.url);}catch{return reject('invalid-link');}
- const host={fed:'www.federalreserve.gov',hkma:'www.hkma.gov.hk',csrc:'www.csrc.gov.cn',nvidia:'nvidianews.nvidia.com'}[source.id];
+ const host={fed:'www.federalreserve.gov',hkma:'www.hkma.gov.hk','hkma-rss':'www.hkma.gov.hk',csrc:'www.csrc.gov.cn',nvidia:'nvidianews.nvidia.com'}[source.id];
  if(url.protocol!=='https:'||url.hostname!==host||url.port||url.username||url.password)return reject('untrusted-link');
  url.hash='';
  let publishedAt,datePrecision;
@@ -35,7 +35,7 @@ function normalize(source,{title,link,date},rejections,index){
   if(typeof date!=='string'||!/(?:GMT|UTC|[+-]\d{4})\s*$/.test(date)||!Number.isFinite(Date.parse(date)))return reject('invalid-publication-time');
   publishedAt=new Date(date).toISOString();datePrecision='instant';
  }else{
-  if(typeof date!=='string'||!validNewsDate(date.slice(0,10)))return reject('invalid-publication-date');
+  if(typeof date!=='string'||!validNewsDate(date.slice(0,10))||source.id==='hkma-rss'&&!validNewsDate(date))return reject('invalid-publication-date');
   publishedAt=date.slice(0,10);datePrecision='day';
  }
  return {id:hash(source.provider+'\n'+url.href),title:title.trim(),url:url.href,publishedAt,datePrecision,sourcePublishedAt:date,publicationTimeNote:datePrecision==='day'?'仅采用来源页面显示日期；不推断精确时刻或历史可交易时间':'RSS带时区的发布时间',publisher:source.publisher,provider:source.provider,sourceId:source.id,originKey:host,contentScope:'headline-link'};
@@ -43,10 +43,12 @@ function normalize(source,{title,link,date},rejections,index){
 export function parseOfficialPage(query,text,page=1){
  const source=OFFICIAL_NEWS_SOURCES.find(s=>s.id===query.id);if(!source)throw new Error('未知新闻来源');
  let entries,hasMore=false,limit=null;
- if(['fed','nvidia'].includes(source.id)){
+ if(['fed','nvidia','hkma-rss'].includes(source.id)){
   if(/<!DOCTYPE|<!ENTITY/i.test(text)||XMLValidator.validate(text)!==true)throw new Error('官方RSS格式无效');
   const feed=parser.parse(text);if(!feed.rss?.channel)throw new Error('官方来源未返回RSS');
-  entries=array(feed.rss.channel.item).map(x=>({title:x.title,link:x.link,date:x.pubDate}));
+  // HKMA supplies sortDate alongside midnight pubDate. Use the explicit day,
+  // never turn that display timestamp into a historical availability instant.
+  entries=array(feed.rss.channel.item).map(x=>({title:x.title,link:x.link,date:source.id==='hkma-rss'?x.sortDate:x.pubDate}));
  }else{
   let value;try{value=JSON.parse(text);}catch{throw new Error('官方来源未返回JSON');}
   if(source.id==='hkma'){

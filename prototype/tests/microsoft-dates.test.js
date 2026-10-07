@@ -10,7 +10,7 @@ const head=(url,local='2024-02-06T00:00:00',zoned='2024-02-06T08:00:00+00:00')=>
 const read=(url=source,visible=heading(),meta=head(url))=>extractArticle(`<html><head><title>Synthetic announcement</title>${meta}</head><body>${visible}${content}</body></html>`,url);
 test('verified Microsoft heading corroborates calendar day while unzoned clocks retain raw evidence without inferred instants',()=>{
  for(const [url,visible,local,zoned] of [[source,heading(),'2024-02-06T00:00:00','2024-02-06T08:00:00+00:00'],[blog,blogHeading(),'2024-02-06T05:47:32','2024-02-06T12:47:32+00:00']]){
-  const a=read(url,visible,head(url,local,zoned));assert.equal(a.publishedAt,'2024-02-06');assert.equal(a.publicationDateEvidence.schema,'publication-date-4');assert.equal(a.method,'public-article-7');assert(a.publicationDateEvidence.candidates.some(c=>c.raw===local));assert(a.publicationDateEvidence.candidates.some(c=>c.raw===zoned));assert.equal(materialInput({...a,url},'2026-10-04').datePrecision,'day');assert.deepEqual(validatePublicationEvidence(a.publicationDateEvidence,a.publishedAt,url),a.publicationDateEvidence);
+  const a=read(url,visible,head(url,local,zoned));assert.equal(a.publishedAt,'2024-02-06');assert.equal(a.publicationDateEvidence.schema,'publication-date-5');assert.equal(a.method,'public-article-7');assert(a.publicationDateEvidence.candidates.some(c=>c.raw===local));assert(a.publicationDateEvidence.candidates.some(c=>c.raw===zoned));assert.equal(materialInput({...a,url},'2026-10-04').datePrecision,'day');assert.deepEqual(validatePublicationEvidence(a.publicationDateEvidence,a.publishedAt,url),a.publicationDateEvidence);
  }
  assert.equal(parsePublicationDate('2024-02-06T05:47:32'),null);
 });
