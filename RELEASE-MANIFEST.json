@@ -58,8 +58,8 @@
       "sha256": "625a5a4b2050f15bec584a1c8eb01081aa840646859fe2ba0f52ff749e0b860d"
     },
     "README.md": {
-      "bytes": 16234,
-      "sha256": "8e793f690b7d929143ef8ece10d417e52cc2eaed524163cdb08219e7262abb75"
+      "bytes": 16247,
+      "sha256": "81901d783709b2c1c4ce0455abe331368edea906aeb0997184e60770fc7a000d"
     },
     "SECURITY.md": {
       "bytes": 2268,
@@ -74,8 +74,8 @@
       "sha256": "d8bcfef6287f47ca7073adbf8d9a8b7f3db5ec4ed05ec69a22d5384d01c57ec2"
     },
     "docs/BACKLOG.md": {
-      "bytes": 432276,
-      "sha256": "c715155f4143decf9414940b3c015d2675d37717afb7be893e37134c8fc24173"
+      "bytes": 435178,
+      "sha256": "d5b878eaa9cbf488555f05b06590626467697fe897193ee5f311e02ccefb332c"
     },
     "docs/BRANDING.md": {
       "bytes": 990,
@@ -86,12 +86,12 @@
       "sha256": "ecb3e73eeb588bde28ccbd073062fa62f7da8454f3ecf1f469e3db962c5819d8"
     },
     "docs/DECISIONS.md": {
-      "bytes": 89938,
-      "sha256": "c24ce37e480601162a84b46014c9df8cc395420b728c2d84d9d95a67a560f623"
+      "bytes": 90952,
+      "sha256": "7e9329f03f29c11b714838fea0df1bf8944c7501a3eec78a9e08d1a87f220ce8"
     },
     "docs/DEPLOYMENT.md": {
-      "bytes": 115386,
-      "sha256": "91ef9ad25d574f58d8698aa45670ecb438d58a23f0675f0c0ce7b3f4168315c6"
+      "bytes": 116602,
+      "sha256": "3829cf5f9ed4cbd3a82e1f60f993b4ccf8e1b9a0c02dd666290340100a14ea81"
     },
     "docs/EVALUATION-PROTOCOL.md": {
       "bytes": 48844,
@@ -530,8 +530,8 @@
       "sha256": "f98a0b264bce7d6019783cc61952b37e207793f01f95e9aa554f670b199075eb"
     },
     "prototype/server/news-sources.mjs": {
-      "bytes": 5844,
-      "sha256": "37479e3febc92f2cdb3834f99b602b3e389de60cc86483b959350b12005da916"
+      "bytes": 6121,
+      "sha256": "bae1c20e58a177b9548f804a581937ef2f10680bb8e4928c184972f9b2930263"
     },
     "prototype/server/news-window.mjs": {
       "bytes": 2858,
@@ -594,12 +594,12 @@
       "sha256": "fb2a5e6c72c7754d4dadef349e9a692f323fe2bc95897127fb64ba0882fec0dc"
     },
     "prototype/server/publication-date.mjs": {
-      "bytes": 8855,
-      "sha256": "2df63486721412ee88d0d0b1398d07a2fcc64f14686bf8fd3cb12ddd104db333"
+      "bytes": 10334,
+      "sha256": "69f265fa4182e2cfa96435c6de7b42907cebc461c5772638d528ded690ac8ebb"
     },
     "prototype/server/publication-profiles.mjs": {
-      "bytes": 5595,
-      "sha256": "41bc9147d7bd68f31905b59f200b723b0f8ddcd8cd54c820d6adb662c6f0180b"
+      "bytes": 5868,
+      "sha256": "97a9e48bf0335785399c45afa01bc3a8ac04006cda77f59bfb65fa83ce2d5d6d"
     },
     "prototype/server/recall-evaluation.mjs": {
       "bytes": 7851,
@@ -798,8 +798,8 @@
       "sha256": "6b5fce4c97bee9d44c658bf017c99e656cfe7b49fe339892d333c1528da9510b"
     },
     "prototype/shared/news-sources.mjs": {
-      "bytes": 2308,
-      "sha256": "b45fdd9a6e3a69661e0b8ffef5fb6575ce4f179ce58b92a9d75f203d6bc00293"
+      "bytes": 2743,
+      "sha256": "031b7ec604ee2632848763b51538363db16640398422ba270efe680a5a026301"
     },
     "prototype/shared/price-collection.mjs": {
       "bytes": 855,
@@ -986,8 +986,8 @@
       "sha256": "155e2c39daee2ba24e2c457127a1b189f8026d78dbc61ab4b32c2d5f63c26ee4"
     },
     "prototype/src/integrated/Operations.jsx": {
-      "bytes": 16167,
-      "sha256": "abc29bcbef2b4ac0258fb913da0684c6c066f38de16d68257dc8cb35c4c90160"
+      "bytes": 16223,
+      "sha256": "d9090c4ec14ff6bd36e0f0f59fb8a5c418eb15bd14b01864fe70fe4d0fd7c92c"
     },
     "prototype/src/integrated/PaperForms.jsx": {
       "bytes": 14329,
@@ -1557,6 +1557,10 @@
       "bytes": 8971,
       "sha256": "f204adf8873c8fa4edc65bbbd33f568ca03d91d23d597ea1d425fdbd04dfa021"
     },
+    "prototype/tests/hkma-rss.test.js": {
+      "bytes": 3212,
+      "sha256": "54c06ab10cdbc61908958d43b563f0dbbf26a07e90e5ada09a38106dd8a26f9c"
+    },
     "prototype/tests/independent-news.test.js": {
       "bytes": 16504,
       "sha256": "c6ff2a68bf54b48cb0a27f8e929c154733144991fec14b36d0dcff79c9267639"
@@ -1639,7 +1643,7 @@
     },
     "prototype/tests/microsoft-dates.test.js": {
       "bytes": 5586,
-      "sha256": "29e3d0f391b90770b9d6168c6e2d0e46e3984b124585917fdf2a12bf90f3566b"
+      "sha256": "72cd3e6fe66cbe6e976d32507ed9283c97263cda38d31f54960fd501e9e5fcc4"
     },
     "prototype/tests/minute-anomaly-ui.test.js": {
       "bytes": 4504,
@@ -1750,16 +1754,16 @@
       "sha256": "2a1d136fa4fec15d0b439e35a2aea3872d19ce5325cd4e589e0a24eb2a7ea526"
     },
     "prototype/tests/publication-date.test.js": {
-      "bytes": 12668,
-      "sha256": "37ed71afc9981b3edec42820b25c99cd205b51db0c68ae34d93d683e6a9dedf1"
+      "bytes": 14742,
+      "sha256": "b09d6d13fb4c9558a4030ca4d6e1cc9be4927bbec46df636608e281e2e788301"
     },
     "prototype/tests/publication-profiles.test.js": {
-      "bytes": 7070,
-      "sha256": "2c4673c19b775e9f3e2280f3e753199229fbb3b135c171147744b1eefe575695"
+      "bytes": 8191,
+      "sha256": "b591e13fc56925f73f3de9f9e1b0d11dae5d5cf0c7c5398bc84756d30de08147"
     },
     "prototype/tests/publisher-dates.test.js": {
       "bytes": 7511,
-      "sha256": "7ed7cbc9641ccf7ad8ab11dd8aecedff2d634ae777c524964bde5494006869ee"
+      "sha256": "182fd7e9f560ba452d357cbe626d0cf3ac43e0982c91c819287aa009a4f21732"
     },
     "prototype/tests/recall-evaluation.test.js": {
       "bytes": 9714,
@@ -1810,8 +1814,8 @@
       "sha256": "c5518317b20da1f34c7e9e1373e989d089cf91a9f756dac29c11633e52031cac"
     },
     "prototype/tests/research-navigation.test.js": {
-      "bytes": 10482,
-      "sha256": "241ffd669bbb8bcfbe8ad15ea09de17b6faf731cc43c8becb079094fb2c1d8a1"
+      "bytes": 10539,
+      "sha256": "728c507e9a182643fa9831e10c1c50046abb0e38dbfde1596a304f11976f8e2c"
     },
     "prototype/tests/research-pipeline-ui.test.js": {
       "bytes": 4681,

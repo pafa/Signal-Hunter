@@ -7,9 +7,10 @@ export function publicationProfile(url){
 }
 // Date profiles evolve independently of the immutable article-extraction profile.
 // v1/v2 evidence must continue resolving with the rules that created it.
-export function datePublicationProfile(url,format='publication-date-4'){
- if(['publication-date-3','publication-date-4'].includes(format))try{const u=new URL(url);if(u.protocol==='https:'&&!u.port&&!u.username&&!u.password){
-  if(format==='publication-date-4'){
+export function datePublicationProfile(url,format='publication-date-5'){
+ if(['publication-date-3','publication-date-4','publication-date-5'].includes(format))try{const u=new URL(url);if(u.protocol==='https:'&&!u.port&&!u.username&&!u.password){
+  if(format==='publication-date-5'&&u.hostname==='www.hkma.gov.hk'&&/^\/eng\/news-and-media\/press-releases\/\d{4}\/\d{2}\/\d{8}(?:-\d+)?\/$/.test(u.pathname))return 'hkma-english-date-1';
+  if(['publication-date-4','publication-date-5'].includes(format)){
    if(u.hostname==='news.microsoft.com'&&/^\/source\/\d{4}\/\d{2}\/\d{2}\/[a-z0-9-]+\/$/.test(u.pathname))return 'microsoft-source-1';
    if(u.hostname==='blogs.microsoft.com'&&/^\/blog\/\d{4}\/\d{2}\/\d{2}\/[a-z0-9-]+\/$/.test(u.pathname))return 'microsoft-blog-1';
   }
@@ -70,7 +71,7 @@ export function profileCandidates(document,profile,add){
   const match=/^日期[：:]\s*(\d{4}-\d{2}-\d{2})\s+来源[：:]\s*\S[\s\S]*$/.exec(raw);
   add('csrc:article-date',match?match[1]:raw);
  }
- if(profile==='hkma-release-1')for(const node of document.querySelectorAll('.content-area > .date')){
+ if(['hkma-release-1','hkma-english-date-1'].includes(profile))for(const node of document.querySelectorAll('.content-area > .date')){
   if(node.parentElement.querySelector(':scope > .press-release-title'))add('hkma:release-date',node.textContent.trim());
  }
 }

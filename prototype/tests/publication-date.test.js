@@ -17,6 +17,21 @@ test('publication parser retains day precision and original offset without local
  for(const [raw,expected] of [['2024-02-29','2024-02-29'],['February 7, 2022','2022-02-07'],['2026年 10月 2日','2026-10-02'],['2026-10-02T23:30:00-07:00','2026-10-02T23:30:00-07:00'],['2026-10-03T01:02:03.456Z','2026-10-03T01:02:03.456Z']])assert.equal(parsePublicationDate(raw),expected);
  for(const value of ['2026-02-29','2026-02-31','2026-13-01','2026-10-02T12:00:00','2026-10-02T24:00:00Z','2026-10-02T12:60:00Z','2026-10-02T12:00:00+25:00','10/02/2026','yesterday','February 30, 2022','October 2',null])assert.equal(parsePublicationDate(value),null,String(value));
 });
+test('v5 expands only unambiguous dates and explicit timezone timestamps',()=>{
+ for(const [raw,expected] of [['2026/10/6','2026-10-06'],['2026.10.06','2026-10-06'],['Oct. 6, 2026','2026-10-06'],['6 October 2026','2026-10-06'],['6 Oct, 2026','2026-10-06'],['Tue, 06 Oct 2026 00:00:00 +0800','2026-10-06T00:00:00+08:00'],['06 Oct 2026 15:30:00 GMT','2026-10-06T15:30:00Z']])assert.equal(parsePublicationDate(raw),expected,raw);
+ for(const raw of ['6/10/2026','Oct 6','2026/02/30','2026/10.06','Octember 6, 2026','06 Oct 2026 15:30:00 EST','Mon, 06 Oct 2026 00:00:00 +0800','06 Oct 2026 24:00:00 GMT','06 Oct 2026 15:30:00','2026-10-06 15:30:00'])assert.equal(parsePublicationDate(raw),null,raw);
+ const a=read('','<div class="published-date">6 Oct 2026</div>');assert.equal(a.publishedAt,'2026-10-06');assert.equal(a.publicationDateEvidence.schema,'publication-date-5');assert.deepEqual(validatePublicationEvidence(a.publicationDateEvidence,a.publishedAt,url),a.publicationDateEvidence);
+ assert.equal(resolvePublicationDate([c('6 Oct 2026'),c('2026-10-07')]).status,'conflict');
+});
+test('v1-v4 evidence retains its original invalid results and v4 Microsoft calendar rules',()=>{
+ for(const schema of ['publication-date-1','publication-date-2','publication-date-3','publication-date-4']){
+  const evidence={schema,status:'invalid',candidates:[c('6 Oct 2026')],truncated:false,...(schema!=='publication-date-1'?{profile:'generic',excluded:[]}:{})};
+  assert.deepEqual(validatePublicationEvidence(evidence,null,url),evidence);assert.throws(()=>validatePublicationEvidence({...evidence,status:'known'},'2026-10-06',url));
+ }
+ const old={schema:'publication-date-4',status:'known',candidates:[c('2026-10-06T00:00:00','jsonld:datePublished'),c('Oct. 6, 2026','microsoft:visible-date')],truncated:false,profile:'microsoft-source-1',excluded:[]};
+ const microsoft='https://news.microsoft.com/source/2026/10/06/synthetic-test/';assert.deepEqual(validatePublicationEvidence(old,'2026-10-06',microsoft),old);
+ assert.throws(()=>validatePublicationEvidence(old,'2026-10-06',url));
+});
 test('explicit visible publication label repairs missing metadata without manufacturing midnight',()=>{
  const a=read('','<div class="article-date">\n February 7, 2022 \n</div>');assert.equal(a.publishedAt,'2022-02-07');assert.equal(a.publicationDateEvidence.status,'known');assert.deepEqual(a.publicationDateEvidence.candidates,[c('February 7, 2022','element:publication-label')]);assert.equal(a.method,'public-article-7');
 });

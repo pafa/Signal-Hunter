@@ -12,7 +12,7 @@ const meta='<meta name="PubDate" content="2026-08-01 21:56:31"><meta name="other
 const info=date=>`<div class="content"><div class="info"><p class="fl">日期：${date}     来源：合成测试</p></div></div>`;
 const header=date=>`<div class="content-area"><div class="date">${date}</div><h3 class="press-release-title">合成公告</h3></div>`;
 test('CSRC profile records generated-time exclusion with matching explicit context and retains article date',()=>{
- const a=extract(csrc,meta,info('2024-02-06'));assert.equal(a.publishedAt,'2024-02-06');assert.equal(a.publicationDateEvidence.schema,'publication-date-4');assert.equal(a.publicationDateEvidence.profile,'csrc-article-1');assert.deepEqual(a.publicationDateEvidence.candidates,[{source:'csrc:article-date',raw:'2024-02-06'}]);assert.deepEqual(a.publicationDateEvidence.excluded,[{source:'meta:pubdate',raw:'2026-08-01 21:56:31',reason:'page-generation',context:'页面生成时间 2026-08-01 21:56:31'}]);assert.deepEqual(validatePublicationEvidence(a.publicationDateEvidence,a.publishedAt,csrc),a.publicationDateEvidence);
+ const a=extract(csrc,meta,info('2024-02-06'));assert.equal(a.publishedAt,'2024-02-06');assert.equal(a.publicationDateEvidence.schema,'publication-date-5');assert.equal(a.publicationDateEvidence.profile,'csrc-article-1');assert.deepEqual(a.publicationDateEvidence.candidates,[{source:'csrc:article-date',raw:'2024-02-06'}]);assert.deepEqual(a.publicationDateEvidence.excluded,[{source:'meta:pubdate',raw:'2026-08-01 21:56:31',reason:'page-generation',context:'页面生成时间 2026-08-01 21:56:31'}]);assert.deepEqual(validatePublicationEvidence(a.publicationDateEvidence,a.publishedAt,csrc),a.publicationDateEvidence);
 });
 test('CSRC cannot discard PubDate without exact explicit generation-time corroboration',()=>{
  for(const head of ['<meta name="PubDate" content="2026-08-01 21:56:31">',meta.replace('页面生成时间 2026-08-01','页面生成时间 2026-08-02'),meta.replace('页面生成时间','文章修改时间')]){const a=extract(csrc,head,info('2024-02-06'));assert.equal(a.publishedAt,null);assert.equal(a.publicationDateEvidence.status,'invalid');assert.equal(a.publicationDateEvidence.excluded.length,0);}
@@ -25,6 +25,15 @@ test('publisher selectors and exclusions are restricted to exact HTTPS article h
 test('HKMA Chinese profile keeps day precision and ignores revision date and generic midnight meta',()=>{
  const a=extract(hkma,'<meta name="date" content="2024-10-16T00:00:00+08:00">',header('2024年10月16日')+'<div class="revision-date">修訂日期 : 2026年10月02日</div>');assert.equal(a.publishedAt,'2024-10-16');assert.equal(a.publicationDateEvidence.profile,'hkma-release-1');assert.deepEqual(a.publicationDateEvidence.candidates,[{source:'hkma:release-date',raw:'2024年10月16日'}]);assert.equal(extract(hkma.replace('/chi/','/gb_chi/'),'',header('2024年10月16日')).publishedAt,'2024-10-16');
  assert.equal(extract(hkma,'','<div class="content-area"><div class="date">2024年10月16日</div></div>').publishedAt,null);
+});
+test('v5 English HKMA article headings bind the explicit day while v4 keeps its former missing result',()=>{
+ const url='https://www.hkma.gov.hk/eng/news-and-media/press-releases/2026/10/20261006-4/';
+ const a=extract(url,'',header('06 Oct 2026'));assert.equal(a.publishedAt,'2026-10-06');assert.equal(a.publicationDateEvidence.profile,'hkma-english-date-1');assert.deepEqual(validatePublicationEvidence(a.publicationDateEvidence,a.publishedAt,url),a.publicationDateEvidence);
+ const old={schema:'publication-date-4',status:'missing',candidates:[],truncated:false,profile:'generic',excluded:[]};assert.deepEqual(validatePublicationEvidence(old,null,url),old);
+ assert.equal(extract(url,'','<div class="content-area"><div class="date">06 Oct 2026</div></div>').publishedAt,null);
+ assert.equal(extract(url.replace('/eng/','/other/'),'',header('06 Oct 2026')).publishedAt,null);
+ assert.throws(()=>validatePublicationEvidence(a.publicationDateEvidence,a.publishedAt,'https://news.acme.com/article'));
+ assert.equal(extract(url,'',header('06 Oct 2026')+header('07 Oct 2026')).publicationDateEvidence.status,'conflict');
 });
 test('invalid publisher labels, conflicting dates and combined candidate bounds still fail closed',()=>{
  assert.equal(extract(csrc,meta,info('2024-02-30')).publicationDateEvidence.status,'invalid');assert.equal(extract(csrc,meta,info('2024/02/06')).publicationDateEvidence.status,'invalid');
