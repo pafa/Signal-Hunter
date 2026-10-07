@@ -74,8 +74,8 @@
       "sha256": "d8bcfef6287f47ca7073adbf8d9a8b7f3db5ec4ed05ec69a22d5384d01c57ec2"
     },
     "docs/BACKLOG.md": {
-      "bytes": 430327,
-      "sha256": "4cf7db37818fdf3a49800016ddd39cf1a8c8b7b054cc54eb611069670849a923"
+      "bytes": 432276,
+      "sha256": "c715155f4143decf9414940b3c015d2675d37717afb7be893e37134c8fc24173"
     },
     "docs/BRANDING.md": {
       "bytes": 990,
@@ -86,16 +86,16 @@
       "sha256": "ecb3e73eeb588bde28ccbd073062fa62f7da8454f3ecf1f469e3db962c5819d8"
     },
     "docs/DECISIONS.md": {
-      "bytes": 88871,
-      "sha256": "7cfd0a253d4b2e4571768b0022524ea2ddb55f4e98fd2eb240855afb2bbcc626"
+      "bytes": 89938,
+      "sha256": "c24ce37e480601162a84b46014c9df8cc395420b728c2d84d9d95a67a560f623"
     },
     "docs/DEPLOYMENT.md": {
-      "bytes": 114513,
-      "sha256": "9c7b6e846fafda72b565e5eba678266dc84757afa6ebb97b7e9bb6c9897ec7e2"
+      "bytes": 115386,
+      "sha256": "91ef9ad25d574f58d8698aa45670ecb438d58a23f0675f0c0ce7b3f4168315c6"
     },
     "docs/EVALUATION-PROTOCOL.md": {
-      "bytes": 46856,
-      "sha256": "75cfb6683afa4aa01a19c3e1d96f19694e3bf00c9cc99bb10e4987c9b253f40a"
+      "bytes": 48844,
+      "sha256": "2be74b8fdec84f87a3a8b06befcea2c5112de9070c1a66b20d35c492c6c1dde8"
     },
     "docs/MAJOR-EVENT-SYSTEM.md": {
       "bytes": 22494,
@@ -345,9 +345,13 @@
       "bytes": 4519,
       "sha256": "2968bf1e017cff38b1ec12906b2a7bec527df26d582681247b126bfd86dee122"
     },
+    "prototype/server/daily-event-prices.mjs": {
+      "bytes": 9713,
+      "sha256": "5d4af16d55fd01bb84cda5aae0ffacd73e1bbda5573bbbdf1208a492f865478e"
+    },
     "prototype/server/daily.mjs": {
-      "bytes": 3635,
-      "sha256": "907616f66b89cf57bf3ee0936c9890f4eb926d38ef9e1a7f0583dcda6ed2e950"
+      "bytes": 3765,
+      "sha256": "f95f5b9800add5460f6cda7eead928408b70f6008b4caa217250ae24b7fa4e3a"
     },
     "prototype/server/data-capabilities.mjs": {
       "bytes": 1486,
@@ -390,8 +394,8 @@
       "sha256": "5cef429c2db14ef4762e78e2c6301d805f36581b5a0c5fc8e6e7e047a110b23a"
     },
     "prototype/server/event-prices.mjs": {
-      "bytes": 13630,
-      "sha256": "3f1a60fb8a7f745526fb08841fbc16a4d682367f88adb3b4f5eda7e05f0ce265"
+      "bytes": 15095,
+      "sha256": "f7a0016184bb489b44ccc16227191dc6e090732d89acee7f1e356f22a389e8c9"
     },
     "prototype/server/event-routing.mjs": {
       "bytes": 6616,
@@ -766,8 +770,8 @@
       "sha256": "1b36c7ce46f7466f8ec172ef763d8a89f9750216f49dc3f5b32a5d564216f86f"
     },
     "prototype/shared/event-prices.mjs": {
-      "bytes": 1170,
-      "sha256": "0c49c1b691a92defb8c78cc5e4450ff1d1901034c390befe8068be7c04200f67"
+      "bytes": 1917,
+      "sha256": "e77b2fd14db9ffa4f135a4c461880000c74cc4804d733be1100354b4e622f699"
     },
     "prototype/shared/forward-review.mjs": {
       "bytes": 495,
@@ -930,8 +934,8 @@
       "sha256": "c4e68e25e668d8412aec0761a5736537b01ca047a4d1f04a7072e4ba05d28564"
     },
     "prototype/src/integrated/EventPrices.jsx": {
-      "bytes": 6159,
-      "sha256": "9b08b6dcc06a549cabcd11587390d74049580775c6020decd8df01644e964be9"
+      "bytes": 6972,
+      "sha256": "357779cfe51975ec3e4f1ea79c2408fff97ce4d548aac425a1c102944ab7689e"
     },
     "prototype/src/integrated/ForwardEvaluations.jsx": {
       "bytes": 6218,
@@ -1393,6 +1397,10 @@
       "bytes": 11744,
       "sha256": "0055416f35b8ce2e47ccefb377a53dd9cda88cdb7f341b1caee760f12f177e40"
     },
+    "prototype/tests/daily-event-prices.test.js": {
+      "bytes": 9245,
+      "sha256": "7a94d4de81bae8603f80ebf95f69a8a33d0f4e07f5e69b125c0d989f002b0545"
+    },
     "prototype/tests/daily-integrity.test.js": {
       "bytes": 8143,
       "sha256": "3146af2348b44eb07238637b6cc3c48296936fd4c47579cd69ee6a668bcda26e"
@@ -1458,8 +1466,8 @@
       "sha256": "a3f182ea05d3b00701d5ce376298adc199a3d984fc85488efa5f77fc95810aa9"
     },
     "prototype/tests/event-prices-ui.test.js": {
-      "bytes": 3529,
-      "sha256": "d6bde6bc0448d247dcaadb5983f23fa0fb94665ec4c18e7cb5f0463148c4133a"
+      "bytes": 4513,
+      "sha256": "95b2c7956e003ba814b449ae129712fc5cacd96355bfbcf3a40f0afecbac1713"
     },
     "prototype/tests/event-prices.test.js": {
       "bytes": 14739,
