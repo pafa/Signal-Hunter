@@ -11,11 +11,13 @@ const price=value=>value==null?'未知':String(value);
 const accountName=(overview,id)=>overview?.accounts.find(a=>a.id===id)?.label||id;
 const activityNames={offline:'离线演示',paused:'任务已暂停',running:'研究运行中',degraded:'部分任务降级',waiting:'等待下一轮'};
 
-export function DashboardStatus({data,onRuntime}){
+export function DashboardStatus({data,onRuntime,onAutomation,busy}){
  const overview=data?.overview,activity=overview?.activity,h=dataHealth(data,data?.serverTime?Date.parse(data.serverTime):Date.now());
+ const pipeline=data?.researchPipeline,automaticRunning=!!pipeline?.settings.automatic&&!data?.operations?.discovery?.paused;
  return <div className="dashboard-status" aria-label="整体状态">
+  {pipeline&&<button className="dashboard-automation" disabled={busy||!onAutomation||!pipeline.enabled} onClick={()=>onAutomation(automaticRunning?'pause':'start')} title={pipeline.enabled?'沿用当前范围与每日调用上限；仅启动新闻与研究，不执行交易':'当前模式未启用本机模型研究'}>{automaticRunning?'暂停自动研究':'启动自动研究'}</button>}
   <span><b>{activityNames[activity?.state]||'读取状态中'}</b> · {data?.runtime?.instance?.label||'当前工作台'}</span>
-  <button onClick={onRuntime}>新闻 {data?.runtime?.offline?'合成资料':h.rssState} · 最近输入 {time(activity?.newsAt)}</button>
+  <button onClick={onRuntime}>新闻 {data?.runtime?.offline?'合成资料':h.rssState} · 最近输入 {time(activity?.newsAt)}{pipeline?.settings.automatic?` · 研判完成 ${pipeline.counts.completed||0} / 观察 ${pipeline.counts.observing||0}`:''}</button>
   <span className={overview?.risks.length?'amber':''}>全局风险 {overview?.risks.length??'—'} · 待决定 {overview?.decisions.length??'—'}</span>
   <span className="dashboard-market-time">{[['600825.SH','A股'],['00293.HK','港股'],['AAPL.US','美股']].map(([symbol,label])=>`${label} ${data?.runtime?.offline?'演示':marketClock(symbol,data?.serverTime).label}`).join(' · ')}</span>
  </div>;

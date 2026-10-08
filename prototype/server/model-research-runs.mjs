@@ -1,3 +1,4 @@
+import {researchActor} from './research-actor.mjs';
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {randomUUID} from 'node:crypto';
 import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest,rejectedOutputDiagnostic} from './codex-research.mjs';
@@ -81,7 +82,8 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
   },
   async wait(id){await jobs.get(id)?.done;return read(id);},
   cancel(topicId,id){api.get(topicId,id);const job=jobs.get(id);if(!job)throw new Error('此调用不在本实例运行；已结束或等待中断恢复');job.controller.abort();return {id,status:'cancelling'};},
-  adopt(topicId,id,{version}={}){
+  adopt(topicId,id,{version}={},actor){
+   const provenance=researchActor(actor);
    const run=api.get(topicId,id);if(run.status!=='candidate')throw new Error('此模型结果不可采纳或已经处理');
    validateCandidate(run.candidate,run.packet,{model:run.model,topicId});
    const packet=research.packet(topicId);if(version!==packet.input.topicVersion||packet.inputHash!==run.packet.inputHash)throw new Error('研究或材料已变化；此候选保留在历史中，请重新生成');
@@ -90,8 +92,8 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
     // Bind the transaction to the exact stored record checked above, including
     // its original model configuration, rather than today's configured model.
     if(digest(current)!==digest(run))throw new CodexResearchError('output');
-    write({...run,status:'adopted',acceptedVersion:version+1,acceptedAt:new Date(now()).toISOString()});
-   });
+    write({...run,...provenance,status:'adopted',acceptedVersion:version+1,acceptedAt:new Date(now()).toISOString()});
+   },actor);
   },
   async close(){closed=true;for(const job of jobs.values())job.controller.abort();await Promise.allSettled([...jobs.values()].map(job=>job.done));}
  };

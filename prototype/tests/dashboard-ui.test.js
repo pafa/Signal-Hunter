@@ -20,6 +20,15 @@ async function ui(run){
  }finally{if(root)await act(()=>root.unmount());for(const [k,d] of before)if(d)Object.defineProperty(globalThis,k,d);else delete globalThis[k];await service.close();store.close();dom.window.close();await vite.close();}
 }
 
+test('home offers one automatic-research control and leaves unavailable demo mode disabled',()=>ui(async({data,DashboardStatus,render,click,button})=>{
+ const actions=[];
+ await render(React.createElement(DashboardStatus,{data,onRuntime:()=>{},onAutomation:a=>actions.push(a)}));assert(button('启动自动研究').disabled);
+ data.researchPipeline.enabled=true;data.runtime.offline=false;
+ await render(React.createElement(DashboardStatus,{data,onRuntime:()=>{},onAutomation:a=>actions.push(a)}));await click('启动自动研究');assert.deepEqual(actions,['start']);
+ data.researchPipeline.settings.automatic=true;data.operations.discovery.paused=false;
+ await render(React.createElement(DashboardStatus,{data,onRuntime:()=>{},onAutomation:a=>actions.push(a)}));await click('暂停自动研究');assert.deepEqual(actions,['start','pause']);
+}));
+
 test('holdings keep unrelated positions, expand one row and isolate uninitialized accounts',()=>ui(async({data,HoldingsSummary,render,calls})=>{
  const selected=data.overview.accounts.find(a=>a.id==='scenario').positions[0];
  function Harness(){const [account,setAccount]=useState('scenario'),[expanded,setExpanded]=useState(null);return React.createElement(HoldingsSummary,{overview:data.overview,accountId:account,onAccount:setAccount,expanded,onExpand:setExpanded,selectedTopic:selected.topicId,selectedSymbol:selected.symbol,onSelect:()=>{},onDetail:()=>{},onPortfolio:()=>{}});}

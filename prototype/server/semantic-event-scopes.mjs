@@ -9,7 +9,7 @@ const fail=()=>{throw new Error(semanticErrors[11]);};
 export function eventComparisonSnapshot(db,ref){
  try{
   const topic=JSON.parse(db.prepare('SELECT payload FROM research_topics WHERE id=?').get(ref.id)?.payload),origin=topic.eventExtraction;
-  if(topic.id!==ref.id||ref.revision!==1||topic.status!=='active'||topic.origin!=='material-event-review'||!origin)fail();
+  if(topic.id!==ref.id||ref.revision!==1||topic.status!=='active'||!['material-event-review','material-event-system'].includes(topic.origin)||!origin)fail();
   const run=JSON.parse(db.prepare('SELECT payload FROM material_event_runs WHERE id=?').get(origin.runId)?.payload),packet=run.packet,candidate=run.candidate;
   const decision=JSON.parse(db.prepare('SELECT payload FROM material_event_decisions WHERE run_id=? AND event_index=? ORDER BY version DESC LIMIT 1').get(origin.runId,origin.eventIndex)?.payload);
   if(run.status!=='candidate'||run.id!==origin.runId||packet.inputHash!==digest(packet.input))fail();
@@ -17,6 +17,7 @@ export function eventComparisonSnapshot(db,ref){
   if(digest(candidate.trace)!==digest(origin.modelTrace)||candidate.trace.inputHash!==packet.inputHash)fail();
   if(digest(candidate.rawOutput)!==candidate.trace.outputHash||digest(JSON.parse(candidate.rawOutput))!==digest(candidate.decomposition))fail();
   if(digest(origin.event)!==digest(candidate.decomposition.events[origin.eventIndex]))fail();
+  if(digest(decision.actor||null)!==digest(origin.actor||null))fail();
   if(decision.action!=='create'||decision.topicId!==topic.id||decision.inputHash!==packet.inputHash||decision.note!==origin.reviewNote)fail();
   // Legacy v1 time purposes remain unspecified. Validate without rewriting old records.
   const checked=structuredClone(candidate.decomposition);
@@ -34,7 +35,7 @@ export function comparisonEvents(db,params={}){
  if(Object.keys(params).some(k=>!['q','offset','limit'].includes(k)))throw new Error(semanticErrors[7]);
  const q=params.q??'',offset=Number(params.offset??0),limit=Number(params.limit??20);
  if(typeof q!=='string'||q.length>200||!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>50)throw new Error(semanticErrors[7]);
- const where="json_extract(payload,'$.origin')='material-event-review' AND json_extract(payload,'$.status')='active' AND instr(lower(json_extract(payload,'$.title')),lower(?))>0";
+ const where="json_extract(payload,'$.origin') IN ('material-event-review','material-event-system') AND json_extract(payload,'$.status')='active' AND instr(lower(json_extract(payload,'$.title')),lower(?))>0";
  const total=db.prepare(`SELECT count(*) n FROM research_topics WHERE ${where}`).get(q.trim()).n;
  const rows=db.prepare(`SELECT id,payload FROM research_topics WHERE ${where} ORDER BY rowid DESC LIMIT ? OFFSET ?`).all(q.trim(),limit,offset);
  const items=rows.map(row=>{const t=JSON.parse(row.payload);try{return {...comparisonSummary(eventComparisonSnapshot(db,{id:t.id,revision:1})),selectable:true};}catch{return {kind:'event',id:t.id,revision:1,title:t.title,selectable:false,unavailableReason:semanticErrors[11]};}});

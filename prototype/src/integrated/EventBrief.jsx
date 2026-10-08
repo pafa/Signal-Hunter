@@ -5,11 +5,12 @@ import {claimsOf} from '../../shared/claims.mjs';
 import {CLAIM_STATES} from '../../shared/uncertainty.mjs';
 const actions={observe:'继续观察 · 尚未形成买点',buy:'研究买入 · 等待条件评估',add:'研究增仓 · 先核对新增风险',reduce:'评估减仓 · 等待本人审批',exit:'评估退出 · 等待本人审批'};
 export default function EventBrief({topic,workflow,onDetail,onEvidence,onCompany,compact=false}){
- const claims=claimsOf(topic),a=claims[0],origin=topic.origin==='news-candidate'?'新闻候选 · 未经深度研判':topic.origin==='recent-data-test'?'真实新闻 · 回溯研究':topic.origin==='attachment-research'?'附件研究 · 助手研判':topic.origin==='retrospective-case'?'既有回溯案例':'人工研究';
+ const claims=claimsOf(topic),a=claims[0],origin=topic.origin==='material-event-system'?'系统识别 · 事实待核实':topic.origin==='news-candidate'?'新闻候选 · 未经深度研判':topic.origin==='recent-data-test'?'真实新闻 · 回溯研究':topic.origin==='attachment-research'?'附件研究 · 助手研判':topic.origin==='retrospective-case'?'既有回溯案例':'人工研究';
+ const systemJudgment=topic.dossier?.actor?.kind==='system',logic=systemJudgment?(topic.dossier.sections?.find(s=>s.id==='materiality')?.paragraphs?.[0]||topic.hypothesis.logic):topic.hypothesis.logic;
  if(compact)return <div className="dashboard-brief v8-brief">
   <div className="i-topic-heading"><div><div className="i-kicker">{topic.label} · {origin} · v{topic.version}</div><h1>{topic.title}</h1></div><Button onClick={()=>onDetail(topic.dossier?'brief':'evidence')}>深入研究 →</Button></div>
   <div className="v8-verdict"><b>{actions[topic.hypothesis.action]||'尚未形成行动判断'}</b><Button onClick={()=>onDetail('hypothesis')}>查看行动条件</Button></div>
-  <p className="dashboard-logic" title={topic.hypothesis.logic}><b>判断依据</b> {topic.hypothesis.logic||topic.summary||'研判依据待补'}</p>
+  <p className="dashboard-logic" title={logic}><b>{systemJudgment?'系统研判':'判断依据'}</b> {logic||topic.summary||'研判依据待补'}</p>
   <p className="dashboard-logic dashboard-risk" title={topic.hypothesis.invalidation}><b>主要风险</b> {topic.hypothesis.invalidation||'尚无明确失效条件，不能据此形成买卖方案'}</p>
   <p className="dashboard-horizon">持有窗口：{topic.hypothesis.holdingHorizon||'待评估'} · 复核：{time(topic.hypothesis.reviewAt)}</p>
   <details className="v8-context"><summary>展开证据与本次变化</summary><p>{topic.changeSummary?.items?.join('；')||'查看当前研究与历史版本'} · 更新 {time(topic.updatedAt)}</p><p>支持 {topic.coverage.support} / 反证 {topic.coverage.against} / 待核 {topic.coverage.pending}；证据数量不等于结论已成立。</p><p>{topic.nextEvidence||'后续验证条件待补'}。</p><Button onClick={()=>onDetail('materials')}>查看完整证据</Button></details>

@@ -117,6 +117,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='POST'&&/^\/api\/research-pipeline\/events\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retryEvent(url.pathname.split('/')[4]);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&/^\/api\/research-pipeline\/relations\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retryRelation(url.pathname.split('/')[4]);reply(200,updatedSnapshot());return;}
     if(req.method==='PATCH'&&url.pathname==='/api/price-collection'){service.priceCollection.configure(data);reply(200,updatedSnapshot());return;}
+    if(req.method==='POST'&&url.pathname==='/api/research-automation'){service.controlResearchAutomation(data);reply(200,updatedSnapshot());return;}
     if(req.method==='PATCH'&&url.pathname==='/api/research-pipeline'){service.researchPipeline.configure(data);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&/^\/api\/research-pipeline\/[a-f0-9]{64}\/retry$/.test(url.pathname)){if(Object.keys(data).length)throw new Error('重试参数无效');service.researchPipeline.retry(url.pathname.split('/')[3]);reply(200,updatedSnapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/execution-feed/refresh'){if(Object.keys(data).length)throw Error('执行输入只允许服务端配置，不能由浏览器提交报价');reply(200,service.executionInputs.refresh());return;}

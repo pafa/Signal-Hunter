@@ -1,3 +1,4 @@
+import {researchActor} from './research-actor.mjs';
 import {randomUUID} from 'node:crypto';
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {digest,CodexResearchError,rejectedOutputDiagnostic} from './codex-research.mjs';
@@ -29,7 +30,7 @@ export function openCompanyEntityRuns(store,research,{enabled=false,config={},ru
  const api={
   list(topicId){research.get(topicId);return {enabled:enabled&&!closed,model:config.model||null,runs:db.prepare('SELECT payload,expires_at FROM company_entity_runs WHERE topic_id=? ORDER BY rowid DESC LIMIT 50').all(topicId).map(row=>summary(expired(JSON.parse(row.payload),row.expires_at)))};},
   get(topicId,id){const r=read(id);if(r.topicId!==topicId)throw new Error('身份识别记录不属于此研究');return {...r,stale:stale(r),reviews:(r.candidate?.resolution.mentions||[]).map((_,i)=>history(id,i))};},
-  start(topicId,data){
+  start(topicId,data,beforeCommit=()=>{}){
    guard();if(!data||Object.keys(data).sort().join(',')!=='materialId,requestId,revision,version'||typeof data.requestId!=='string'||!/^[-a-zA-Z0-9]{16,80}$/.test(data.requestId))throw new Error('身份识别请求参数无效');
    const {requestId}=data,request={version:data.version,materialId:data.materialId,revision:data.revision},prior=db.prepare('SELECT payload FROM company_entity_runs WHERE request_id=?').get(requestId);
    if(prior){const r=JSON.parse(prior.payload);if(r.topicId!==topicId||Object.keys(request).some(k=>r.request[k]!==request[k]))throw new Error('请求标识已用于其他输入');return summary(read(r.id));}
@@ -37,7 +38,7 @@ export function openCompanyEntityRuns(store,research,{enabled=false,config={},ru
    const packet=companyEntitiesPacket(store,research,topicId,request),timeoutMs=config.timeoutMs??180000;
    if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>600000)throw new Error('模型超时配置无效');
    const run={id:randomUUID(),topicId,requestId,request,packet,status:'running',model:config.model,createdAt:new Date(now()).toISOString()};
-   db.exec('BEGIN IMMEDIATE');try{guard();if(digest(companyEntitiesPacket(store,research,topicId,request))!==digest(packet))throw new Error('材料或研究已变化，请刷新识别');recover();claimModelLease(db,run.id,now(),timeoutMs+30000);db.prepare('INSERT INTO company_entity_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,requestId,run.status,now()+timeoutMs+30000,JSON.stringify(run));db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+   db.exec('BEGIN IMMEDIATE');try{guard();if(digest(companyEntitiesPacket(store,research,topicId,request))!==digest(packet))throw new Error('材料或研究已变化，请刷新识别');recover();claimModelLease(db,run.id,now(),timeoutMs+30000);db.prepare('INSERT INTO company_entity_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,requestId,run.status,now()+timeoutMs+30000,JSON.stringify(run));beforeCommit(run);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(candidate=>{
     if(controller.signal.aborted)throw new CodexResearchError('cancelled');
@@ -49,19 +50,20 @@ export function openCompanyEntityRuns(store,research,{enabled=false,config={},ru
   },
   async wait(id){await jobs.get(id)?.done;const r=read(id);return api.get(r.topicId,id);},
   cancel(topicId,id){guard();api.get(topicId,id);const job=jobs.get(id);if(!job)throw new Error('此调用不在本实例运行');job.controller.abort();return {id,status:'cancelling'};},
-  decide(topicId,id,data){
+  decide(topicId,id,data,actor){
+   const provenance=researchActor(actor);
    guard();if(!data||Object.keys(data).sort().join(',')!=='action,mentionIndex,note,symbol,topicVersion,version'||!['link','reject','reopen'].includes(data.action)||!Number.isSafeInteger(data.mentionIndex)||data.mentionIndex<0||!Number.isSafeInteger(data.version)||data.version<0||!Number.isSafeInteger(data.topicVersion)||data.topicVersion<1||typeof data.symbol!=='string'||typeof data.note!=='string'||!data.note.trim()||data.note.length>1200)throw new Error('身份核对参数无效');
    const r=read(id);if(r.topicId!==topicId)throw new Error('身份识别记录不属于此研究');
    const mention=r.candidate?.resolution?.mentions[data.mentionIndex];if(r.status!=='candidate'||!mention)throw new Error('没有可核对的身份候选');
    // Revalidate frozen output before a decision; a stored candidate is not trusted input.
    validateSavedCandidate(r);const frozenHash=digest(r);
-   const latest=history(id,data.mentionIndex)[0],requestHash=digest({mentionIndex:data.mentionIndex,version:data.version,action:data.action,note:data.note,symbol:data.symbol,topicVersion:data.topicVersion});
+   const latest=history(id,data.mentionIndex)[0],requestHash=digest({mentionIndex:data.mentionIndex,version:data.version,action:data.action,note:data.note,symbol:data.symbol,topicVersion:data.topicVersion,...provenance});
    if(latest?.requestHash===requestHash)return api.get(topicId,id);
    const check=()=>{guard();if(digest(read(id))!==frozenHash)throw new CodexResearchError('output');const current=history(id,data.mentionIndex)[0],topic=research.get(topicId);if((current?.version||0)!==data.version||current?.action==='link')throw new Error('核对记录已变化；已关联证券请在公司关系中处理');if(data.action==='link'&&(stale(r)||current?.action==='reject'||topic.version!==data.topicVersion||!mention.symbols.includes(data.symbol)||!['candidate','ambiguous'].includes(mention.resolution)))throw new Error('材料、研究或身份候选已变化，请刷新核对');if(data.action!=='link'&&data.symbol)throw new Error('排除或重新核对不得指定证券');if(data.action==='reopen'&&current?.action!=='reject')throw new Error('只有已排除候选可以重新核对');};
-   const decision={version:data.version+1,action:data.action,note:data.note.trim(),symbol:data.symbol,at:new Date(now()).toISOString(),requestHash,inputHash:r.packet.inputHash};
+   const decision={...provenance,version:data.version+1,action:data.action,note:data.note.trim(),symbol:data.symbol,at:new Date(now()).toISOString(),requestHash,inputHash:r.packet.inputHash};
    const save=()=>db.prepare('INSERT INTO company_entity_decisions VALUES(?,?,?,?)').run(id,data.mentionIndex,decision.version,JSON.stringify(decision));
    if(data.action==='link'){
-    check();const m=r.packet.input.material,identity=r.packet.input.directory.find(c=>c.symbol===data.symbol),basis={runId:id,mentionIndex:data.mentionIndex,mention,identity,inputHash:r.packet.inputHash,materialId:m.id,materialRevision:m.revision,directoryVersion:identity.directoryVersion||r.packet.input.directoryVersion,trace:r.candidate.trace,reviewNote:decision.note};
+    check();const m=r.packet.input.material,identity=r.packet.input.directory.find(c=>c.symbol===data.symbol),basis={...provenance,runId:id,mentionIndex:data.mentionIndex,mention,identity,inputHash:r.packet.inputHash,materialId:m.id,materialRevision:m.revision,directoryVersion:identity.directoryVersion||r.packet.input.directoryVersion,trace:r.candidate.trace,reviewNote:decision.note};
     research.addCompany(topicId,{version:data.topicVersion,symbol:data.symbol,kind:'mentioned',relationStatus:'pending',direction:'unclear',note:decision.note,url:m.url,evidenceIds:['material:'+m.id],identityReviewed:false},()=>{check();decision.researchVersion=data.topicVersion+1;save();},basis);
    }else{db.exec('BEGIN IMMEDIATE');try{check();save();db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}}
    return api.get(topicId,id);
