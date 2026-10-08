@@ -2,11 +2,17 @@ import {digest} from './codex-research.mjs';
 import {materialComparisonSnapshot,comparisonSummary} from './semantic-materials.mjs';
 import {validateMaterialEvents} from './material-events.mjs';
 import {semanticErrors} from '../shared/semantic-labels.mjs';
+import {readSnapshotCache} from './read-snapshot-cache.mjs';
 const fail=()=>{throw new Error(semanticErrors[11]);};
+const caches=new WeakMap();
 // A reviewed occurrence has its own identity; sharing a document does not share an event.
 // Scope v1 is immutable. Editing a research note does not revise the occurrence.
 // Archival, changed material or lost provenance makes it unavailable, preserving history.
 export function eventComparisonSnapshot(db,ref,{historical=false}={}){
+ if(!caches.has(db))caches.set(db,readSnapshotCache(db));
+ return caches.get(db)(JSON.stringify([ref,historical]),()=>readEventSnapshot(db,ref,historical));
+}
+function readEventSnapshot(db,ref,historical){
  try{
   const topic=JSON.parse(db.prepare('SELECT payload FROM research_topics WHERE id=?').get(ref.id)?.payload),origin=topic.eventExtraction;
   if(topic.id!==ref.id||ref.revision!==1||topic.status!=='active'||!['material-event-review','material-event-system'].includes(topic.origin)||!origin)fail();

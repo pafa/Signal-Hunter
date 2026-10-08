@@ -1,4 +1,5 @@
 import {revisionComparisonPacket} from './revision-comparison.mjs';
+import {researchActor,SYSTEM_RESEARCH_ACTOR} from './research-actor.mjs';
 import {eventComparisonSnapshot} from './semantic-event-scopes.mjs';
 import {randomUUID} from 'node:crypto';
 import {digest} from './codex-research.mjs';
@@ -23,8 +24,11 @@ export function openSemanticBatches(store,semantic,{enabled=false,config={},now=
  const rows=id=>db.prepare('SELECT i.*,r.status AS run_status,r.expires_at AS run_expires FROM semantic_batch_items i LEFT JOIN semantic_runs r ON r.id=i.run_id WHERE i.batch_id=? ORDER BY i.ordinal').all(id);
  const itemView=row=>{const item=JSON.parse(row.payload),run=row.run_id?semantic.get(row.run_id):null;return {...item,status:run?.status||row.status,runId:row.run_id,failure:run?.failure?.message||item.failure||null,relation:run?.candidate?.comparison.relation||null,stale:run?.stale||false};};
  const project=(batch,details=false)=>{const records=rows(batch.id),counts={};for(const row of records){const status=(row.run_status==='running'&&row.run_expires<now()?'interrupted':row.run_status)||row.status;counts[status]=(counts[status]||0)+1;}const state=batch.state==='active'&&!counts.queued&&!counts.running?'completed':batch.state;return {id:batch.id,requestId:batch.requestId,state,createdAt:batch.createdAt,model:batch.plan.model,planHash:batch.plan.planHash,inputCount:batch.plan.inputs.length,pairCount:records.length,counts,...(batch.owner?{owner:batch.owner}:{}),...(batch.plan.revision?{revision:batch.plan.revision,revisionPreviousIds:batch.plan.revisionPreviousIds}:{}),...(details?{inputs:batch.plan.inputs.map(comparisonSummary),items:records.map(itemView),audit:db.prepare('SELECT action,at,payload FROM semantic_batch_audit WHERE batch_id=? ORDER BY id').all(batch.id).map(r=>({...r,payload:JSON.parse(r.payload)}))}:{})};};
- function plan(input,revision=null){
-  if(!input||Object.keys(input).join(',')!=='inputs'||!Array.isArray(input.inputs)||input.inputs.length<2||input.inputs.length>(revision?20:10))fail(0);
+ function plan(input,revision=null,actor){
+  researchActor(actor);const automatic=actor===SYSTEM_RESEARCH_ACTOR;
+  // Automatic work is already persisted and executed one pair at a time under
+  // the shared quota. The manual selection limit must not drop later reports.
+  if(!input||Object.keys(input).join(',')!=='inputs'||!Array.isArray(input.inputs)||input.inputs.length<2||!automatic&&input.inputs.length>(revision?20:10)||automatic&&input.inputs.some(r=>r?.kind!=='event'))fail(0);
   const keys=input.inputs.map(r=>`${r?.kind||'news'}:${r?.id}`);if(new Set(keys).size!==keys.length)fail(0);
   const inputs=[],pairs=[];
   if(revision){
@@ -36,31 +40,34 @@ export function openSemanticBatches(store,semantic,{enabled=false,config={},now=
     const packet=revisionComparisonPacket(store,{left:input.inputs[left],right:input.inputs[right],revision});pairs.push({left,right,inputHash:packet.inputHash,executionHash:executionHash(packet)});
    }
    if(!pairs.length||new Set(pairs.flatMap(p=>[p.left,p.right])).size!==inputs.length)fail(0);
-   const value={schema:'semantic-revision-batch-1',revision,revisionPreviousIds:inputs.filter(m=>before.has(m.id)).map(m=>m.id),inputs,pairs,model:config.model||null,configHash:configHash()};return {...value,planHash:digest(value)};
+   const value={schema:'semantic-revision-batch-1',...(automatic?{executionMode:'automatic-complete-pairs'}:{}),revision,revisionPreviousIds:inputs.filter(m=>before.has(m.id)).map(m=>m.id),inputs,pairs,model:config.model||null,configHash:configHash()};return {...value,planHash:digest(value)};
   }
   for(let left=0;left<input.inputs.length;left++)for(let right=left+1;right<input.inputs.length;right++){
    const packet=comparisonPacket(store,{left:input.inputs[left],right:input.inputs[right]});inputs[left]=packet.input.left;inputs[right]=packet.input.right;pairs.push({left,right,inputHash:packet.inputHash,executionHash:executionHash(packet)});
   }
-  const value={schema:'semantic-batch-1',inputs,pairs,model:config.model||null,configHash:configHash()};return {...value,planHash:digest(value)};
+  const value={schema:'semantic-batch-1',...(automatic?{executionMode:'automatic-complete-pairs'}:{}),inputs,pairs,model:config.model||null,configHash:configHash()};return {...value,planHash:digest(value)};
  }
  const api={
-  preview(input){const p=plan(input);return {...p,inputs:p.inputs.map(comparisonSummary),maximumCalls:p.pairs.length};},
-  previewRevision(input,revision){const p=plan(input,revision);return {...p,inputs:p.inputs.map(comparisonSummary),maximumCalls:p.pairs.length};},
+  preview(input,actor){const p=plan(input,null,actor);return {...p,inputs:p.inputs.map(comparisonSummary),maximumCalls:p.pairs.length};},
+  previewRevision(input,revision,actor){const p=plan(input,revision,actor);return {...p,inputs:p.inputs.map(comparisonSummary),maximumCalls:p.pairs.length};},
   list(){return {enabled:enabled&&semantic.status().enabled,batches:db.prepare('SELECT payload FROM semantic_batches ORDER BY rowid DESC LIMIT 50').all().map(r=>project(JSON.parse(r.payload)))};},
   get(id){return project(read(id),true);},
-  create(input,{owner=null,reuseRunIds=[],beforeCommit=()=>{},revision=null}={}){
+  create(input,{owner=null,reuseRunIds=[],beforeCommit=()=>{},revision=null,actor}={}){
+   researchActor(actor);if(actor&&owner!=='research-pipeline')fail(3);
    if(revision&&owner!=='research-pipeline')fail(0);
    writeAllowed();if(!enabled||!semantic.status().enabled)throw new Error('当前未启用本机 Codex 研判');
    if(!config.binary||!config.model)throw new Error('请先配置本机 Codex 路径与模型');
    if(!input||Object.keys(input).sort().join(',')!=='inputs,planHash,requestId'||typeof input.requestId!=='string'||!/^[-a-zA-Z0-9]{16,80}$/.test(input.requestId)||typeof input.planHash!=='string')fail(3);
    const batch=transaction(()=>{
     const old=db.prepare('SELECT payload FROM semantic_batches WHERE request_id=?').get(input.requestId);if(old){const b=JSON.parse(old.payload);if(b.requestHash!==digest(input))fail(3);return b;}
-    const p=plan({inputs:input.inputs},revision);if(p.planHash!==input.planHash)fail(1);
+    const p=plan({inputs:input.inputs},revision,actor);if(p.planHash!==input.planHash)fail(1);
     const b={id:randomUUID(),requestId:input.requestId,requestHash:digest(input),createdAt:at(),state:'active',plan:p,...(owner?{owner}:{})};
-    const reusable=reuseRunIds.map(id=>semantic.get(id)).filter(r=>r.status==='candidate'&&!r.stale&&r.model===p.model&&(!r.decision||r.decision.runId===r.id&&r.decision.action==='accept'));
+    const reusable=new Map();
+    for(const id of new Set(reuseRunIds)){const r=semantic.get(id);if(r.status==='candidate'&&!r.stale&&r.model===p.model&&(!r.decision||r.decision.runId===r.id&&r.decision.action==='accept')){const key=executionHash(r.packet);if(!reusable.has(key))reusable.set(key,r);}}
     db.prepare('INSERT INTO semantic_batches VALUES(?,?,?)').run(b.id,b.requestId,JSON.stringify(b));
-    for(const [ordinal,pair] of p.pairs.entries()){const reused=reusable.find(r=>r.packet.inputHash===pair.inputHash&&executionHash(r.packet)===pair.executionHash);db.prepare('INSERT INTO semantic_batch_items VALUES(?,?,?,?,?)').run(b.id,ordinal,reused?'candidate':'queued',reused?.id||null,JSON.stringify({ordinal,...pair,attempts:[],...(reused?{reusedRunId:reused.id}:{})}));}
-    beforeCommit(b);audit(b.id,'create',{planHash:p.planHash,maximumCalls:p.pairs.length,reusedPairs:p.pairs.filter(pair=>reusable.some(r=>r.packet.inputHash===pair.inputHash&&executionHash(r.packet)===pair.executionHash)).length});return b;
+    let reusedPairs=0;const insert=db.prepare('INSERT INTO semantic_batch_items VALUES(?,?,?,?,?)');
+    for(const [ordinal,pair] of p.pairs.entries()){const match=reusable.get(pair.executionHash),reused=match?.packet.inputHash===pair.inputHash?match:null;if(reused)reusedPairs++;insert.run(b.id,ordinal,reused?'candidate':'queued',reused?.id||null,JSON.stringify({ordinal,...pair,attempts:[],...(reused?{reusedRunId:reused.id}:{})}));}
+    beforeCommit(b);audit(b.id,'create',{planHash:p.planHash,maximumCalls:p.pairs.length,reusedPairs});return b;
    });return project(batch,true);
   },
   control(id,input,beforeCommit=()=>{}){

@@ -29,9 +29,11 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
   succession.scan(context);
   const rows=db.prepare(`SELECT r.* FROM research_pipeline_relations r JOIN semantic_runs s ON s.id=r.run_id WHERE s.status='candidate' AND json_extract(r.payload,'$.clusterExpansion')='reviewed-increment-1'
    AND (coalesce(json_extract(r.payload,'$.automatic'),0)!=1 OR r.status='completed')
-   AND NOT EXISTS(SELECT 1 FROM research_pipeline_cluster_jobs j WHERE j.relation_id=r.id) ORDER BY r.rowid LIMIT 20`).all();
+   AND NOT EXISTS(SELECT 1 FROM research_pipeline_cluster_jobs j WHERE j.relation_id=r.id AND NOT(j.status='skipped' AND coalesce(json_extract(j.payload,'$.automatic'),0)=1 AND coalesce(json_extract(j.payload,'$.reason'),'')='扩展后超过10份输入，保留原簇全部成员，不截断'))
+   AND NOT EXISTS(SELECT 1 FROM research_pipeline_cluster_jobs j WHERE j.relation_id='large-pair-resume:'||r.id) ORDER BY r.rowid LIMIT 20`).all();
   for(const row of rows){
-   context.assertActive();guard();const source=JSON.parse(row.payload),p={...(source.automatic?{automatic:true}:{}),sourceId:source.source.id,sourceVersion:source.source.version,sourceTitle:source.source.title,newsId:source.newsId,newsRevision:source.newsRevision,runId:row.run_id,createdAt:at()},id=digest({relation:row.id,kind:'cluster-expansion'});
+   context.assertActive();guard();const previous=db.prepare('SELECT id FROM research_pipeline_cluster_jobs WHERE relation_id=?').get(row.id),relationId=previous?'large-pair-resume:'+row.id:row.id;
+   const source=JSON.parse(row.payload),p={...(source.automatic?{automatic:true}:{}),...(previous?{resumedJobId:previous.id}:{}),sourceId:source.source.id,sourceVersion:source.source.version,sourceTitle:source.source.title,newsId:source.newsId,newsRevision:source.newsRevision,runId:row.run_id,createdAt:at()},id=digest({relation:relationId,kind:'cluster-expansion'});
    // Serialize automatic plans so later relations see the newly saved membership.
    if(p.automatic&&db.prepare("SELECT 1 FROM research_pipeline_cluster_jobs j JOIN semantic_batches b ON b.id=j.batch_id WHERE j.status='active' AND json_extract(j.payload,'$.automatic')=1 AND json_extract(b.payload,'$.state')='active'").get())return;
    let cluster,run,plan,input,reason='比较依据失效或不支持同一事件';
@@ -47,20 +49,20 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
     }
     p.triggerHash=triggerHash(run);
     reason='事件簇或来源依据变化，或新事项已经归簇';valid(p);
-    reason='扩展后超过10份输入，保留原簇全部成员，不截断';if(cluster?.members.length>=10)throw Error();
+    reason='扩展后超过10份输入，保留原簇全部成员，不截断';if(!p.automatic&&cluster?.members.length>=10)throw Error();
     reason='此事项针对同一事件簇版本已有扩展计划';
     if(cluster&&db.prepare("SELECT 1 FROM research_pipeline_cluster_jobs WHERE batch_id IS NOT NULL AND json_extract(payload,'$.sourceId')=? AND json_extract(payload,'$.clusterHash')=?").get(p.sourceId,p.clusterHash))throw Error();
     reason='完整成员的配对输入已失效，保留当前研究';
     input=cluster&&run.packet.input.right.id===p.sourceId?[...cluster.members.map(ref),ref(run.packet.input.right)]:[ref(run.packet.input.left),...(cluster?cluster.members.map(ref):[ref(run.packet.input.right)])];
-    plan=batches.preview({inputs:input});
+    plan=batches.preview({inputs:input},p.automatic?SYSTEM_RESEARCH_ACTOR:undefined);
    }catch{
-    transaction(()=>{context.assertActive();db.prepare('INSERT OR IGNORE INTO research_pipeline_cluster_jobs VALUES(?,?,?,NULL,?)').run(id,row.id,'skipped',JSON.stringify({...p,reason}));});continue;
+    transaction(()=>{context.assertActive();db.prepare('INSERT OR IGNORE INTO research_pipeline_cluster_jobs VALUES(?,?,?,NULL,?)').run(id,relationId,'skipped',JSON.stringify({...p,reason}));});continue;
    }
    const relatedRuns=db.prepare("SELECT run_id FROM research_pipeline_relations WHERE run_id IS NOT NULL AND json_extract(payload,'$.source.id')=? ORDER BY rowid DESC LIMIT 3").all(p.sourceId).map(r=>r.run_id);
    const reuseRunIds=[...new Set([row.run_id,...(cluster?.pairs||[]).map(pair=>pair.basis.runId),...relatedRuns])];
-   batches.create({inputs:input,planHash:plan.planHash,requestId:id},{owner:'research-pipeline',reuseRunIds,beforeCommit:batch=>{
+   batches.create({inputs:input,planHash:plan.planHash,requestId:id},{owner:'research-pipeline',actor:p.automatic?SYSTEM_RESEARCH_ACTOR:undefined,reuseRunIds,beforeCommit:batch=>{
     context.assertActive();guard();valid(p);
-    db.prepare('INSERT INTO research_pipeline_cluster_jobs VALUES(?,?,?,?,?)').run(id,row.id,'active',batch.id,JSON.stringify(p));audit(id,'cluster-expansion-planned',{clusterId:cluster?.id||null,batchId:batch.id,planHash:plan.planHash,automatic:!!p.automatic});
+    db.prepare('INSERT INTO research_pipeline_cluster_jobs VALUES(?,?,?,?,?)').run(id,relationId,'active',batch.id,JSON.stringify(p));audit(id,'cluster-expansion-planned',{clusterId:cluster?.id||null,batchId:batch.id,planHash:plan.planHash,automatic:!!p.automatic,...(previous?{resumedJobId:previous.id}:{})});
    }});
   }
  }
@@ -127,7 +129,7 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
     if(!confirmedVersion)try{valid(p);}catch{stale=true;}
    }
    const status=p.automatic?row.status==='active'?(batch.state==='completed'?'processing':batch.state):row.status:confirmedVersion?'confirmed':row.status==='active'?batch.state:row.status;
-   return {id:row.id,...p,batchId:row.batch_id,status,confirmedVersion,stale,counts:batch?.counts||null,reusedPairs:batch?.items.filter(i=>i.reusedRunId).length||0};})};},
+   return {id:row.id,...p,batchId:row.batch_id,status,confirmedVersion,stale,inputCount:batch?.inputCount??null,pairCount:batch?.pairCount??null,counts:batch?.counts||null,reusedPairs:batch?.items.filter(i=>i.reusedRunId).length||0};})};},
   step(context){
    context.assertActive();guard();scan(context);
    const rows=db.prepare("SELECT * FROM research_pipeline_cluster_jobs WHERE status='active' ORDER BY rowid").all();let deferred=null;

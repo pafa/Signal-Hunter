@@ -1,4 +1,5 @@
 import {revisionMappingResult} from './revision-comparison.mjs';
+import {SYSTEM_RESEARCH_ACTOR} from './research-actor.mjs';
 import {digest} from './codex-research.mjs';
 import {eventComparisonSnapshot} from './semantic-event-scopes.mjs';
 import {validateComparisonCandidate} from './semantic-events.mjs';
@@ -73,13 +74,15 @@ export function openPipelineSuccession({store,research,semantic,batches,clusters
    const replaced=record.members.filter(m=>latest.get(m.documentId)?.revision>m.materialRevision);if(!replaced.length)continue;
    if(db.prepare("SELECT 1 FROM research_pipeline_cluster_jobs WHERE status='active' AND json_extract(payload,'$.clusterId')=?").get(row.id))continue;
    const c=clusters.get(row.id);
-   const ids=[...new Set(replaced.map(m=>latest.get(m.documentId).id))].sort(),id=digest({kind:'automatic-succession-1',cluster:c.snapshotHash,sources:ids});
+   const ids=[...new Set(replaced.map(m=>latest.get(m.documentId).id))].sort(),originalId=digest({kind:'automatic-succession-1',cluster:c.snapshotHash,sources:ids});
+   const prior=db.prepare('SELECT status,payload FROM research_pipeline_cluster_jobs WHERE id=?').get(originalId),resuming=prior?.status==='observing'&&JSON.parse(prior.payload).automatic===true&&JSON.parse(prior.payload).reason==='修订后没有完整事项，或完整比较超过10份输入；保留观察，不截断候选';
+   const id=resuming?digest({previous:originalId,kind:'large-pair-resume'}):originalId;
    if(db.prepare('SELECT 1 FROM research_pipeline_cluster_jobs WHERE id=?').get(id))continue;
    let sources;try{sources=ids.map(source);}catch(error){
     if(!error.pending)observe(context,id,{automatic:true,mode:'replace',clusterId:c.id,clusterVersion:c.version,clusterHash:c.snapshotHash,clusterTitle:c.title,sourceId:replaced[0].id,sourceTitle:'来源修订 · '+c.title,sourceJobIds:ids,createdAt:at()},error.message);
     continue;
    }
-   const p={automatic:true,mode:'replace',clusterId:c.id,clusterVersion:c.version,clusterHash:c.snapshotHash,clusterTitle:c.title,sourceId:sources[0].topics[0]?.id||replaced[0].id,sourceTitle:'来源修订 · '+c.title,newsId:sources[0].newsId,newsRevision:sources[0].newsRevision,sources,replaced:replaced.map(m=>({id:m.id,documentId:m.documentId,materialRevision:m.materialRevision})),retained:[],createdAt:at()};
+   const p={automatic:true,...(resuming?{resumedJobId:originalId}:{}),mode:'replace',clusterId:c.id,clusterVersion:c.version,clusterHash:c.snapshotHash,clusterTitle:c.title,sourceId:sources[0].topics[0]?.id||replaced[0].id,sourceTitle:'来源修订 · '+c.title,newsId:sources[0].newsId,newsRevision:sources[0].newsRevision,sources,replaced:replaced.map(m=>({id:m.id,documentId:m.documentId,materialRevision:m.materialRevision})),retained:[],createdAt:at()};
    let inputs,plan,reason='原归组决定、当前材料或成员分配已有变化';
    try{
     originalBasis(c);
@@ -87,23 +90,23 @@ export function openPipelineSuccession({store,research,semantic,batches,clusters
     p.phase=!p.retained.length||new Set(p.replaced.map(m=>m.documentId)).size!==p.replaced.length?'correspondence':'current';
     // Match the original new-source-first comparison direction so valid runs reuse their decisions.
     inputs=[...sources.flatMap(s=>s.topics.map(ref)),...p.retained.map(ref)];
-    reason='修订后没有完整事项，或完整比较超过10份输入；保留观察，不截断候选';if(inputs.length<2||inputs.length>10||sources.some(s=>!s.topics.length))throw Error();
+    reason='修订后没有完整事项，保留观察，不截断候选';if(inputs.length<2||sources.some(s=>!s.topics.length))throw Error();
     reason='新旧材料或成员依据已经变化';valid(p);
-    if(p.phase==='correspondence'){p.currentInputs=inputs;p.revision={clusterId:c.id,clusterVersion:c.version,clusterHash:c.snapshotHash};inputs=[...p.replaced.map(ref),...sources.flatMap(s=>s.topics.map(ref))];plan=batches.previewRevision({inputs},p.revision);}
-    else plan=batches.preview({inputs});
+    if(p.phase==='correspondence'){p.currentInputs=inputs;p.revision={clusterId:c.id,clusterVersion:c.version,clusterHash:c.snapshotHash};inputs=[...p.replaced.map(ref),...sources.flatMap(s=>s.topics.map(ref))];plan=batches.previewRevision({inputs},p.revision,SYSTEM_RESEARCH_ACTOR);}
+    else plan=batches.preview({inputs},SYSTEM_RESEARCH_ACTOR);
    }catch{
     observe(context,id,p,reason);continue;
    }
    const existing=db.prepare("SELECT run_id FROM research_pipeline_relations WHERE run_id IS NOT NULL AND json_extract(payload,'$.source.id') IN (SELECT value FROM json_each(?))").all(JSON.stringify(sources.flatMap(s=>s.topics.map(t=>t.id)))).map(r=>r.run_id);
-   batches.create({inputs,planHash:plan.planHash,requestId:id},{owner:'research-pipeline',revision:p.phase==='correspondence'?p.revision:null,reuseRunIds:[...new Set([...existing,...c.pairs.map(pair=>pair.basis.runId)])],beforeCommit:batch=>{
+   batches.create({inputs,planHash:plan.planHash,requestId:id},{owner:'research-pipeline',actor:SYSTEM_RESEARCH_ACTOR,revision:p.phase==='correspondence'?p.revision:null,reuseRunIds:[...new Set([...existing,...c.pairs.map(pair=>pair.basis.runId)])],beforeCommit:batch=>{
     context.assertActive();guard();valid(p);db.prepare('INSERT INTO research_pipeline_cluster_jobs VALUES(?,?,?,?,?)').run(id,id,'active',batch.id,JSON.stringify(p));audit(id,'automatic-succession-planned',{clusterId:c.id,batchId:batch.id,sourceRevisions:sources.map(s=>({documentId:s.documentId,revision:s.materialRevision}))});
    }});return;
   }
  }
  function advanceMapping(context,row,p,batch,beforeCommit){
   const evidence=revisionMappingResult(batch,semantic);if(!evidence)return null;
-  const next={...p,phase:'current',correspondenceBatchId:batch.id,correspondenceHash:digest(evidence),mappings:evidence.mappings},plan=batches.preview({inputs:p.currentInputs});
-  return batches.create({inputs:p.currentInputs,planHash:plan.planHash,requestId:digest({job:row.id,phase:'current'})},{owner:'research-pipeline',beforeCommit:current=>{
+  const next={...p,phase:'current',correspondenceBatchId:batch.id,correspondenceHash:digest(evidence),mappings:evidence.mappings},plan=batches.preview({inputs:p.currentInputs},SYSTEM_RESEARCH_ACTOR);
+  return batches.create({inputs:p.currentInputs,planHash:plan.planHash,requestId:digest({job:row.id,phase:'current'})},{owner:'research-pipeline',actor:SYSTEM_RESEARCH_ACTOR,beforeCommit:current=>{
    beforeCommit();valid(next);db.prepare('UPDATE research_pipeline_cluster_jobs SET batch_id=?,payload=? WHERE id=?').run(current.id,JSON.stringify(next),row.id);audit(row.id,'automatic-succession-mapped',{clusterId:p.clusterId,mappingBatchId:batch.id,batchId:current.id,mappings:evidence.mappings});
   }});
  }

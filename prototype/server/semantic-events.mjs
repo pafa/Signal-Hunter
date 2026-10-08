@@ -8,6 +8,7 @@ import {randomUUID} from 'node:crypto';
 import {digest,runStructuredCodex,CodexResearchError,rejectedOutputDiagnostic} from './codex-research.mjs';
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {semanticKinds,semanticErrors as errors} from '../shared/semantic-labels.mjs';
+import {readSnapshotCache} from './read-snapshot-cache.mjs';
 
 export const SEMANTIC_VERSION='event-pair-1',MATERIAL_SEMANTIC_VERSION='event-pair-material-1',EVENT_SEMANTIC_VERSION='event-pair-scoped-1';
 const string={type:'string'},eventFields=['actor','action','object','eventTime','stage','quote'];
@@ -64,6 +65,7 @@ export async function generateComparison(packet,config){
 
 export function openSemanticEvents(store,{enabled=false,config={},runner=generateComparison,now=()=>Date.now()}={}){
  const db=store.db,jobs=new Map();let closed=false;initializeModelLease(db);
+ const cachedView=readSnapshotCache(db);
  db.exec(`CREATE TABLE IF NOT EXISTS semantic_runs(id TEXT PRIMARY KEY,pair_key TEXT NOT NULL,status TEXT NOT NULL,expires_at INTEGER NOT NULL,payload TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS semantic_pair ON semantic_runs(pair_key);
  CREATE TABLE IF NOT EXISTS semantic_decisions(pair_key TEXT NOT NULL,version INTEGER NOT NULL,run_id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(pair_key,version));`);
@@ -113,7 +115,7 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
   materials(params){return comparisonMaterials(db,params);},
   status(){return {enabled:enabled&&!closed,model:config.model||null};},
   list(){return {...api.status(),runs:db.prepare('SELECT payload,expires_at FROM semantic_runs ORDER BY rowid DESC LIMIT 50').all().map(r=>summary(expired(JSON.parse(r.payload),r.expires_at)))};},
-  get(id){return view(read(id));},
+  get(id){const run=read(id);return run.status==='running'?view(run):cachedView(id,()=>view(read(id)));},
   start(input,beforePersist=()=>{},actor){return launch(()=>comparisonPacket(store,input),beforePersist,actor);},
   startRevision(input,beforePersist=()=>{},actor){if(actor!==SYSTEM_RESEARCH_ACTOR)throw Error('修订对照仅由自动研究内部调用');return launch(()=>revisionComparisonPacket(store,input),beforePersist,actor);},
   async wait(id){await jobs.get(id)?.done;return api.get(id);},

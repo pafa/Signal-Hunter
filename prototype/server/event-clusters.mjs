@@ -57,9 +57,10 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
  };
  const groupPairs=group=>group.pairs.map(p=>({left:comparisonSummary(group.members[group.indices.indexOf(p.left)]),right:comparisonSummary(group.members[group.indices.indexOf(p.right)]),basis:p.basis}));
  const replacementPlan=(id,input)=>{
-  if(!keys(input,'batchId,groupId,version,replacements')&&!keys(input,'batchId,correspondenceBatchId,groupId,version,replacements')||!text(input.batchId,80)||!text(input.groupId,80)||!Number.isSafeInteger(input.version)||input.version<1||!Array.isArray(input.replacements)||!input.replacements.length||input.replacements.length>10)fail(7);
+  if(!keys(input,'batchId,groupId,version,replacements')&&!keys(input,'batchId,correspondenceBatchId,groupId,version,replacements')||!text(input.batchId,80)||!text(input.groupId,80)||!Number.isSafeInteger(input.version)||input.version<1||!Array.isArray(input.replacements)||!input.replacements.length)fail(7);
   const old=read(id),{snapshotHash,...oldValue}=old;
   if(snapshotHash!==digest(oldValue))fail(8);
+  if(input.replacements.length>old.members.length)fail(7);
   if(old.status!=='active'||old.version!==input.version)fail(5);
   const preview=api.preview(input.batchId),group=preview.groups.find(g=>g.id===input.groupId);
   if(!group||group.state!=='ready')fail(2);
