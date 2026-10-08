@@ -31,3 +31,18 @@ test('new versions preserve group identity and prior research while recent membe
  const next=groupEventResearch([topic('a'),topic('b'),topic('c',{updatedAt:'2026-10-10T08:00:00Z'})],{eventClusters:[cluster({version:3,topicIds:['a','b','c']})]})[0];
  assert.equal(next.id,first.id);assert.equal(next.topics.length,3);assert.equal(next.topics[0].id,'c');assert.equal(next.updatedAt,'2026-10-10T08:00:00Z');assert.equal(first.topics.length,2);
 });
+
+test('saved succession moves retired research into history without hiding its positions or promoting old company counts',()=>{
+ const old=topic('old',{companies:[{symbol:'OLD.US'}],updatedAt:'2026-10-10T08:00:00Z'}),topics=[topic('a'),topic('b'),old],before=structuredClone(topics);
+ const c=cluster({history:[{topicId:'old',currentTopicId:'a',materialRevision:1,clusterVersion:2}]});
+ const rows=groupEventResearch(topics,{eventClusters:[c],events:[{id:'old',risk:true}],accounts:[{positions:[{topicId:'old',symbol:'OLD.US'}]}]});
+ assert.equal(rows.length,1);assert.deepEqual(rows[0].topics.map(t=>t.id),['a','b']);assert.deepEqual(rows[0].historicalTopics.map(t=>t.id),['old']);assert.equal(rows[0].allTopics.length,3);assert(rows[0].risk&&rows[0].historicalRisk);assert.equal(rows[0].positions,1);assert.equal(rows[0].companyCount,1);assert.equal(rows[0].updatedAt,topic('a').updatedAt);assert.deepEqual(topics,before);
+});
+test('historical membership never overrides a current owner and stale or ambiguous history stays visible independently',()=>{
+ const topics=[topic('a'),topic('b'),topic('old')],c=cluster({history:[{topicId:'old',currentTopicId:'a'}]});
+ const stale=groupEventResearch(topics,{eventClusters:[{...c,health:{current:false}}]});assert.equal(stale.length,3);assert(stale.find(r=>r.topics[0].id==='old').groupStale);
+ const conflict=groupEventResearch(topics,{eventClusters:[c,{...c,id:'other',topicIds:['b']}]});assert.equal(conflict.find(r=>r.topics[0]?.id==='old').cluster,null);
+ const assigned=groupEventResearch(topics,{eventClusters:[c,cluster({id:'new-owner',topicIds:['old']})]});assert.equal(assigned.find(r=>r.topics.some(t=>t.id==='old')).cluster.id,'new-owner');assert.equal(assigned.flatMap(r=>r.historicalTopics).length,0);
+ const noAnchor=groupEventResearch(topics,{eventClusters:[c,cluster({id:'conflicting-current'})]});assert.equal(noAnchor.length,3);assert(noAnchor.every(r=>!r.cluster&&r.topics.length));assert(noAnchor.find(r=>r.topics[0].id==='old').groupStale);
+ const archived=groupEventResearch([topic('a'),topic('b'),topic('old',{status:'archived'})],{eventClusters:[c]});assert.equal(archived.length,1);assert.equal(archived[0].historicalTopics[0].status,'archived');
+});

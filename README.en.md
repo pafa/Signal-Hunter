@@ -92,7 +92,7 @@ The event-tracking panel retrieves repeated headlines, stage differences, possib
 
 Priority reflects research urgency and held-company exposure, not materiality or price probability. Publisher families are not counts of independent reporting. Indexing is bounded and runs in the background; failures retain previous results and remain visible. Full-text semantic recognition and held-out accuracy evaluation are still pending.
 
-The latest development candidate can continue an event cluster automatically after a source revision: all revised occurrences are compared with retained members, and only a unique match advances the original cluster ID. Prior research, decisions and membership versions remain intact. Ambiguity, missing anchors and oversized comparison sets remain observations. This bounded path is not complete automatic research or an RC release. See the [current backlog](docs/BACKLOG.md).
+The latest development candidate can continue an event cluster automatically after a source revision: all revised occurrences are compared with retained members, and only a unique match advances the original cluster ID. Prior research, decisions and membership versions remain intact. Superseded research is accessible inside the event history rather than appearing as a separate current event; its holdings risks remain visible. Historical views are labeled and can return to the current successor. A revised source with no occurrence or an intervening user edit records an observation instead of waiting indefinitely. Ambiguity, missing anchors and oversized comparison sets remain observations. This bounded path is not complete automatic research or an RC release. See the [current backlog](docs/BACKLOG.md).
 
 ## Research workflow
 

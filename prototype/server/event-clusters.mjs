@@ -1,4 +1,5 @@
 import {researchActor} from './research-actor.mjs';
+import {clusterResearchHistory} from './event-cluster-lineage.mjs';
 import {randomUUID} from 'node:crypto';
 import {digest} from './codex-research.mjs';
 import {comparisonSummary} from './semantic-materials.mjs';
@@ -134,9 +135,14 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
    // Only scoped occurrence identity binds research to an event. Shared article
    // evidence alone cannot prove that two research topics are the same event.
    const active=new Set(topics.filter(t=>t.status==='active'&&t.eventExtraction).map(t=>t.id));
+   const scoped=new Set(topics.filter(t=>t.eventExtraction).map(t=>t.id));
+   const owners=new Map(db.prepare('SELECT member_key,cluster_id FROM event_cluster_members').all().map(r=>[r.member_key,r.cluster_id]));
    return db.prepare("SELECT payload FROM event_clusters WHERE status='active' ORDER BY id").all().flatMap(row=>{
     const record=JSON.parse(row.payload),topicIds=record.members.filter(m=>m.kind==='event'&&active.has(m.id)).map(m=>m.id);
-    return topicIds.length?[{...summary(record),topicIds}]:[];
+    if(!topicIds.length)return [];
+    const versions=db.prepare('SELECT payload FROM event_cluster_versions WHERE cluster_id=? ORDER BY version').all(record.id).map(r=>JSON.parse(r.payload));
+    const history=clusterResearchHistory(record,versions).filter(h=>scoped.has(h.topicId)&&topicIds.includes(h.currentTopicId)&&!owners.has(`event:${h.topicId}`));
+    return [{...summary(record),topicIds,history}];
    });
   },
   list(params={}){
