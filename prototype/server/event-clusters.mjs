@@ -128,6 +128,15 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
    return command('archive',id,input,()=>{const old=read(id);if(old.status==='archived'||old.version!==input.version)fail(5);const {snapshotHash,...value}=old;return persist({...value,version:old.version+1,status:'archived',note:input.note.trim(),updatedAt:new Date(now()).toISOString(),previousVersion:old.version});});
   },
   get(id){const record=read(id);return {...record,health:health(record),history:db.prepare('SELECT payload FROM event_cluster_versions WHERE cluster_id=? ORDER BY version DESC').all(id).map(r=>JSON.parse(r.payload))};},
+  workbench(topics){
+   // Only scoped occurrence identity binds research to an event. Shared article
+   // evidence alone cannot prove that two research topics are the same event.
+   const active=new Set(topics.filter(t=>t.status==='active'&&t.eventExtraction).map(t=>t.id));
+   return db.prepare("SELECT payload FROM event_clusters WHERE status='active' ORDER BY id").all().flatMap(row=>{
+    const record=JSON.parse(row.payload),topicIds=record.members.filter(m=>m.kind==='event'&&active.has(m.id)).map(m=>m.id);
+    return topicIds.length?[{...summary(record),topicIds}]:[];
+   });
+  },
   list(params={}){
    if(Object.keys(params).some(k=>!['offset','q','status'].includes(k)))fail(0);const offset=Number(params.offset??0),q=params.q??'',status=params.status??'active',limit=20;
    if(!Number.isSafeInteger(offset)||offset<0||typeof q!=='string'||q.length>140||!['active','archived','all'].includes(status))fail(0);

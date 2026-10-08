@@ -102,3 +102,19 @@ test('automatic batch retry and audit remain atomic after a storage failure',asy
   f.store.db.exec('DROP TRIGGER fail_batch_retry');await f.drive();assert.equal(f.calls.semantic,11);
  }finally{await f.close();}
 });
+
+test('workbench projects actual scoped cluster identity read-only and invalidates grouping after a relationship withdrawal',async()=>{
+ const f=fixture();try{
+  const first=await two(f);f.add(3);await f.drive();const c=cluster(f),writes=f.store.db.prepare('SELECT total_changes() n').get().n;
+  const snapshot=f.service.snapshot(),projection=snapshot.overview.eventClusters;
+  assert.equal(projection.length,1);assert.equal(projection[0].id,first.id);assert.equal(projection[0].version,2);assert.equal(projection[0].health.current,true);
+  assert.deepEqual(new Set(projection[0].topicIds),new Set(c.members.map(m=>m.id)));assert.equal(projection[0].actor.kind,'system');
+  assert.equal(f.store.db.prepare('SELECT total_changes() n').get().n,writes);
+  const run=f.service.semanticEvents.get(c.pairs[0].basis.runId);
+  f.service.semanticEvents.decide(run.id,{version:run.decisionVersion,action:'withdraw',note:'本人撤销，首页不能继续把各份研究合并显示'});
+  assert.equal(f.service.snapshot().overview.eventClusters[0].health.current,false);
+  f.service.eventClusters.archive(c.id,{version:c.version,note:'归档保留研究与历史',requestId:'workbench-archive-test-1'});
+  assert.equal(f.service.snapshot().overview.eventClusters.length,0);assert.equal(f.service.eventClusters.get(c.id).history.length,3);
+  for(const id of projection[0].topicIds)assert.equal(f.service.research.get(id).status,'active');
+ }finally{await f.close();}
+});

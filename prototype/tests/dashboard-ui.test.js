@@ -57,3 +57,28 @@ test('workbench detail history returns to holdings and preserves event, account 
  await click('查看更多事件 · 3 →');await click('← 返回原看板');assert.match(document.querySelector('.daily-pagination').textContent,/2 \/ 3/);assert.equal(document.querySelector('.v6-chart-toolbar button.on')?.textContent,'多股并列');assert.equal([...document.querySelectorAll('[aria-label="日线时间范围"] button')].find(e=>e.getAttribute('aria-pressed')==='true').textContent,'6个月');
  assert(calls.every(c=>!c.method||c.method==='GET'),'drilldown and returning must not write or run research');
 }));
+
+test('event grouping expands research, filters across members and preserves selection and expansion through full list and detail return',()=>ui(async({data,vite,render,click,calls})=>{
+ const [a,b,other]=data.research.topics;a.categoryId='policy';b.categoryId='product';other.categoryId='clinical';
+ data.overview.eventClusters=[{id:'fixture-group',title:'Synthetic shared event',status:'active',version:2,health:{current:true},actor:{kind:'system'},topicIds:[a.id,b.id]}];
+ const {default:Workbench}=await vite.ssrLoadModule('/src/integrated/IntegratedWorkbench.jsx');await render(React.createElement(Workbench));await act(async()=>{});
+ assert.equal(document.querySelectorAll('.dashboard-event').length,2);assert.match(document.querySelector('.i-section-head').textContent,/2 项 · 3 份研究/);
+ await click('展开 2 份研究');const members=[...document.querySelectorAll('.dashboard-event-members>button')];assert.equal(members.length,2);
+ await act(()=>members.find(el=>el.querySelector('strong').textContent===b.title).click());assert.equal(document.querySelector('.i-topic-heading h1').textContent,b.title);
+ await click('深入研究 →');await click('← 返回原看板');assert(document.querySelector('.dashboard-event-members'));assert.equal(document.querySelector('.i-topic-heading h1').textContent,b.title);
+ await click('查看更多事件 · 2 →');assert(document.querySelector('.dashboard-radar-full .dashboard-event-members'));await act(()=>[...document.querySelectorAll('.dashboard-event-members>button')].find(el=>el.querySelector('strong').textContent===b.title).click());await click('← 返回事件列表');assert(document.querySelector('.dashboard-radar-full .dashboard-event-members'));await click('← 返回原看板');assert(document.querySelector('.dashboard-event-members'));assert.equal(document.querySelector('.i-topic-heading h1').textContent,b.title);
+ const scope=document.querySelector('[aria-label="事件类型"]'),type=(await vite.ssrLoadModule('/src/integrated/event-view.js')).eventProfile(a).id;
+ await act(()=>{scope.value=type;scope.dispatchEvent(new window.Event('change',{bubbles:true}));});
+ assert(document.querySelector('.dashboard-event-members'),'filtering keeps the group expanded');assert.match(document.querySelector('.dashboard-event-members').textContent,new RegExp(b.title));
+ assert(calls.every(c=>!c.method||c.method==='GET'));assert(data.research.topics.some(t=>t.id===other.id));
+}));
+
+test('background group expansion and invalidation retain the selected research even outside the first five rows',()=>ui(async({data,vite,render,click})=>{
+ const {default:Radar}=await vite.ssrLoadModule('/src/integrated/EventRadar.jsx'),{groupEventResearch}=await import('../shared/workbench-events.mjs');
+ const base=data.research.topics[0],topics=Array.from({length:8},(_,i)=>({...base,id:'fixture-'+i,title:'Fixture research '+i,updatedAt:`2026-10-0${8-i}T08:00:00Z`}));
+ const cluster={id:'stable-cluster',title:'Stable event',status:'active',version:1,health:{current:true},topicIds:['fixture-6','fixture-7']};let overview={eventClusters:[cluster]};const selected='fixture-7';
+ function Harness(){const [expanded,onExpand]=useState(null);return React.createElement(Radar,{topics,rows:groupEventResearch(topics,overview),overview,selected,expanded,onExpand,filters:{search:'',archived:false,eventType:'all',researchStage:'ready',eventScope:'all'},onFilter:()=>{},onSelect:()=>{},onMore:()=>{},onNews:()=>{},onRelations:()=>{}});}
+ await render(React.createElement(Harness));assert.equal(document.querySelectorAll('.dashboard-event').length,5);assert.match(document.querySelector('.dashboard-event.selected').textContent,/Stable event/);await click('展开 2 份研究');
+ overview={eventClusters:[{...cluster,version:2,topicIds:['fixture-5','fixture-6','fixture-7']}]};await render(React.createElement(Harness));assert.equal(document.querySelectorAll('.dashboard-event-members>button').length,3);assert.equal(document.querySelector('.dashboard-event-members>button[aria-pressed="true"] strong').textContent,'Fixture research 7');
+ overview={eventClusters:[{...cluster,health:{current:false}}]};await render(React.createElement(Harness));assert(!document.querySelector('.dashboard-event-members'));assert.match(document.querySelector('.dashboard-event.selected').textContent,/Fixture research 7/);assert.match(document.querySelector('.dashboard-event.selected').textContent,/原归组依据已变化/);
+}));

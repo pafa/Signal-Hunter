@@ -26,7 +26,7 @@ function performance(positions,configured){
   unavailable:{dailyPnl:'尚无可核对的当日净值和现金流基准',maxDrawdown:'尚无完整同口径净值序列'}};
 }
 
-export function buildWorkbenchOverview({topics=[],paper=null,workflow=[],marketAccounts=[],operations={},checks={},offline=false,at}){
+export function buildWorkbenchOverview({topics=[],eventClusters=[],paper=null,workflow=[],marketAccounts=[],operations={},checks={},offline=false,at}){
  if(!Number.isFinite(Date.parse(at)))throw Error('看板时间无效');
  const byTopic=new Map(topics.map(t=>[t.id,t])),byWorkflow=new Map(workflow.map(w=>[w.topicId,w]));
  const risks=[],decisions=[];
@@ -84,7 +84,7 @@ export function buildWorkbenchOverview({topics=[],paper=null,workflow=[],marketA
  const tasks=Object.entries(operations),running=tasks.filter(([,s])=>s.running).map(([name])=>name),blocked=tasks.filter(([,s])=>s.blocked).map(([name])=>name);
  const activeTasks=tasks.filter(([,s])=>!s.paused);
  const latest=tasks.filter(([,s])=>s.lastSuccessAt).sort((a,b)=>b[1].lastSuccessAt.localeCompare(a[1].lastSuccessAt))[0];
- return {schema:OVERVIEW_VERSION,at,defaultAccount:offline?'scenario':'aggressive',accounts,risks,decisions,events,
+ return {schema:OVERVIEW_VERSION,at,defaultAccount:offline?'scenario':'aggressive',accounts,risks,decisions,events,eventClusters,
   monitoring:allPositions.map(p=>({id:p.id,account:p.account,topicId:p.topicId,symbol:p.symbol,reviewAt:p.reviewAt,holdingHorizon:p.holdingHorizon,risks:p.risks})).sort((a,b)=>(a.reviewAt||'~').localeCompare(b.reviewAt||'~')),
   activity:{state:offline?'offline':running.length?'running':blocked.length?'degraded':activeTasks.length?'waiting':'paused',running,blocked,
    latestEffectiveAt:latest?.[1].lastSuccessAt||null,latestTask:latest?.[0]||null,newsAt:checks.news?.receivedAt||null,
