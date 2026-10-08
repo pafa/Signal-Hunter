@@ -57,7 +57,9 @@ Demo changes persist across restarts. Run `npm run health` from another terminal
 
 ## Workspace navigation
 
-The primary navigation is Workspace / Portfolio / Evaluation (工作台 / 组合 / 评估). The workspace combines a complete paginated news inbox, research and charts, and a persistent activity sidebar. Saved activity shows actual collection results, model stages, failures, wait reasons and scheduled work. It is an audit of observable actions, not model internal reasoning. Repeated idle checks are folded in the display; the original records remain stored. Unified tasks open the existing review and approval forms.
+The primary navigation is Workspace / Portfolio / Evaluation (工作台 / 组合 / 评估). The existing dark layout now has five areas: overall status, event changes, research and charts, global risks with decisions and monitoring, and a persistent positions summary. The home view shows priority records and counts, with full lists one level deeper. Event selection highlights associated positions without hiding other risks. Aggressive and steady market simulations and the scenario book remain separate; unavailable values are shown as unknown.
+
+Background progress opens the existing activity log and technical tasks. Reading, expanding, and switching accounts does not run research or approve orders. Nested details return to the prior research and position context. The “自动研究” control currently opens task controls; fully automatic research adoption and conditional proposals remain later milestones in the [product blueprint and 1.0 roadmap](docs/PRODUCT-BLUEPRINT.md).
 
 Research detail has five groups: summary, evidence, company and prices, action, and history. Scenario books and minute charts are advanced sections. Sources, task controls, budgets and backups are under Settings. Legacy UI links redirect to the unified workspace without changing the dataset or runtime mode. See [the backlog](docs/BACKLOG.md) for the candidate's deployment status.
 
