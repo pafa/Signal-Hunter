@@ -1,3 +1,4 @@
+import {researchActor} from './research-actor.mjs';
 import {randomUUID} from 'node:crypto';
 import {digest} from './codex-research.mjs';
 import {comparisonSummary} from './semantic-materials.mjs';
@@ -33,7 +34,7 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
   for(const pair of record.pairs){try{const run=semantic.get(pair.basis.runId);if(pairState(run)!=='same'||digest(basis(run))!==digest(pair.basis))throw Error();}catch{return {current:false,reason:'输入修订或比较决定变化，原事件簇与成员保留，需重新核对'};}}
   return {current:true,reason:'成员版本与全部组内比较仍匹配；不等于事实已核实'};
  };
- const summary=record=>({id:record.id,version:record.version,status:record.status,title:record.title,confirmedAt:record.confirmedAt,updatedAt:record.updatedAt,memberCount:record.members.length,batchId:record.batchId,health:health(record)});
+ const summary=record=>({...(record.actor?{actor:record.actor}:{}),id:record.id,version:record.version,status:record.status,title:record.title,confirmedAt:record.confirmedAt,updatedAt:record.updatedAt,memberCount:record.members.length,batchId:record.batchId,health:health(record)});
  const persist=record=>{
   const saved={...record,snapshotHash:digest(record)},payload=JSON.stringify(saved);
   db.prepare('INSERT INTO event_clusters VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,status=excluded.status,payload=excluded.payload').run(saved.id,saved.version,saved.status,payload);
@@ -42,10 +43,10 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
   if(saved.status==='active')for(const member of saved.members)db.prepare('INSERT INTO event_cluster_members VALUES(?,?)').run(memberKey(member),saved.id);
   return {id:saved.id,version:saved.version};
  };
- const command=(action,id,input,fn)=>{
+ const command=(action,id,input,fn,provenance={})=>{
   if(!text(input?.requestId,80)||!/^[-a-zA-Z0-9]{16,80}$/.test(input.requestId))fail(0);
   db.exec('BEGIN IMMEDIATE');try{
-   writeAllowed();const hash=digest({action,id,input}),old=db.prepare('SELECT * FROM event_cluster_commands WHERE request_id=?').get(input.requestId);
+   writeAllowed();const hash=digest({action,id,input,...provenance}),old=db.prepare('SELECT * FROM event_cluster_commands WHERE request_id=?').get(input.requestId);
    if(old){if(old.request_hash!==hash)fail(6);db.exec('COMMIT');return JSON.parse(old.response);}
    const result=fn();db.prepare('INSERT INTO event_cluster_commands VALUES(?,?,?)').run(input.requestId,hash,JSON.stringify(result));db.exec('COMMIT');return result;
   }catch(error){db.exec('ROLLBACK');throw error;}
@@ -95,7 +96,8 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
    }
    return {algorithm,batchId,planHash:batch.planHash,inputCount:members.length,groups,unmergedPairs:pairs.filter(p=>!same.has(p.relation))};
   },
-  save(input){
+  save(input,actor,beforeCommit=()=>{}){
+   const provenance=researchActor(actor);
    if(!keys(input,'batchId,groupId,previewHash,clusterId,version,title,note,requestId')||!text(input.batchId,80)||!text(input.groupId,80)||!text(input.previewHash,80)||typeof input.clusterId!=='string'||!Number.isSafeInteger(input.version)||input.version<0||!text(input.title,140)||!text(input.note,1200))fail(0);
    return command('save','',input,()=>{
     const preview=api.preview(input.batchId),group=preview.groups.find(g=>g.id===input.groupId);if(!group||group.hash!==input.previewHash)fail(1);
@@ -103,8 +105,9 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
     const existing=group.overlaps[0];if((existing?.id||'')!==input.clusterId||(existing?.version||0)!==input.version)fail(5);
     const old=existing?read(existing.id):null;if(old?.status==='archived')fail(5);
     const at=new Date(now()).toISOString();
-    return persist({id:old?.id||randomUUID(),version:(old?.version||0)+1,status:'active',title:input.title.trim(),note:input.note.trim(),confirmedAt:old?.confirmedAt||at,updatedAt:at,algorithm,method:'human-confirmed-model-pair-cluster',batchId:input.batchId,planHash:preview.planHash,groupHash:group.hash,members:group.members,pairs:groupPairs(group),previousVersion:old?.version||null});
-   });
+    const record={...provenance,id:old?.id||randomUUID(),version:(old?.version||0)+1,status:'active',title:input.title.trim(),note:input.note.trim(),confirmedAt:old?.confirmedAt||at,updatedAt:at,algorithm,method:actor?'system-model-pair-cluster':'human-confirmed-model-pair-cluster',batchId:input.batchId,planHash:preview.planHash,groupHash:group.hash,members:group.members,pairs:groupPairs(group),previousVersion:old?.version||null};
+    beforeCommit({id:record.id,version:record.version});return persist(record);
+   },provenance);
   },
   replacementPreview(id,input){return replacementPlan(id,input);},
   replace(id,input){

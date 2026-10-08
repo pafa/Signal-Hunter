@@ -48,18 +48,18 @@ export function openSemanticBatches(store,semantic,{enabled=false,config={},now=
     beforeCommit(b);audit(b.id,'create',{planHash:p.planHash,maximumCalls:p.pairs.length,reusedPairs:p.pairs.filter(pair=>reusable.some(r=>r.packet.inputHash===pair.inputHash&&executionHash(r.packet)===pair.executionHash)).length});return b;
    });return project(batch,true);
   },
-  control(id,input){
+  control(id,input,beforeCommit=()=>{}){
    if(!input||Object.keys(input).sort().join(',')!==(['pause','resume','cancel'].includes(input.action)?'action':'action,ordinal')||!['pause','resume','cancel','retry'].includes(input.action))fail(3);
    transaction(()=>{
     const b=read(id);if(input.action==='retry'){
      if(b.state==='cancelled'||!Number.isSafeInteger(input.ordinal))fail(6);const row=db.prepare('SELECT * FROM semantic_batch_items WHERE batch_id=? AND ordinal=?').get(id,input.ordinal);if(!row||!['failed','interrupted','cancelled'].includes(itemView(row).status))fail(6);
-     const item=JSON.parse(row.payload);db.prepare("UPDATE semantic_batch_items SET status='queued',run_id=NULL,payload=? WHERE batch_id=? AND ordinal=?").run(JSON.stringify({...item,failure:null}),id,input.ordinal);audit(id,'retry',{ordinal:input.ordinal,previousRun:row.run_id});return;
+     const item=JSON.parse(row.payload);db.prepare("UPDATE semantic_batch_items SET status='queued',run_id=NULL,payload=? WHERE batch_id=? AND ordinal=?").run(JSON.stringify({...item,failure:null}),id,input.ordinal);audit(id,'retry',{ordinal:input.ordinal,previousRun:row.run_id});beforeCommit();return;
     }
     if(b.state==='cancelled')fail(3);b.state={pause:'paused',resume:'active',cancel:'cancelled'}[input.action];db.prepare('UPDATE semantic_batches SET payload=? WHERE id=?').run(JSON.stringify(b),id);
-    if(input.action==='cancel')db.prepare("UPDATE semantic_batch_items SET status='cancelled' WHERE batch_id=? AND status='queued'").run(id);audit(id,input.action);
+    if(input.action==='cancel')db.prepare("UPDATE semantic_batch_items SET status='cancelled' WHERE batch_id=? AND status='queued'").run(id);audit(id,input.action);beforeCommit();
    });return api.get(id);
   },
-  step(context,{batchId=null,beforeCommit=()=>{}}={}){
+  step(context,{batchId=null,beforeCommit=()=>{},actor}={}){
    context.assertActive();writeAllowed();if(!enabled||!semantic.status().enabled)return {skipped:'model-disabled'};
    const row=db.prepare("SELECT i.* FROM semantic_batch_items i JOIN semantic_batches b ON b.id=i.batch_id WHERE i.status='queued' AND json_extract(b.payload,'$.state')='active' AND ((? IS NULL AND json_extract(b.payload,'$.owner') IS NULL) OR (b.id=? AND json_extract(b.payload,'$.owner')='research-pipeline')) ORDER BY b.rowid,i.ordinal LIMIT 1").get(batchId,batchId);if(!row)return {skipped:'no-queued-items'};
    if(db.prepare('SELECT 1 FROM model_job_lease WHERE expires_at>=?').get(now()))return {skipped:'model-busy'};
@@ -71,7 +71,7 @@ export function openSemanticBatches(store,semantic,{enabled=false,config={},now=
      if(executionHash(run.packet)!==item.executionHash||executionHash(comparisonPacket(store,pair))!==item.executionHash)fail(5);
      beforeCommit(run,b.id,item.ordinal);
      db.prepare("UPDATE semantic_batch_items SET status='running',run_id=?,payload=? WHERE batch_id=? AND ordinal=?").run(run.id,JSON.stringify({...item,attempts:[...item.attempts,run.id]}),b.id,item.ordinal);audit(b.id,'start',{ordinal:item.ordinal,runId:run.id});
-    });return {ok:true,batchId:b.id,ordinal:item.ordinal,runId:started.id};
+    },actor);return {ok:true,batchId:b.id,ordinal:item.ordinal,runId:started.id};
    }catch(error){
     context.assertActive();if(error.message==='已有模型研判正在运行，请等待或取消后再试')return {skipped:'model-busy'};
     if(!batchErrors.includes(error.message)&&!semanticErrors.includes(error.message)&&error.code!=='packet')throw error;

@@ -1,3 +1,4 @@
+import {researchActor} from './research-actor.mjs';
 import {eventComparisonSnapshot,comparisonEvents} from './semantic-event-scopes.mjs';
 import {ARTICLE_SCOPE_INSTRUCTIONS,ARTICLE_SCOPE_VERSION} from './article-extraction.mjs';
 import {TIME_EVIDENCE_SCHEMA,TIME_PROMPT_VERSION,TIME_INSTRUCTIONS,validateTimeEvidence} from './semantic-time.mjs';
@@ -85,20 +86,21 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
   }
   return digest(current.input)!==run.packet.inputHash;
  }catch{return true;}};
- const view=run=>{const history=decisions(run.pairKey),latest=history[0]||null,isStale=stale(run);return {...run,stale:isStale,decisionVersion:latest?.version||0,decision:latest,history,active:!!latest&&latest.runId===run.id&&latest.action==='accept'&&!isStale};};
- const summary=run=>{const v=view(run);return {id:v.id,status:v.status,createdAt:v.createdAt,left:comparisonSummary(v.packet.input.left),right:comparisonSummary(v.packet.input.right),relation:v.candidate?.comparison.relation,stale:v.stale,active:v.active,decision:v.decision};};
+ const view=run=>{const history=decisions(run.pairKey),latest=history[0]||null,isStale=stale(run);return {...run,automatic:run.actor?.kind==='system',stale:isStale,decisionVersion:latest?.version||0,decision:latest,history,active:!!latest&&latest.runId===run.id&&latest.action==='accept'&&!isStale};};
+ const summary=run=>{const v=view(run);return {id:v.id,status:v.status,automatic:v.automatic,createdAt:v.createdAt,left:comparisonSummary(v.packet.input.left),right:comparisonSummary(v.packet.input.right),relation:v.candidate?.comparison.relation,stale:v.stale,active:v.active,decision:v.decision};};
  const api={
   events(params){return comparisonEvents(db,params);},
   materials(params){return comparisonMaterials(db,params);},
   status(){return {enabled:enabled&&!closed,model:config.model||null};},
   list(){return {...api.status(),runs:db.prepare('SELECT payload,expires_at FROM semantic_runs ORDER BY rowid DESC LIMIT 50').all().map(r=>summary(expired(JSON.parse(r.payload),r.expires_at)))};},
   get(id){return view(read(id));},
-  start(input,beforePersist=()=>{}){
+  start(input,beforePersist=()=>{},actor){
+   const provenance=researchActor(actor);
    if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw new Error('恢复副本需先完成核对确认');
    if(!enabled||closed)throw new Error('当前未启用本机 Codex 研判');
    if(!config.binary||!config.model)throw new Error('请先配置本机 Codex 路径与模型');
    const packet=comparisonPacket(store,input),timeoutMs=config.timeoutMs??180000;if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>600000)throw new Error('模型超时配置无效');
-   const run={id:randomUUID(),pairKey:digest(['left','right'].map(side=>{const r=packet.input[side];return packet.schema===SEMANTIC_VERSION?r.id:r.kind==='event'?`event:${r.id}`:r.kind==='material'?`material:${r.documentId}`:`news:${r.id}`;}).sort()),status:'running',packet,model:config.model,createdAt:new Date(now()).toISOString()};
+   const run={...provenance,id:randomUUID(),pairKey:digest(['left','right'].map(side=>{const r=packet.input[side];return packet.schema===SEMANTIC_VERSION?r.id:r.kind==='event'?`event:${r.id}`:r.kind==='material'?`material:${r.documentId}`:`news:${r.id}`;}).sort()),status:'running',packet,model:config.model,createdAt:new Date(now()).toISOString()};
    db.exec('BEGIN IMMEDIATE');try{recover();claimModelLease(db,run.id,now(),timeoutMs+30000);db.prepare('INSERT INTO semantic_runs VALUES(?,?,?,?,?)').run(run.id,run.pairKey,run.status,now()+timeoutMs+30000,JSON.stringify(run));beforePersist(run);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(candidate=>{
@@ -111,10 +113,13 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
   },
   async wait(id){await jobs.get(id)?.done;return api.get(id);},
   cancel(id){read(id);const job=jobs.get(id);if(!job)throw new Error('此调用不在本实例运行；已结束或等待中断恢复');job.controller.abort();return {id,status:'cancelling'};},
-  decide(id,input){
+  decide(id,input,actor,beforeCommit=()=>{}){
+   const provenance=researchActor(actor);
    if(!input||Object.keys(input).sort().join(',')!=='action,note,version'||!['accept','reject','withdraw'].includes(input.action)||!Number.isSafeInteger(input.version)||input.version<0||typeof input.note!=='string'||!input.note.trim()||input.note.length>1200)fail(5);
    db.exec('BEGIN IMMEDIATE');try{
+    if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw Error('恢复副本需先完成核对确认');
     const run=api.get(id);if(run.status!=='candidate')fail(6);if(run.decisionVersion!==input.version)fail(4);
+    if(actor&&run.decision)throw Error('已有关系决定，系统不得覆盖');
     if(input.action==='accept'&&run.stale)fail(3);
     // A historical candidate cannot silently withdraw a newer accepted relationship.
     if(input.action==='withdraw'&&(!run.decision||run.decision.runId!==id||run.decision.action!=='accept'))fail(4);
@@ -124,8 +129,8 @@ export function openSemanticEvents(store,{enabled=false,config={},runner=generat
     // now inconsistent; never copy damaged candidate fields into that receipt.
     if(input.action!=='withdraw')validateComparisonCandidate(run.candidate,run.packet,run.model);
     const basis=input.action==='withdraw'?run.decision:{inputHash:run.packet.inputHash,relation:run.candidate.comparison.relation,orientation:{left:run.packet.input.left.id,right:run.packet.input.right.id}};
-    const decision={version:input.version+1,runId:id,action:input.action,note:input.note.trim(),at:new Date(now()).toISOString(),inputHash:basis.inputHash,relation:basis.relation,orientation:basis.orientation};
-    db.prepare('INSERT INTO semantic_decisions VALUES(?,?,?,?)').run(run.pairKey,decision.version,id,JSON.stringify(decision));db.exec('COMMIT');return api.get(id);
+    const decision={...provenance,version:input.version+1,runId:id,action:input.action,note:input.note.trim(),at:new Date(now()).toISOString(),inputHash:basis.inputHash,relation:basis.relation,orientation:basis.orientation};
+    db.prepare('INSERT INTO semantic_decisions VALUES(?,?,?,?)').run(run.pairKey,decision.version,id,JSON.stringify(decision));beforeCommit(decision);db.exec('COMMIT');return api.get(id);
    }catch(e){db.exec('ROLLBACK');throw e;}
   },
   async close(){closed=true;for(const job of jobs.values())job.controller.abort();await Promise.allSettled([...jobs.values()].map(j=>j.done));}

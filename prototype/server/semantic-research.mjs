@@ -16,7 +16,7 @@ const usable=run=>run.active&&run.status==='candidate'&&positive.has(run.candida
 function basis(run,source,target,sourceSide){
  const sourceEvidenceIds=evidenceIds(source,run.packet.input[sourceSide]),targetEvidenceIds=evidenceIds(target,run.packet.input[other(sourceSide)]);
  if(!usable(run)||!sourceEvidenceIds.length||!targetEvidenceIds.length)fail();
- const value={runId:run.id,decisionVersion:run.decisionVersion,inputHash:run.packet.inputHash,outputHash:run.candidate.trace.outputHash,model:run.model,promptVersion:run.candidate.trace.promptVersion,relation:run.candidate.comparison.relation,sourceSide,sourceEvidenceIds,targetEvidenceIds,source:comparisonSummary(run.packet.input[sourceSide]),target:comparisonSummary(run.packet.input[other(sourceSide)]),comparison:structuredClone(run.candidate.comparison),decisionAt:run.decision.at,decisionNote:run.decision.note};
+ const value={runId:run.id,decisionVersion:run.decisionVersion,inputHash:run.packet.inputHash,outputHash:run.candidate.trace.outputHash,model:run.model,promptVersion:run.candidate.trace.promptVersion,relation:run.candidate.comparison.relation,sourceSide,sourceEvidenceIds,targetEvidenceIds,source:comparisonSummary(run.packet.input[sourceSide]),target:comparisonSummary(run.packet.input[other(sourceSide)]),comparison:structuredClone(run.candidate.comparison),...(run.decision.actor?{actor:run.decision.actor}:{}),decisionAt:run.decision.at,decisionNote:run.decision.note};
  return {...value,hash:digest(value)};
 }
 export function freezeSemanticBasis(semanticEvents,source,target,input){

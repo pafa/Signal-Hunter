@@ -58,9 +58,10 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
      else setState(candidate,candidate.topic_id?'ready':'queued',{reason:'后台恢复未完成的正文准备',nextRetryAt:null});
     });
    }
-   const eventWork=events?.step(context);if(eventWork)return eventWork;
-   const comparison=relations?.step(context);if(comparison)return comparison;
-   const clusterWork=clusterJobs?.step(context);if(clusterWork)return clusterWork;
+   // Quota or a busy model must not prevent another lane from saving a finished result.
+   let deferred=null;
+   for(const lane of [events,relations,clusterJobs]){const result=lane?.step(context);if(!result)continue;if(!['call-limit','model-busy'].includes(result.skipped))return result;deferred=result;}
+   if(deferred)return deferred;
    const row=db.prepare("SELECT * FROM research_pipeline_items WHERE status IN ('queued','ready') ORDER BY rowid LIMIT 1").get();if(!row)return {skipped:'no-queued-items'};
    if(used()>=settings().dailyCalls)return {skipped:'call-limit'};
    if(db.prepare('SELECT 1 FROM model_job_lease WHERE expires_at>=?').get(now()))return {skipped:'model-busy'};
