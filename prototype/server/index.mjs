@@ -50,6 +50,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&/^\/api\/market-simulation\/orders\/[-a-z0-9]{36}\/review$/.test(url.pathname)){reply(200,market.review(url.pathname.split('/')[4]));return;}
     if(req.method==='GET'&&url.pathname==='/api/semantic-events/events'){reply(200,service.semanticEvents.events(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/semantic-events/materials'){reply(200,service.semanticEvents.materials(Object.fromEntries(url.searchParams)));return;}
+    if(req.method==='GET'&&/^\/api\/event-clusters\/[-a-z0-9]{36}\/research$/.test(url.pathname)){if([...url.searchParams.keys()].some(k=>k!=='job')||url.searchParams.getAll('job').length>1)throw Error('综合研判参数无效');reply(200,service.researchPipeline.synthesis.detail(url.pathname.split('/')[3],url.searchParams.get('job')||undefined));return;}
     if(req.method==='GET'&&url.pathname==='/api/event-clusters'){reply(200,service.eventClusters.list(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/event-clusters\/[-a-z0-9]{36}$/.test(url.pathname)){reply(200,service.eventClusters.get(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&/^\/api\/semantic-batches\/[-a-z0-9]{36}\/clusters$/.test(url.pathname)){reply(200,service.eventClusters.preview(url.pathname.split('/')[3]));return;}
@@ -160,6 +161,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='POST'&&url.pathname==='/api/semantic-events'){reply(202,service.semanticEvents.start(data));return;}
     if(req.method==='POST'&&/^\/api\/event-clusters\/[-a-z0-9]{36}\/replacement-preview$/.test(url.pathname)){reply(200,service.eventClusters.replacementPreview(url.pathname.split('/')[3],data));return;}
     if(req.method==='POST'&&/^\/api\/event-clusters\/[-a-z0-9]{36}\/replace$/.test(url.pathname)){reply(200,service.eventClusters.replace(url.pathname.split('/')[3],data));return;}
+    if(req.method==='POST'&&/^\/api\/event-synthesis\/[a-f0-9]{64}\/cancel$/.test(url.pathname)){if(Object.keys(data).length)throw Error('取消参数无效');service.researchPipeline.synthesis.cancel(url.pathname.split('/')[3]);reply(200,service.snapshot());return;}
     if(req.method==='POST'&&url.pathname==='/api/event-clusters'){reply(201,service.eventClusters.save(data));return;}
     if(req.method==='POST'&&/^\/api\/event-clusters\/[-a-z0-9]{36}\/archive$/.test(url.pathname)){reply(200,service.eventClusters.archive(url.pathname.split('/')[3],data));return;}
     if(req.method==='POST'&&url.pathname==='/api/semantic-batches/preview'){reply(200,service.semanticBatches.preview(data));return;}

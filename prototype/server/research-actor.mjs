@@ -13,5 +13,6 @@ export function automaticRunPredicate(expression){
  return `EXISTS(SELECT 1 FROM research_pipeline_attempts a WHERE a.run_id=${expression} AND (
   EXISTS(SELECT 1 FROM research_pipeline_event_jobs j WHERE j.id=a.item_id AND json_extract(j.payload,'$.automatic')=1) OR
   EXISTS(SELECT 1 FROM research_pipeline_relations j WHERE j.id=a.item_id AND json_extract(j.payload,'$.automatic')=1) OR
-  EXISTS(SELECT 1 FROM research_pipeline_cluster_jobs j WHERE j.id=a.item_id AND json_extract(j.payload,'$.automatic')=1)))`;
+  EXISTS(SELECT 1 FROM research_pipeline_cluster_jobs j WHERE j.id=a.item_id AND json_extract(j.payload,'$.automatic')=1) OR
+  EXISTS(SELECT 1 FROM event_cluster_research j WHERE j.id=a.item_id AND json_extract(j.payload,'$.automatic')=1)))`;
 }

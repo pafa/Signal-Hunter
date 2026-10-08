@@ -126,7 +126,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       const researchView=research.snapshot({topics,news});
       researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));
       const workflow=topics.map(t=>assessTopic(t,{book})),operations=scheduler.snapshot(),checks=store.checks();
-      const overview=buildWorkbenchOverview({topics,eventClusters:eventClusters.workbench(topics),paper:book,workflow,operations,checks,offline,at,
+      const overview=buildWorkbenchOverview({topics,eventClusters:eventClusters.workbench(topics).map(c=>({...c,research:researchPipeline.synthesis?.overview(c.id)||null})),paper:book,workflow,operations,checks,offline,at,
         marketAccounts:Object.values(marketSimulations).map(m=>m.observationSnapshot(at))});
       return {overview,executionData:executionInputs.status(),priceCollection:priceCollection.snapshot(),storageMonitor:storageMonitor?.snapshot()??null,
         researchPipeline:researchPipeline.snapshot(),observationInbox:observations.summary(),eventContinuity:{...continuity.summary(),health:checks.events||{state:'pending'}},
