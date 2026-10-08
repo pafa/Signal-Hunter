@@ -5,7 +5,7 @@ import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,
 
 export function validateCandidate(result,packet,{model,topicId}){
  validatePacket(packet);
- const output={sections:result?.sections,missingEvidence:result?.missingEvidence,...(result?.materialityReviews===undefined?{}:{materialityReviews:result.materialityReviews})};
+ const output={sections:result?.sections,missingEvidence:result?.missingEvidence,...(result?.materialityReviews===undefined?{}:{materialityReviews:result.materialityReviews}),...(result?.sourceRequests===undefined?{}:{sourceRequests:result.sourceRequests})};
  validateCodexDraft(output,packet);
  if(result.status!=='candidate'||result.reviewStatus!=='unreviewed'||packet.input.topicId!==topicId||result.trace?.inputHash!==packet.inputHash||result.trace?.model!==model||result.trace?.topicVersion!==packet.input.topicVersion||result.trace?.topicId!==topicId||typeof result.rawOutput!=='string'||digest(result.rawOutput)!==result.trace.outputHash)throw new CodexResearchError('output');
  let raw;try{raw=validateCodexDraft(JSON.parse(result.rawOutput),packet);}catch{throw new CodexResearchError('output');}

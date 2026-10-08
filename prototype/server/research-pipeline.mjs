@@ -32,12 +32,27 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
  const events=materialEvents?openPipelineEvents(store,research,models,materialEvents,{config,now,guard,transaction,audit,used,settings,relations,entities}):null;
  const clusterJobs=batches&&clusters&&semantic?openPipelineClusters(store,research,semantic,batches,clusters,{now,guard,transaction,audit,used,settings}):null;
  const synthesis=clusters?openEventSynthesis(store,research,clusters,models,{config,now,guard,transaction,audit,used,settings}):null;
- const evidence=relations&&events?openPipelineEvidence(store,research,relations,{now,guard,transaction,audit,settings,executionHash,setState}):null;
+ const evidence=relations&&events?openPipelineEvidence(store,research,relations,{now,guard,transaction,audit,settings,executionHash,setState,enqueueLinked}):null;
+ function enqueueLinked(news,{searchId,context}){
+  context.assertActive();guard(); // Called inside store.ingest's transaction.
+  const prior=db.prepare('SELECT * FROM research_pipeline_items WHERE news_id=? AND revision=? ORDER BY rowid DESC LIMIT 1').get(news.id,news.revision);
+  if(prior){
+   const old=JSON.parse(prior.payload),activated=prior.status==='skipped'&&old.configuration.automatic&&old.executionHash===executionHash();
+   if(activated)setState(prior,'queued',{selectionReason:'linked-evidence',initialSelectionReason:old.selectionReason,evidenceSearchId:searchId,reason:'当前系统研判选中原文链接，补充读取；原初筛保留'});
+   return {id:prior.id,activated,initialStatus:prior.status};
+  }
+  const s=settings(),triage=research.newsItem(news.id).triage,id=digest({news:news.id,revision:news.revision,rules:research.screenings.rulesHash});
+  db.prepare('INSERT OR IGNORE INTO triage VALUES(?,?,?,?,?)').run(news.id,news.revision,`${RULES_VERSION}@${research.screenings.rulesHash}`,JSON.stringify(triage),at());research.screenings.capture(news,triage,at());
+  const payload={title:news.title,createdAt:at(),screening:triage,configuration:s,selectionReason:'linked-evidence',evidenceSearchId:searchId,executionHash:executionHash(),reason:'原文中的网页引用；尚未读取目标正文，发布日期未知'};
+  db.prepare('INSERT INTO research_pipeline_items VALUES(?,?,?,?,?,NULL,NULL,?)').run(id,news.id,news.revision,research.screenings.rulesHash,'queued',JSON.stringify(payload));audit(id,'linked-source-discovered',{searchId,newsId:news.id,revision:news.revision});
+  return {id,activated:false,initialStatus:'new'};
+ }
  async function prepareSource(context){
    const row=db.prepare("SELECT * FROM research_pipeline_items WHERE status IN ('queued','ready') ORDER BY rowid LIMIT 1").get();if(!row)return null;
+   if(store.newsById(row.news_id)?.provider==='linked-public-source'&&!evidence?.hasActiveLinkedRequest(row)){transaction(()=>{context.assertActive();setState(read(row.id),'invalidated',{reason:'原补读请求依据已变化，停止尚未开始的读取；旧记录保留'});});return {skipped:'linked-request-invalidated'};}
    if(used()>=settings().dailyCalls)return {skipped:'call-limit'};
    if(db.prepare('SELECT 1 FROM model_job_lease WHERE expires_at>=?').get(now()))return {skipped:'model-busy'};
-   const valid=()=>{context.assertActive();guard();current(row);if(JSON.parse(read(row.id).payload).executionHash!==executionHash())throw Error('模型或提示词已变化，旧条目需重新核对');};
+   const valid=()=>{context.assertActive();guard();current(row);if(current(row).provider==='linked-public-source'&&!evidence?.hasActiveLinkedRequest(row))throw Error('原补读请求已失效');if(JSON.parse(read(row.id).payload).executionHash!==executionHash())throw Error('模型或提示词已变化，旧条目需重新核对');};
    try{
     valid();
     const owned=JSON.parse(read(row.id).payload);

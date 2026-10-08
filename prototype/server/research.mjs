@@ -14,6 +14,7 @@ import {validateResearchBrief} from './research-brief.mjs';
 import {openMaterials,immutableMaterialSnapshot} from './research-materials.mjs';
 import {checkMaterialitySources} from './materiality-source-check.mjs';
 import {validateMaterialityReviews} from './materiality-review.mjs';
+import {validateSourceRequests} from './source-links.mjs';
 import {readPublicArticle,publicSourceUrl} from './source-reader.mjs';
 import {RELATION_KINDS,relatedCandidates} from '../shared/research-links.mjs';
 import {semanticResearchCandidates,freezeSemanticBasis,semanticBasisStatus} from './semantic-research.mjs';
@@ -97,8 +98,10 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    if(data.version!==topic.version||candidate?.trace?.inputHash!==packet.inputHash||candidate?.trace?.topicId!==id||candidate?.trace?.topicVersion!==topic.version||candidate?.status!=='candidate')throw new Error('模型候选与当前研究不匹配，请重新生成');
    const sections=validateDossierSections(candidate.sections,topic.evidence);
    const reviews=validateMaterialityReviews(candidate.materialityReviews,packet);
+   const sourceRequests=validateSourceRequests(candidate.sourceRequests,packet);
    topic.dossier={sections,...provenance,reviewStatus:'draft',revisionReason:actor?'系统形成研判草稿；事实与交易条件未获人工确认':'本人采纳 Codex 候选为待复核草稿',preparedBy:actor?'Codex 模型研判 · 系统生成，尚待复核':'Codex 模型候选 · 本人采纳，尚待复核',preparedAt:clock(),basedOnResearchVersion:topic.version+1,sourceModelRun:{id:data.runId,...candidate.trace},missingEvidence:candidate.missingEvidence};
    if(reviews?.length)topic.dossier.materialityReview={...packet.input.materialityReview,checks:reviews,topicVersion:topic.version,inputHash:packet.inputHash};
+   if(sourceRequests!==undefined)topic.dossier.sourceRequests=sourceRequests;
    topic.researchUpdatedAt=clock();
    return commit(topic,actor?'系统生成研判草稿：未标记完成、未提交交易':'采纳模型研判草稿：未标记完成、未提交交易',data.version,()=>{
     if(materials.packet(withSemanticStatus(withAvailability(get(id)))).inputHash!==candidate.trace.inputHash)throw new Error('研究或材料已变化；此候选保留在历史中，请重新生成');

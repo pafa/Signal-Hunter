@@ -7,8 +7,9 @@ import {prepareArticleExtraction,finishArticleExtraction} from './article-extrac
 import {articleTableText} from './article-table-text.mjs';
 import {JSDOM} from 'jsdom';
 import {Readability} from '@mozilla/readability';
+import {sourceLinks} from './source-links.mjs';
 
-export const READER_VERSION='public-article-7';
+export const READER_VERSION='public-article-8';
 export const MAX_SOURCE_BYTES=1_000_000;
 function assertArticleHost(url){
  if(['news.google.com','consent.google.com','accounts.google.com'].includes(url.hostname))throw new Error('这是聚合或登录入口，请在阅读来源后粘贴发布方的文章链接');
@@ -44,7 +45,8 @@ export function extractArticle(html,url){
   const structuredBody=articleTableText(dom.window.document,article.content);
   if(structuredBody.length>80000)throw new Error('正文超过 8 万字符，请手动补充必要段落');
   const publication=publicationDateResult(dates),extractionEvidence=finishArticleExtraction(dom.window.document,url,preparation,article.content);
-  return {title:(article.title||new URL(url).hostname).slice(0,200),sourceName:(article.siteName||new URL(url).hostname).slice(0,160),body:structuredBody,...publication,extractionEvidence,scope:'extracted-text',method:READER_VERSION};
+  const linkRoot=dom.window.document.createElement('div');linkRoot.innerHTML=article.content;
+  return {title:(article.title||new URL(url).hostname).slice(0,200),sourceName:(article.siteName||new URL(url).hostname).slice(0,160),body:structuredBody,...publication,extractionEvidence,sourceLinks:sourceLinks(linkRoot,url),scope:'extracted-text',method:READER_VERSION};
  }finally{dom.window.close();}
 }
 export async function readPublicArticle(value,{resolver=lookup,request=transport,timeoutMs=20000}={}){

@@ -2,6 +2,7 @@ import React,{useEffect,useState} from 'react';
 import {Button} from './Primitives';
 import {request,time,stanceNames} from './api';
 import {MaterialHistoricalRecall} from './HistoricalRecall';
+import ArticleSourceLinks from './ArticleSourceLinks';
 import ArticleReadingScope from './ArticleReadingScope';
 import PublicationDateEvidence from './PublicationDateEvidence';
 const scopes={'extracted-text':'网页提取正文 · 完整性待核','user-supplied-text':'人工提供正文 · 完整性未保证',excerpt:'摘录 · 仅此范围'};
@@ -26,7 +27,7 @@ export default function SourceMaterial({topicId,material:m,busy}){
    {m.url&&<a href={m.url} target="_blank" rel="noreferrer">打开原始来源 ↗</a>}<p className="m-note">与事件的关系：{m.interpretation}</p>
    {error?<div role="alert"><p>{error}</p><Button onClick={()=>setRetry(n=>n+1)}>重试读取此版材料</Button></div>:!detail?<p role="status">正在读取材料 v{m.revision}…</p>:<>
     <PublicationDateEvidence evidence={detail.publicationDateEvidence} showMissing={m.scope==='extracted-text'}/><ArticleReadingScope evidence={detail.extractionEvidence} showMissing={m.scope==='extracted-text'}/>
-    <pre className="source-body">{detail.body}</pre><small>内容指纹 {m.contentHash.slice(0,20)} · 旧版保留</small><MaterialHistoricalRecall material={detail} busy={busy}/>
+    <ArticleSourceLinks links={detail.sourceLinks}/><pre className="source-body">{detail.body}</pre><small>内容指纹 {m.contentHash.slice(0,20)} · 旧版保留</small><MaterialHistoricalRecall material={detail} busy={busy}/>
    </>}
   </>}
  </details>;

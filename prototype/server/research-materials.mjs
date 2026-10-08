@@ -5,6 +5,7 @@ import {READER_VERSION} from './source-reader.mjs';
 import {packetQuantities} from '../shared/source-quantities.mjs';
 import {materialityReviewTargets} from './materiality-review.mjs';
 import {claimsOf} from '../shared/claims.mjs';
+import {validateSourceLinks} from './source-links.mjs';
 
 export const PACKET_VERSION='event-research-packet-1';
 const required=(v,name,max)=>{if(typeof v!=='string'||!v.trim()||v.trim().length>max)throw new Error(`${name}不能为空，最多 ${max} 字符`);return v.trim();};
@@ -16,9 +17,11 @@ export function materialInput(data,at){
  if(data.publishedAt){const s=data.publishedAt;if(typeof s!=='string'||!/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(s)||!Number.isFinite(Date.parse(s))||new Date(`${s.slice(0,10)}T00:00:00Z`).toISOString().slice(0,10)!==s.slice(0,10)||Date.parse(s)>Date.parse(at))throw new Error('来源日期无效或晚于获取时间');publishedAt=s;}
  const provenance=Object.hasOwn(data,'publicationDateEvidence')?{publicationDateEvidence:validatePublicationEvidence(data.publicationDateEvidence,publishedAt,url)}:{};
  const extraction=Object.hasOwn(data,'extractionEvidence')?{extractionEvidence:validateExtractionEvidence(data.extractionEvidence,url)}:{};
+ const links=Object.hasOwn(data,'sourceLinks')?{sourceLinks:validateSourceLinks(data.sourceLinks)}:{};
+ if(Object.keys(links).length&&data.scope!=='extracted-text')throw new Error('正文来源链接仅用于网页提取材料');
  if(Object.keys(extraction).length&&data.scope!=='extracted-text')throw new Error('正文提取范围仅用于网页提取材料');
  if(Object.keys(provenance).length&&data.scope!=='extracted-text')throw new Error('来源日期读取依据仅用于网页提取材料');
- return {title,sourceName,body,url,scope:data.scope,publishedAt,...provenance,...extraction,datePrecision:!publishedAt?'unknown':publishedAt.length===10?'day':'instant'};
+ return {title,sourceName,body,url,scope:data.scope,publishedAt,...provenance,...extraction,...links,datePrecision:!publishedAt?'unknown':publishedAt.length===10?'day':'instant'};
 }
 // Read an immutable version without asserting that it is the current document.
 // Used only as explicitly labelled historical context; comparisons still require latest.
@@ -47,7 +50,7 @@ export function openMaterials(db,{clock=()=>new Date().toISOString()}={}){
   attempt(topicId,data){db.prepare('INSERT INTO research_source_attempts(topic_id,payload) VALUES(?,?)').run(topicId,JSON.stringify({...data,at:clock()}));},
   list(topic,{view='full'}={}){
    if(!['full','summary'].includes(view))throw Error('材料列表视图无效');
-   const read=view==='full'?get:id=>{const row=db.prepare("SELECT json_remove(payload,'$.body','$.publicationDateEvidence','$.extractionEvidence') payload FROM research_materials WHERE id=?").get(id);if(!row)throw Error('材料快照不存在');return JSON.parse(row.payload);};
+   const read=view==='full'?get:id=>{const row=db.prepare("SELECT json_remove(payload,'$.body','$.publicationDateEvidence','$.extractionEvidence','$.sourceLinks') payload FROM research_materials WHERE id=?").get(id);if(!row)throw Error('材料快照不存在');return JSON.parse(row.payload);};
    return {materials:topic.evidence.filter(e=>e.materialId).map(e=>({...read(e.materialId),evidenceId:e.id,stance:e.stance,interpretation:e.interpretation,verification:e.verification})),attempts:db.prepare('SELECT payload FROM research_source_attempts WHERE topic_id=? ORDER BY id DESC LIMIT 20').all(topic.id).map(r=>JSON.parse(r.payload))};},
   detail(topic,id){
    const evidence=topic.evidence.find(e=>e.materialId===id);
