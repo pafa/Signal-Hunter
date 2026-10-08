@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
+import {DatabaseSync} from 'node:sqlite';
 import {openStore} from '../server/store.mjs';
 import {createService} from '../server/service.mjs';
 import {assertDatabaseMode} from '../server/runtime.mjs';
 import {digest} from '../server/codex-research.mjs';
 import {SYSTEM_RESEARCH_ACTOR} from '../server/research-actor.mjs';
+import {revisionComparisonPacket} from '../server/revision-comparison.mjs';
 import {config,at,quote,output,extraction,identity,dossier,comparison,fixture,allClusters,cluster,relationRows,candidateRelation,two} from './automatic-research-fixture.mjs';
 test('automatic first cluster and expansion preserve identity, complete pair evidence and no intermediate human tasks or orders',async()=>{
  const f=fixture();try{
@@ -207,6 +209,34 @@ for(const outcome of ['ambiguous','uncertain','unrelated','related'])test(`a ${o
 });
 
 async function pendingMatrix(f){const before=await sameDocumentCluster(f);f.revise(1);await f.until(()=>currentSuccession(f)?.phase==='correspondence'&&currentSuccession(f).batchId);return {before,job:currentSuccession(f)};}
+test('revision snapshot reuse rejects changed content, ownership and input even within rolled-back transactions',async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{
+  const {before,job}=await pendingMatrix(f),db=f.store.db;
+  const input={left:{kind:'event',id:before.members[0].id,revision:1},right:{kind:'event',id:job.sources[0].topics[0].id,revision:1},revision:job.revision};
+  const read=()=>revisionComparisonPacket(f.store,input),original=read();
+  original.input.left.eventFocus.object='caller mutation';assert.notEqual(read().input.left.eventFocus.object,'caller mutation');
+  const payload=db.prepare('SELECT payload FROM event_clusters WHERE id=?').get(before.id).payload;
+  db.exec('BEGIN');db.prepare("UPDATE event_clusters SET payload=json_set(payload,'$.title','changed without a new fingerprint') WHERE id=?").run(before.id);assert.throws(read);db.exec('ROLLBACK');assert.equal(read().inputHash,original.inputHash);
+  const {snapshotHash,...record}=JSON.parse(payload),changed={...record,title:'new checked bytes'},saved={...changed,snapshotHash:digest(changed)};
+  db.exec('BEGIN');db.prepare('UPDATE event_clusters SET payload=? WHERE id=?').run(JSON.stringify(saved),before.id);
+  assert.throws(read);assert(revisionComparisonPacket(f.store,{...input,revision:{...input.revision,clusterHash:saved.snapshotHash}}));
+  db.exec('ROLLBACK; BEGIN');assert.equal(read().inputHash,original.inputHash);
+  db.prepare('DELETE FROM event_cluster_members WHERE member_key=?').run('event:'+input.left.id);assert.throws(read);db.exec('ROLLBACK');assert.equal(read().inputHash,original.inputHash);
+  db.exec('BEGIN');db.prepare("UPDATE research_topics SET payload=json_set(payload,'$.status','archived') WHERE id=?").run(input.right.id);assert.throws(read);db.exec('ROLLBACK');assert.equal(read().inputHash,original.inputHash);
+  db.exec('BEGIN');db.prepare('DELETE FROM event_clusters WHERE id=?').run(before.id);assert.throws(read);db.exec('ROLLBACK');assert.equal(read().inputHash,original.inputHash);
+  assert.equal(db.prepare('SELECT payload FROM event_clusters WHERE id=?').get(before.id).payload,payload);
+ }finally{if(f.store.db.isTransaction)f.store.db.exec('ROLLBACK');await f.close();}
+});
+test('revision reads see committed peer edits without accepting an old claimed fingerprint',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'revision-read-peer-')),path=join(dir,'research.sqlite'),f=fixture({path,extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});let peer;
+ try{
+  const {before,job}=await pendingMatrix(f),input={left:{kind:'event',id:before.members[0].id,revision:1},right:{kind:'event',id:job.sources[0].topics[0].id,revision:1},revision:job.revision},read=()=>revisionComparisonPacket(f.store,input),original=read();
+  peer=new DatabaseSync(path);const payload=peer.prepare('SELECT payload FROM event_clusters WHERE id=?').get(before.id).payload;
+  peer.exec('BEGIN');peer.prepare("UPDATE event_clusters SET payload=json_set(payload,'$.title','uncommitted') WHERE id=?").run(before.id);assert.equal(read().inputHash,original.inputHash);peer.exec('ROLLBACK');assert.equal(read().inputHash,original.inputHash);
+  peer.prepare("UPDATE event_clusters SET payload=json_set(payload,'$.title','committed changed bytes') WHERE id=?").run(before.id);assert.throws(read);
+  peer.prepare('UPDATE event_clusters SET payload=? WHERE id=?').run(payload,before.id);assert.equal(read().inputHash,original.inputHash);
+ }finally{if(peer?.isTransaction)peer.exec('ROLLBACK');peer?.close();await f.close();rmSync(dir,{recursive:true,force:true});}
+});
 for(const action of ['pause','cancel'])test(`revision correspondence ${action} remains authoritative while other sources continue`,async()=>{
  const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{const {before,job}=await pendingMatrix(f),calls=f.calls.semantic;f.service.semanticBatches.control(job.batchId,{action});f.advance(180001);await f.drive(15);assert.equal(f.calls.semantic,calls);assert.equal(currentSuccession(f).status,action==='pause'?'paused':'cancelled');assert.equal(cluster(f).snapshotHash,before.snapshotHash);f.add(2);await f.drive(60);assert.equal(f.store.db.prepare("SELECT count(*) n FROM research_pipeline_event_jobs WHERE kind='dossier' AND status='completed' AND json_extract(payload,'$.newsId')=?").get(f.news(2).id).n,2);}finally{await f.close();}
 });

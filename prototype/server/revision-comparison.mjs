@@ -1,20 +1,38 @@
 import {digest,CodexResearchError} from './codex-research.mjs';
 import {eventComparisonSnapshot} from './semantic-event-scopes.mjs';
 import {comparisonSummary} from './semantic-materials.mjs';
+import {readSnapshotCache} from './read-snapshot-cache.mjs';
 
 export const REVISION_COMPARISON_VERSION='event-revision-pair-1';
 const fail=()=>{throw new CodexResearchError('packet');};
 const same=new Set(['repeat','followup','reversal']);
 export const comparisonBasis=run=>({runId:run.id,inputHash:run.packet.inputHash,outputHash:run.candidate.trace.outputHash,model:run.model,promptVersion:run.candidate.trace.promptVersion,decisionVersion:run.decisionVersion,comparison:structuredClone(run.candidate.comparison)});
 
+// Rechecking one revision matrix used to parse and hash the same full cluster
+// (including every prior pair) for every cell. Reuse only that pure validation,
+// keyed by the exact bytes just read, never by a mutable ID or claimed hash.
+// Keep one record per connection; membership and current inputs still read live.
+const checkedClusters=new WeakMap();
+function revisionCluster(db,id){
+ if(!checkedClusters.has(db))checkedClusters.set(db,{memo:readSnapshotCache(db,{limit:1,maxBytes:16*1024*1024})});
+ const cache=checkedClusters.get(db);return cache.memo(id,()=>{
+  const payload=db.prepare('SELECT payload FROM event_clusters WHERE id=?').get(id)?.payload;
+  if(typeof payload!=='string')fail();
+  if(cache.payload===payload)return cache.record;
+  const parsed=JSON.parse(payload);if(!parsed)fail();const {snapshotHash,...value}=parsed;
+  if(digest(value)!==snapshotHash)fail();
+  const record={status:parsed.status,version:parsed.version,snapshotHash,members:parsed.members};
+  if(Buffer.byteLength(payload)<=16*1024*1024){cache.payload=payload;cache.record=record;}else{delete cache.payload;delete cache.record;}return record;
+ });
+}
+
 // Historical input is available only through an exact, still-owned cluster
 // version. Ordinary comparison and clustering continue to require current input.
 export function revisionComparisonPacket(store,input){
  if(!input||Object.keys(input).sort().join(',')!=='left,revision,right'||Object.keys(input.revision||{}).sort().join(',')!=='clusterHash,clusterId,clusterVersion')fail();
  const {clusterId,clusterVersion,clusterHash}=input.revision,db=store.db;
- const record=JSON.parse(db.prepare('SELECT payload FROM event_clusters WHERE id=?').get(clusterId)?.payload||'null');
- if(!record)fail();const {snapshotHash,...value}=record;
- if(record.status!=='active'||record.version!==clusterVersion||snapshotHash!==clusterHash||digest(value)!==snapshotHash)fail();
+ const record=revisionCluster(db,clusterId),{snapshotHash}=record;
+ if(record.status!=='active'||record.version!==clusterVersion||snapshotHash!==clusterHash)fail();
  for(const ref of [input.left,input.right])if(!ref||Object.keys(ref).sort().join(',')!=='id,kind,revision'||ref.kind!=='event'||typeof ref.id!=='string'||ref.revision!==1)fail();
  const old=record.members.find(m=>m.kind==='event'&&m.id===input.left.id);
  if(!old||db.prepare('SELECT cluster_id FROM event_cluster_members WHERE member_key=?').get('event:'+old.id)?.cluster_id!==clusterId)fail();

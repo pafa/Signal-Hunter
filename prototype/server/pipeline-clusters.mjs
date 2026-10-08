@@ -68,7 +68,7 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
  }
  function active(context,row,p){
   context.assertActive();guard();valid(p);
-  if(read(row.id)?.status!=='active'||['paused','cancelled'].includes(batches.get(row.batch_id).state))throw Error('自动归组已暂停或状态变化');
+  if(read(row.id)?.status!=='active'||['paused','cancelled'].includes(batches.progress(row.batch_id).state))throw Error('自动归组已暂停或状态变化');
  }
  function finish(context,row,p,status,reason){
   // Stop remaining batch work and record the terminal outcome in the same transaction.
@@ -76,7 +76,7 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
    db.prepare('UPDATE research_pipeline_cluster_jobs SET status=?,payload=? WHERE id=?').run(status,JSON.stringify({...p,reason}),row.id);
    audit(row.id,'automatic-cluster-'+status,{batchId:row.batch_id,reason});
   };
-  if(batches.get(row.batch_id).state==='cancelled')transaction(save);else batches.control(row.batch_id,{action:'pause'},save);
+  if(batches.progress(row.batch_id).state==='cancelled')transaction(save);else batches.control(row.batch_id,{action:'pause'},save);
   return {ok:true,clusterJobId:row.id,status};
  }
  function settle(context,row,p,batch){
@@ -123,13 +123,13 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
  }
  return {
   snapshot(){return {items:db.prepare('SELECT * FROM research_pipeline_cluster_jobs ORDER BY rowid DESC LIMIT 30').all().map(row=>{
-   const p=JSON.parse(row.payload),batch=row.batch_id?batches.get(row.batch_id):null;let stale=false,confirmedVersion=null;
+   const p=JSON.parse(row.payload),batch=row.batch_id?batches.progress(row.batch_id):null;let stale=false,confirmedVersion=null;
    if(batch){
     if(p.clusterId){const cluster=clusters.get(p.clusterId),confirmed=cluster.history.find(v=>{const {snapshotHash,...record}=v;return v.batchId===row.batch_id&&v.version>(p.clusterVersion||0)&&(p.mode==='replace'?v.replacement?.previousSnapshotHash===p.clusterHash:v.members.some(m=>m.kind==='event'&&m.id===p.sourceId))&&snapshotHash===digest(record);});confirmedVersion=confirmed?.version||null;if(p.automatic&&confirmedVersion)stale=!cluster.health.current;}
     if(!confirmedVersion)try{valid(p);}catch{stale=true;}
    }
    const status=p.automatic?row.status==='active'?(batch.state==='completed'?'processing':batch.state):row.status:confirmedVersion?'confirmed':row.status==='active'?batch.state:row.status;
-   return {id:row.id,...p,batchId:row.batch_id,status,confirmedVersion,stale,inputCount:batch?.inputCount??null,pairCount:batch?.pairCount??null,counts:batch?.counts||null,reusedPairs:batch?.items.filter(i=>i.reusedRunId).length||0};})};},
+   return {id:row.id,...p,batchId:row.batch_id,status,confirmedVersion,stale,inputCount:batch?.inputCount??null,pairCount:batch?.pairCount??null,counts:batch?.counts||null,reusedPairs:batch?.reusedPairs||0};})};},
   step(context){
    context.assertActive();guard();scan(context);
    const rows=db.prepare("SELECT * FROM research_pipeline_cluster_jobs WHERE status='active' ORDER BY rowid").all();let deferred=null;

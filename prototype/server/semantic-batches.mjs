@@ -52,6 +52,7 @@ export function openSemanticBatches(store,semantic,{enabled=false,config={},now=
   previewRevision(input,revision,actor){const p=plan(input,revision,actor);return {...p,inputs:p.inputs.map(comparisonSummary),maximumCalls:p.pairs.length};},
   list(){return {enabled:enabled&&semantic.status().enabled,batches:db.prepare('SELECT payload FROM semantic_batches ORDER BY rowid DESC LIMIT 50').all().map(r=>project(JSON.parse(r.payload)))};},
   get(id){return project(read(id),true);},
+  progress(id){const batch=project(read(id));return {...batch,reusedPairs:db.prepare("SELECT count(*) n FROM semantic_batch_items WHERE batch_id=? AND json_extract(payload,'$.reusedRunId') IS NOT NULL").get(id).n};},
   create(input,{owner=null,reuseRunIds=[],beforeCommit=()=>{},revision=null,actor}={}){
    researchActor(actor);if(actor&&owner!=='research-pipeline')fail(3);
    if(revision&&owner!=='research-pipeline')fail(0);

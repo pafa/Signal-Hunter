@@ -5,6 +5,17 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {readSnapshotCache} from '../server/read-snapshot-cache.mjs';
+import {serialize} from 'node:v8';
+
+test('the byte budget evicts snapshots and never retains a single oversized value',()=>{
+ const db=new DatabaseSync(':memory:');try{
+  const value={body:'x'.repeat(200)},size=serialize(value).byteLength,memo=readSnapshotCache(db,{limit:256,maxBytes:size*2});let reads=0;
+  const read=()=>{reads++;return value;};memo('a',read);memo('b',read);memo('a',read);assert.equal(reads,2);
+  memo('c',read);memo('a',read);assert.equal(reads,4);
+  let largeReads=0;const large=()=>{largeReads++;return {body:'x'.repeat(size*3)};};memo('large',large);memo('large',large);assert.equal(largeReads,2);
+  const before=reads;memo('a',read);assert.equal(reads,before);
+ }finally{db.close();}
+});
 
 test('unchanged reads reuse a bounded private snapshot and callers cannot mutate it',()=>{
  const db=new DatabaseSync(':memory:');try{let reads=0;const memo=readSnapshotCache(db,{limit:2}),read=()=>({n:++reads,nested:{value:'original'}});const a=memo('a',read);a.nested.value='changed';assert.equal(memo('a',read).nested.value,'original');assert.equal(reads,1);memo('b',read);memo('c',read);memo('a',read);assert.equal(reads,4);}
