@@ -22,7 +22,7 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
  }
  const view=row=>{const p=JSON.parse(row.payload),run=row.run_id?semantic.get(row.run_id):null;let stale=!!run?.stale;
   if(p.refs)try{valid(row);}catch{stale=true;}
-  return {id:row.id,itemId:row.item_id,status:row.status==='running'?(run?.status||row.status):row.status,automatic:!!p.automatic,retryAt:p.retryAt||null,runId:row.run_id,source:p.source,target:p.target,reason:p.reason||run?.failure?.message||null,stale,
+  return {id:row.id,itemId:row.item_id,status:row.status==='running'?(run?.status||row.status):row.status,automatic:!!p.automatic,retryAt:p.retryAt||null,active:!!run?.active,runId:row.run_id,source:p.source,target:p.target,reason:p.reason||run?.failure?.message||null,stale,
    scopes:p.packet?[p.packet.input.left.contentScope,p.packet.input.right.contentScope]:null,comparison:run?.status==='candidate'&&!run.stale?run.candidate.comparison:null,createdAt:p.createdAt,
    attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
  };
@@ -55,8 +55,10 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
   return null;
  }
  return {
-  plan(item,topic){
-   const recalled=topic.eventExtraction?recallOccurrence(topic,research.list()):recall(item.news_id),source={id:topic.id,version:topic.version,title:topic.title,kind:topic.eventExtraction?'event':'material'},left=inputRef(topic),seen=new Set();
+  get(id){return view(read(id));},
+  plan(item,topic,followup=null){
+   if(followup&&(!Array.isArray(followup.targets)||!followup.targets.length||followup.targets.length>3))throw Error('补充比较目标无效');
+   const recalled=followup?{items:[...new Set(followup.targets)].map(id=>({id:digest({method:'evidence-followup',source:topic.id,target:id}),right:research.get(id),reasons:[followup.reason]})),coverage:{method:'补充研究与明确原事项逐项比较'},rulesHash:'evidence-followup/1'}:topic.eventExtraction?recallOccurrence(topic,research.list()):recall(item.news_id),source={id:topic.id,version:topic.version,title:topic.title,kind:topic.eventExtraction?'event':'material'},left=inputRef(topic),seen=new Set();
    const candidates=recalled.items.filter(c=>c.right.id!==topic.id&&c.right.status!=='archived').slice(0,3);
    const plans=candidates.map(c=>{
     const target=research.get(c.right.id),right=inputRef(target),p={...(item.automatic?{automatic:true}:{}),newsId:item.news_id,newsRevision:item.revision,source,target:{id:target.id,version:target.version,title:target.title,kind:target.eventExtraction?'event':'material'},candidateId:c.id,recallReasons:c.reasons,recallRulesHash:recalled.rulesHash,...(topic.eventExtraction?{clusterExpansion:'reviewed-increment-1'}:{}),createdAt:at()};

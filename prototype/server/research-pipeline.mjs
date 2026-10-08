@@ -5,6 +5,7 @@ import {READER_VERSION} from './source-reader.mjs';
 import {openPipelineRelations} from './pipeline-relations.mjs';
 import {openPipelineClusters} from './pipeline-clusters.mjs';
 import {openPipelineEvents} from './pipeline-events.mjs';
+import {openPipelineEvidence} from './pipeline-evidence.mjs';
 
 // Research automation writes versioned system judgments; final order decisions stay separate.
 export function openResearchPipeline(store,research,models,{enabled=false,config={},now=Date.now,semantic=null,recall=null,materialEvents=null,entities=null,batches=null,clusters=null}={}){
@@ -31,12 +32,13 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
  const events=materialEvents?openPipelineEvents(store,research,models,materialEvents,{config,now,guard,transaction,audit,used,settings,relations,entities}):null;
  const clusterJobs=batches&&clusters&&semantic?openPipelineClusters(store,research,semantic,batches,clusters,{now,guard,transaction,audit,used,settings}):null;
  const synthesis=clusters?openEventSynthesis(store,research,clusters,models,{config,now,guard,transaction,audit,used,settings}):null;
+ const evidence=relations&&events?openPipelineEvidence(store,research,relations,{now,guard,transaction,audit,settings,executionHash,setState}):null;
  const api={
   synthesis,
   isAutomatic:()=>settings().automatic,
   get(id){return view(read(id));},
   snapshot(){const lane=db.prepare("SELECT token,lease_until,paused FROM operation_tasks WHERE name='discovery'").get(),counts={};
-   const rows=db.prepare(`SELECT CASE WHEN r.status='running' AND r.expires_at<? THEN 'interrupted' WHEN r.status IS NOT NULL THEN r.status WHEN i.status='preparing' AND (? OR json_extract(i.payload,'$.token') IS NOT ?) THEN 'interrupted' ELSE i.status END status,count(*) n FROM research_pipeline_items i LEFT JOIN model_research_runs r ON r.id=i.run_id GROUP BY 1`).all(now(),Number(!lane||!!lane.paused||lane.lease_until<=now()),lane?.token||null);for(const r of rows)counts[r.status]=r.n;return {enabled:enabled&&models.status().enabled,settings:settings(),callsInLast24Hours:used(),counts,relations:relations?.snapshot()||null,events:events?.snapshot()||null,clusters:clusterJobs?.snapshot()||null,synthesis:synthesis?.snapshot()||null,items:db.prepare('SELECT * FROM research_pipeline_items ORDER BY rowid DESC LIMIT 30').all().map(view)};},
+   const rows=db.prepare(`SELECT CASE WHEN r.status='running' AND r.expires_at<? THEN 'interrupted' WHEN r.status IS NOT NULL THEN r.status WHEN i.status='preparing' AND (? OR json_extract(i.payload,'$.token') IS NOT ?) THEN 'interrupted' ELSE i.status END status,count(*) n FROM research_pipeline_items i LEFT JOIN model_research_runs r ON r.id=i.run_id GROUP BY 1`).all(now(),Number(!lane||!!lane.paused||lane.lease_until<=now()),lane?.token||null);for(const r of rows)counts[r.status]=r.n;return {enabled:enabled&&models.status().enabled,settings:settings(),callsInLast24Hours:used(),counts,relations:relations?.snapshot()||null,events:events?.snapshot()||null,clusters:clusterJobs?.snapshot()||null,synthesis:synthesis?.snapshot()||null,evidence:evidence?.snapshot()||null,items:db.prepare('SELECT * FROM research_pipeline_items ORDER BY rowid DESC LIMIT 30').all().map(view)};},
   configure(input,beforeCommit=()=>{}){if(!input||!['dailyCalls,includeClues,version','dailyCalls,extractEvents,includeClues,version','automatic,dailyCalls,extractEvents,includeClues,version'].includes(Object.keys(input).sort().join(','))||!Number.isSafeInteger(input.dailyCalls)||input.dailyCalls<1||input.dailyCalls>100||typeof input.includeClues!=='boolean'||Object.hasOwn(input,'extractEvents')&&typeof input.extractEvents!=='boolean')throw Error('自动研究配置无效');if(Object.hasOwn(input,'automatic')&&(typeof input.automatic!=='boolean'||input.automatic&&(!entities||!events||!input.extractEvents)))throw Error('自动研究需要事项拆分与身份识别');return transaction(()=>{if(input.version!==settings().version)throw Error('自动研究配置已变化，请刷新');if((input.automatic??settings().automatic)&&!(input.extractEvents??settings().extractEvents))throw Error('自动研究需要事项拆分与身份识别');db.prepare('UPDATE research_pipeline_settings SET version=version+1,payload=? WHERE slot=1').run(JSON.stringify({dailyCalls:input.dailyCalls,includeClues:input.includeClues,extractEvents:input.extractEvents??settings().extractEvents,automatic:input.automatic??settings().automatic}));audit(null,'configure',input);beforeCommit();return api.snapshot();});},
   retry(id){return transaction(()=>{if(!enabled)throw Error('当前未启用自动研究');const row=read(id),s=view(row).status;if(!['failed','cancelled','interrupted'].includes(s))throw Error('只有失败、取消或中断条目可以重试');current(row);if(JSON.parse(row.payload).executionHash!==executionHash())throw Error('模型或提示词已变化，旧条目需重新核对');db.prepare('UPDATE research_pipeline_items SET run_id=NULL WHERE id=?').run(id);setState(row,row.topic_id?'ready':'queued',{reason:null});return view(read(id));});},
   retryEvent(id){guard();if(!enabled||!events)throw Error('当前未启用自动研究');return events.retry(id);},
@@ -61,6 +63,7 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
      else setState(candidate,candidate.topic_id?'ready':'queued',{reason:'后台恢复未完成的正文准备',nextRetryAt:null});
     });
    }
+   evidence?.step(context);
    // Quota or a busy model must not prevent another lane from saving a finished result.
    let deferred=null;
    for(const lane of [events,relations,clusterJobs,synthesis]){const result=lane?.step(context);if(!result)continue;if(!['call-limit','model-busy'].includes(result.skipped))return result;deferred=result;}
@@ -88,7 +91,7 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
      // The existing reader enforces public URLs, byte limits and immutable materials.
      topic=await research.readMaterial(topic.id,{version:topic.version,url:current(row).url,stance:'unverified',family:'other',step:'fact',interpretation:'自动读取候选新闻来源；事实、公司影响及正文完整性仍待复核'},()=>{valid();if(owned.configuration.automatic)setState(read(row.id),'preparing',{token:context.token,preparedTopicVersion:topic.version+1});});
     }
-    transaction(()=>{valid();setState(read(row.id),'ready',{reason:null,preparedTopicVersion:topic.version});});
+    transaction(()=>{valid();setState(read(row.id),'ready',{reason:null,preparationFailure:null,preparedTopicVersion:topic.version});});
     const relationPlan=!owned.configuration.automatic&&relations&&!JSON.parse(read(row.id).payload).relationCoverage?relations.plan(row,topic):null;
     const prepared=JSON.parse(read(row.id).payload),eventPlan=events&&prepared.configuration.extractEvents&&!prepared.eventJobId?events.plan(row,topic):null;
     if(prepared.configuration.automatic){
@@ -108,7 +111,7 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
     context.assertActive();guard();
     if(error.message==='已有模型研判正在运行，请等待或取消后再试')return {skipped:'model-busy'};
     const unavailable=error.code==='SOURCE_READ_UNAVAILABLE';
-    transaction(()=>{const latest=read(row.id);if(latest.run_id)return;const p=JSON.parse(latest.payload);setState(latest,'failed',{...(p.configuration.automatic?{nextRetryAt:now()+60000*2**Math.max(0,(p.prepareAttempts||1)-1)}:{}),reason:p.configuration.automatic?'本篇准备未完成，后台限次重试；保留输入与失败记录，其他材料继续':unavailable?'原文读取失败；保留新闻及读取失败记录，本篇不调用模型，队列继续下一篇':'自动准备未完成；检查来源、研究版本或模型配置后重试'});});
+    transaction(()=>{const latest=read(row.id);if(latest.run_id)return;const p=JSON.parse(latest.payload);setState(latest,'failed',{preparationFailure:unavailable?'source-unavailable':'preparation-incomplete',...(p.configuration.automatic?{nextRetryAt:now()+60000*2**Math.max(0,(p.prepareAttempts||1)-1)}:{}),reason:p.configuration.automatic?'本篇准备未完成，后台限次重试；保留输入与失败记录，其他材料继续':unavailable?'原文读取失败；保留新闻及读取失败记录，本篇不调用模型，队列继续下一篇':'自动准备未完成；检查来源、研究版本或模型配置后重试'});});
     if(unavailable)return {skipped:'source-unavailable',itemId:row.id,itemStatus:'failed'};
     if(JSON.parse(read(row.id).payload).configuration.automatic)return {skipped:'preparation-incomplete',itemId:row.id};
     return {error:'自动研究准备失败，原新闻和已有研究保留'};
