@@ -1,14 +1,15 @@
+import OccurrenceRecallCoverage from './OccurrenceRecallCoverage';
 import React from 'react';
 import {Button} from '../major/Primitives';
 const labels={queued:'等待调用',running:'生成中',candidate:'待复核候选',adopted:'已采纳草稿',failed:'失败待处理',interrupted:'中断待处理',cancelled:'已取消',invalidated:'依据变化已保留',completed:'系统处理完成',observing:'继续观察','no-signal':'未发现具体事项'};
 export default function PipelineEventJobs({jobs,enabled,busy,onChange}){
  return <details>
   <summary>事项拆分与续写 · {Object.entries(jobs.counts).map(([s,n])=>`${labels[s]||s} ${n}`).join(' · ')||'尚无计划'}</summary>
-  <p className="m-note">{jobs.items.some(j=>j.automatic)?'自动模式依次处理正文、事项、公司身份和五章研判。未知项进入观察；系统判断不等于人工核实。':'候选模式：需先选择材料事项，后续生成研判候选。'}启用上方选项后，新入队新闻会生成最多12个事项候选。从最多500项已选事项中召回跨报道线索，最多比较3项。未选择、排除和空结果均保留；系统研判不会创建或批准订单。</p>
+  <p className="m-note">{jobs.items.some(j=>j.automatic)?'自动模式依次处理正文、事项、公司身份和五章研判。未知项进入观察；系统判断不等于人工核实。':'候选模式：需先选择材料事项，后续生成研判候选。'}启用上方选项后，新入队新闻会生成最多12个事项候选。自动模式遍历本次全部有效事项，命中项每批3项自动续查；候选模式仍从最近500项召回并选最多3项。未选择、排除和空结果均保留；系统研判不会创建或批准订单。</p>
   {jobs.items.map(job=><article key={job.id}>
    <h4>{job.kind==='extract'?'材料拆分':job.kind==='identity'?'公司身份识别':'事项研判'} · <a href={`/?topic=${encodeURIComponent(job.topicId)}`}>{job.title}</a></h4>
    <p>{labels[job.status]||job.status}{job.automatic?' · 系统处理':''}{job.stale?' · 输入已变化，请核对原记录':''}{job.eventCount!==null&&job.eventCount!==undefined?` · ${job.eventCount} 个事项候选`:''}</p>
-   {job.relationCoverage&&<p>跨报道事项召回：{job.relationCoverage.topicsIndexed}/{job.relationCoverage.topicsTotal} 项；选取 {job.relationCoverage.selectedTopics} 项比较。未命中不代表无关，结果到自动关联比较中复核。</p>}
+   <OccurrenceRecallCoverage coverage={job.relationCoverage}/>
    {job.unresolved?.map(m=><p key={m.mentionIndex}>{m.name} · {m.reason}</p>)}
    {job.reason&&<p>{job.reason}</p>}
    {job.eventCount===0&&<p>本次未发现可支持的具体事项，保留此结果供复核。</p>}

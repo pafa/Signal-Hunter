@@ -36,6 +36,9 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
    const source=JSON.parse(row.payload),p={...(source.automatic?{automatic:true}:{}),...(previous?{resumedJobId:previous.id}:{}),sourceId:source.source.id,sourceVersion:source.source.version,sourceTitle:source.source.title,newsId:source.newsId,newsRevision:source.newsRevision,runId:row.run_id,createdAt:at()},id=digest({relation:relationId,kind:'cluster-expansion'});
    // Serialize automatic plans so later relations see the newly saved membership.
    if(p.automatic&&db.prepare("SELECT 1 FROM research_pipeline_cluster_jobs j JOIN semantic_batches b ON b.id=j.batch_id WHERE j.status='active' AND json_extract(j.payload,'$.automatic')=1 AND json_extract(b.payload,'$.state')='active'").get())return;
+   // Finish this source's recall pages before creating a complete-pair batch.
+   // Otherwise the batch and recall queue could model the same missing pair twice.
+   if(p.automatic&&(db.prepare("SELECT 1 FROM research_pipeline_relations WHERE item_id=? AND status IN ('queued','running')").get(row.item_id)||db.prepare("SELECT 1 FROM research_relation_scans WHERE item_id=? AND status='pending'").get(row.item_id)))continue;
    let cluster,run,plan,input,reason='比较依据失效或不支持同一事件';
    try{
     run=candidate(row.run_id);if(run.packet.input.left.kind!=='event'||run.packet.input.right.kind!=='event'||run.packet.input.left.id!==p.sourceId||run.packet.input.right.id!==source.target.id)throw Error();
@@ -54,11 +57,15 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
     if(cluster&&db.prepare("SELECT 1 FROM research_pipeline_cluster_jobs WHERE batch_id IS NOT NULL AND json_extract(payload,'$.sourceId')=? AND json_extract(payload,'$.clusterHash')=?").get(p.sourceId,p.clusterHash))throw Error();
     reason='完整成员的配对输入已失效，保留当前研究';
     input=cluster&&run.packet.input.right.id===p.sourceId?[...cluster.members.map(ref),ref(run.packet.input.right)]:[ref(run.packet.input.left),...(cluster?cluster.members.map(ref):[ref(run.packet.input.right)])];
+    if(p.automatic&&cluster){
+     const order=new Map(db.prepare("SELECT json_extract(payload,'$.source.id') id,rowid FROM research_relation_scans").all().map(r=>[r.id,r.rowid])),members=cluster.members.map(ref),sourceRef=ref(run.packet.input.left.id===p.sourceId?run.packet.input.left:run.packet.input.right);
+     if(order.has(p.sourceId)&&members.every(m=>order.has(m.id))){const index=members.findIndex(m=>order.get(m.id)<order.get(p.sourceId));members.splice(index<0?members.length:index,0,sourceRef);input=members;}
+    }
     plan=batches.preview({inputs:input},p.automatic?SYSTEM_RESEARCH_ACTOR:undefined);
    }catch{
     transaction(()=>{context.assertActive();db.prepare('INSERT OR IGNORE INTO research_pipeline_cluster_jobs VALUES(?,?,?,NULL,?)').run(id,relationId,'skipped',JSON.stringify({...p,reason}));});continue;
    }
-   const relatedRuns=db.prepare("SELECT run_id FROM research_pipeline_relations WHERE run_id IS NOT NULL AND json_extract(payload,'$.source.id')=? ORDER BY rowid DESC LIMIT 3").all(p.sourceId).map(r=>r.run_id);
+   const relatedRuns=(p.automatic?db.prepare("SELECT run_id FROM research_pipeline_relations WHERE run_id IS NOT NULL AND status='completed' AND (json_extract(payload,'$.source.id')=? OR json_extract(payload,'$.target.id')=?) ORDER BY rowid DESC").all(p.sourceId,p.sourceId):db.prepare("SELECT run_id FROM research_pipeline_relations WHERE run_id IS NOT NULL AND json_extract(payload,'$.source.id')=? ORDER BY rowid DESC LIMIT 3").all(p.sourceId)).map(r=>r.run_id);
    const reuseRunIds=[...new Set([row.run_id,...(cluster?.pairs||[]).map(pair=>pair.basis.runId),...relatedRuns])];
    batches.create({inputs:input,planHash:plan.planHash,requestId:id},{owner:'research-pipeline',actor:p.automatic?SYSTEM_RESEARCH_ACTOR:undefined,reuseRunIds,beforeCommit:batch=>{
     context.assertActive();guard();valid(p);
@@ -131,7 +138,7 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
    const status=p.automatic?row.status==='active'?(batch.state==='completed'?'processing':batch.state):row.status:confirmedVersion?'confirmed':row.status==='active'?batch.state:row.status;
    return {id:row.id,...p,batchId:row.batch_id,status,confirmedVersion,stale,inputCount:batch?.inputCount??null,pairCount:batch?.pairCount??null,counts:batch?.counts||null,reusedPairs:batch?.reusedPairs||0};})};},
   step(context){
-   context.assertActive();guard();scan(context);
+   context.assertActive();guard();const beforeScan=db.prepare('SELECT total_changes() n').get().n;scan(context);const scanned=db.prepare('SELECT total_changes() n').get().n!==beforeScan;
    const rows=db.prepare("SELECT * FROM research_pipeline_cluster_jobs WHERE status='active' ORDER BY rowid").all();let deferred=null;
    for(const row of rows){
     const batch=batches.get(row.batch_id),p=JSON.parse(row.payload);
@@ -150,7 +157,7 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
     }});
     if(result.ok||!['model-busy','no-queued-items'].includes(result.skipped))return result;deferred=result;
    }
-   return deferred;
+   return deferred||(scanned?{ok:true,clusterScanProgress:true}:null);
   }
  };
 }

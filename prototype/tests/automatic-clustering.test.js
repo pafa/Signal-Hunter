@@ -59,7 +59,11 @@ test('serialized system actor and mutations on a restore-locked copy are rejecte
 async function missingPairFixture(){
  let f;f=fixture({semanticRunner:p=>{if(f.calls.semantic>=10)throw Error('synthetic missing pair failure');return comparison(p);}});
  for(let i=1;i<=4;i++){f.add(i);await f.drive();}assert.equal(cluster(f).members.length,4);assert.equal(f.calls.semantic,6);
- const before=cluster(f);f.add(5);await f.drive();assert.equal(f.calls.semantic,10);const job=f.queue.snapshot().clusters.items.find(j=>j.counts?.failed);assert(job);return {f,before,job};
+ const before=cluster(f);f.add(5);await f.until(()=>!!f.store.db.prepare("SELECT 1 FROM research_pipeline_event_jobs WHERE kind='dossier' AND status='completed' AND json_extract(payload,'$.newsId')=?").get(f.news(5).id));
+ // Seed a lexical miss: this fixture deliberately recalls only three of four
+ // prior members, so the complete-pair batch must supply the missing comparison.
+ const scan=f.store.db.prepare('SELECT * FROM research_relation_scans ORDER BY rowid DESC LIMIT 1').get(),p=JSON.parse(scan.payload);p.candidates=p.candidates.slice(0,3);f.store.db.prepare("UPDATE research_relation_scans SET status='scheduled',payload=? WHERE id=?").run(JSON.stringify(p),scan.id);
+ await f.drive();assert.equal(f.calls.semantic,10);const job=f.queue.snapshot().clusters.items.find(j=>j.counts?.failed);assert(job);return {f,before,job};
 }
 test('missing complete-pair work retries under the shared budget and stops after three failures without shrinking the old cluster',async()=>{
  const {f,before,job}=await missingPairFixture();try{
@@ -146,7 +150,7 @@ for(const mode of ['source','user-edit','original-decision','archive'])test(`pen
   if(mode==='user-edit'){const t=f.service.research.get(job.sources[0].topics[0].id);f.service.research.update(t.id,{version:t.version,nextEvidence:'本人新的核验方向'});}
   if(mode==='original-decision'){const r=f.service.semanticEvents.get(before.pairs[0].basis.runId);f.service.semanticEvents.decide(r.id,{version:r.decisionVersion,action:'withdraw',note:'本人撤回原关系'});}
   if(mode==='archive')f.service.eventClusters.archive(before.id,{version:before.version,note:'本人归档',requestId:'archive-during-auto-succession'});
-  await f.step();assert.equal(currentSuccession(f).status,'invalidated');assert.equal(f.service.eventClusters.get(before.id).version,mode==='archive'?2:1);assert.equal(f.store.db.prepare('SELECT 1 FROM event_cluster_commands WHERE request_id=?').get(job.id),undefined);
+  for(let turn=0;turn<5&&f.queue.snapshot().clusters.items.find(j=>j.id===job.id)?.status!=='invalidated';turn++)await f.step();assert.equal(f.queue.snapshot().clusters.items.find(j=>j.id===job.id).status,'invalidated');assert.equal(f.service.eventClusters.get(before.id).version,mode==='archive'?2:1);assert.equal(f.store.db.prepare('SELECT 1 FROM event_cluster_commands WHERE request_id=?').get(job.id),undefined);
  }finally{await f.close();}
 });
 for(const action of ['pause','cancel'])test(`automatic succession ${action} does not restart or affect other research`,async()=>{
@@ -164,8 +168,8 @@ test('pending succession resumes after restart without duplicate comparisons or 
  const dir=mkdtempSync(join(tmpdir(),'automatic-succession-')),path=join(dir,'test.sqlite');let f=fixture({path,...alternativeOptions});try{const {before,job}=await pendingSuccession(f),batch=f.service.semanticBatches.get(job.batchId),pending=batch.counts.queued,completed=batch.items.filter(i=>i.runId).map(i=>({ordinal:i.ordinal,runId:i.runId,attempts:i.attempts}));assert.equal(pending,1);f.service.controlOperation('discovery','pause');await f.close();f=fixture({path,...alternativeOptions});assert(f.service.operations().tasks.discovery.paused);await f.drive();const saved=cluster(f);assert.equal(saved.id,before.id);assert.equal(saved.version,2);assert.deepEqual(saved.history[1],before.history[0]);assert.deepEqual(f.calls,{extract:0,identity:0,dossier:0,semantic:pending});for(const item of completed){const restored=f.service.semanticBatches.get(job.batchId).items.find(i=>i.ordinal===item.ordinal);assert.equal(restored.runId,item.runId);assert.deepEqual(restored.attempts,item.attempts);}await f.drive();assert.deepEqual(cluster(f),saved);}finally{await f.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('queued revisions of both sources continue serially through retained members without losing identity',async()=>{
- const f=fixture();try{const before=await two(f);f.revise(1);f.revise(2);await f.drive(80);const after=cluster(f);assert.equal(after.id,before.id);assert.equal(after.version,3);assert.equal(after.history.length,3);assert.deepEqual(after.history.at(-1),before.history[0]);assert(after.members.every(m=>m.materialRevision===2));assert(after.health.current);assert.equal(f.queue.snapshot().clusters.items.filter(j=>j.mode==='replace'&&j.status==='completed').length,2);assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);}finally{await f.close();}
+test('queued revisions of both sources continue through complete correspondence without losing identity',async()=>{
+ const f=fixture();try{const before=await two(f);f.revise(1);f.revise(2);await f.drive(80);const after=cluster(f);assert.equal(after.id,before.id);assert.equal(after.version,2);assert.equal(after.history.length,2);assert.equal(after.replacement.mappings.length,2);assert.equal(after.replacement.correspondence.pairs.length,2);assert.deepEqual(after.history.at(-1),before.history[0]);assert(after.members.every(m=>m.materialRevision===2));assert(after.health.current);assert.equal(f.queue.snapshot().clusters.items.filter(j=>j.mode==='replace'&&j.status==='completed').length,1);assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);}finally{await f.close();}
 });
 
 test('a revised source with no new occurrence records one observation and leaves other sources running',async()=>{
@@ -246,7 +250,7 @@ for(const mode of ['source','edit','withdraw','archive'])test(`revision correspo
   if(mode==='edit'){const t=f.service.research.get(job.sources[0].topics[0].id);f.service.research.update(t.id,{version:t.version,nextEvidence:'本人保留的新方向'});}
   if(mode==='withdraw'){const r=f.service.semanticEvents.get(before.pairs[0].basis.runId);f.service.semanticEvents.decide(r.id,{version:r.decisionVersion,action:'withdraw',note:'撤销原归组'});}
   if(mode==='archive')f.service.eventClusters.archive(before.id,{version:before.version,note:'归档测试',requestId:'archive-mapping-original-cluster'});
-  await f.step();assert.equal(f.queue.snapshot().clusters.items.find(j=>j.id===job.id).status,'invalidated');assert.equal(f.store.db.prepare('SELECT count(*) n FROM event_cluster_versions WHERE cluster_id=?').get(before.id).n,mode==='archive'?2:1);
+  for(let turn=0;turn<5&&f.queue.snapshot().clusters.items.find(j=>j.id===job.id)?.status!=='invalidated';turn++)await f.step();assert.equal(f.queue.snapshot().clusters.items.find(j=>j.id===job.id).status,'invalidated');assert.equal(f.store.db.prepare('SELECT count(*) n FROM event_cluster_versions WHERE cluster_id=?').get(before.id).n,mode==='archive'?2:1);
  }finally{await f.close();}
 });
 test('revision correspondence shares quota and resumes completed pairs without a second call',async()=>{
@@ -277,4 +281,10 @@ test('historical input remains unavailable to ordinary comparisons and serialize
 });
 test('a unique revision mapping still cannot save inconsistent current members',async()=>{
  let revised=false;const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:p=>p.schema==='event-revision-pair-1'?matrixComparison(p):comparison(p,revised?'unrelated':'followup')});try{const before=await sameDocumentCluster(f);revised=true;f.revise(1);await f.drive(100);assert.equal(currentSuccession(f).status,'observing');assert(currentSuccession(f).correspondenceBatchId);assert.equal(cluster(f).snapshotHash,before.snapshotHash);assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);}finally{await f.close();}
+});
+
+test('concurrent source revisions reuse current pairs in actual adoption order after a dossier retry',async()=>{
+ let retried=false;const f=fixture({researchRunner:p=>{if(!retried&&p.input.evidence.some(e=>e.url?.endsWith('-1')&&e.materialRevision===2)){retried=true;throw Error('synthetic first-source delay');}return dossier(p);}});try{
+  const before=await two(f);f.revise(1);f.revise(2);await f.drive(35);assert(retried);f.advance(60001);await f.drive(80);const after=f.service.eventClusters.get(before.id);assert.equal(after.version,2);assert(after.health.current);assert.equal(after.replacement.mappings.length,2);assert.deepEqual(after.history.at(-1),before.history[0]);assert.equal(allClusters(f).length,1);
+ }finally{await f.close();}
 });

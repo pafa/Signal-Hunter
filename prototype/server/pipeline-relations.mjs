@@ -1,3 +1,4 @@
+import {openPipelineRecall,RECALL_PAGE_SIZE} from './pipeline-recall.mjs';
 import {SYSTEM_RESEARCH_ACTOR} from './research-actor.mjs';
 import {recallOccurrence} from './event-continuity.mjs';
 import {digest} from './codex-research.mjs';
@@ -54,38 +55,74 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
   }
   return null;
  }
- return {
-  get(id){return view(read(id));},
-  plan(item,topic,followup=null){
-   if(followup&&(!Array.isArray(followup.targets)||!followup.targets.length||followup.targets.length>3))throw Error('补充比较目标无效');
-   const recalled=followup?{items:[...new Set(followup.targets)].map(id=>({id:digest({method:'evidence-followup',source:topic.id,target:id}),right:research.get(id),reasons:[followup.reason]})),coverage:{method:'补充研究与明确原事项逐项比较'},rulesHash:'evidence-followup/1'}:topic.eventExtraction?recallOccurrence(topic,research.list()):recall(item.news_id),source={id:topic.id,version:topic.version,title:topic.title,kind:topic.eventExtraction?'event':'material'},left=inputRef(topic),seen=new Set();
-   const candidates=recalled.items.filter(c=>c.right.id!==topic.id&&c.right.status!=='archived').slice(0,3);
-   const plans=candidates.map(c=>{
-    const target=research.get(c.right.id),right=inputRef(target),p={...(item.automatic?{automatic:true}:{}),newsId:item.news_id,newsRevision:item.revision,source,target:{id:target.id,version:target.version,title:target.title,kind:target.eventExtraction?'event':'material'},candidateId:c.id,recallReasons:c.reasons,recallRulesHash:recalled.rulesHash,...(topic.eventExtraction?{clusterExpansion:'reviewed-increment-1'}:{}),createdAt:at()};
+
+ const configHash=()=>digest({model:config.model,binary:config.binary,effort:config.effort||'high',timeoutMs:config.timeoutMs??180000});
+ const policyHash=()=>fingerprint({schema:'event-pair-scoped-1',input:{},inputHash:digest({})});
+ function makePlans(item,topic,candidates,rulesHash){
+  const source={id:topic.id,version:topic.version,title:topic.title,kind:topic.eventExtraction?'event':'material'},left=inputRef(topic),seen=new Set();
+  return candidates.map(c=>{
+    let target;try{target=research.get(c.right.id);}catch{}
+    const right=target?inputRef(target):null,p={...(item.automatic?{automatic:true}:{}),newsId:item.news_id,newsRevision:item.revision,source,target:{id:c.right.id,version:c.right.version,title:c.right.title,kind:target?.eventExtraction?'event':'material'},candidateId:c.id,recallReasons:c.reasons,recallRulesHash:rulesHash,...(topic.eventExtraction?{clusterExpansion:'reviewed-increment-1'}:{}),createdAt:at()};
     let status='queued';
-    if(!left||!right){status='skipped';p.reason='两侧尚未都有保存的正文材料；未退回标题比较';}
+    if(!target||target.version!==c.right.version||target.status==='archived'){status='invalidated';p.target={id:c.right.id,version:c.right.version,title:c.right.title,kind:'event'};p.reason='召回时的目标研究已变化，保留原范围与缺口';}
+    else if(item.automatic&&db.prepare("SELECT 1 FROM research_pipeline_event_jobs WHERE topic_id=? AND json_extract(payload,'$.automatic')=1").get(target.id)&&!db.prepare("SELECT 1 FROM research_pipeline_event_jobs WHERE topic_id=? AND kind='dossier' AND status='completed'").get(target.id)){status='skipped';p.awaitingTargetDossier=true;p.reason='目标自动研判尚未完成；完成后由该事项的召回继续比较，当前保留缺口';}
+    else if(!left||!right){status='skipped';p.reason='两侧尚未都有保存的正文材料；未退回标题比较';}
     else if(refKey(left)===refKey(right)||seen.has(refKey(right))){status='skipped';p.reason='同一材料或重复材料对，不增加独立证据或模型调用';}
     else{seen.add(refKey(right));p.refs={left,right};
      try{p.packet=comparisonPacket(store,p.refs);if(topic.eventExtraction&&p.packet.input.left.documentId===p.packet.input.right.documentId){status='skipped';p.reason='同一来源文档的事项不作为跨报道比较';delete p.refs;}else p.executionHash=fingerprint(p.packet);}
      catch{status='invalidated';p.reason='保存材料已有新修订或不满足比较要求，原研究保留';delete p.refs;}
     }
-    return {id:digest({item:item.id,target:target.id}),itemId:item.id,status,payload:p};
+    return {id:digest({item:item.id,target:c.right.id}),itemId:item.id,status,payload:p};
    });
-   return {plans,coverage:{...recalled.coverage,maximumComparisons:3,recalledTopics:recalled.items.length,selectedTopics:plans.length}};
+ }
+ const persistPlans=plans=>{
+  for(const r of plans){
+   // A previous cancellation or decision is not a new queued comparison.
+   if(db.prepare('SELECT 1 FROM research_pipeline_relations WHERE id=?').get(r.id))continue;
+   if(r.status==='queued')valid({payload:JSON.stringify(r.payload)});
+   db.prepare('INSERT INTO research_pipeline_relations VALUES(?,?,?,NULL,?)').run(r.id,r.itemId,r.status,JSON.stringify(r.payload));
+  }
+ };
+ const continuation=openPipelineRecall(store,research,{now,guard,transaction,audit,policyHash,configHash,makePlans,persistPlans});
+ return {
+  get(id){return view(read(id));},
+  plan(item,topic,followup=null){
+   if(followup&&(!Array.isArray(followup.targets)||!followup.targets.length||followup.targets.length>3))throw Error('补充比较目标无效');
+   const automatic=!!item.automatic&&!!topic.eventExtraction&&!followup;
+   const recalled=followup?{items:[...new Set(followup.targets)].map(id=>({id:digest({method:'evidence-followup',source:topic.id,target:id}),right:research.get(id),reasons:[followup.reason]})),coverage:{method:'补充研究与明确原事项逐项比较'},rulesHash:'evidence-followup/1'}:topic.eventExtraction?recallOccurrence(topic,research.list(),{limit:automatic?null:500}):recall(item.news_id);
+   recalled.items=recalled.items.filter(c=>c.right.id!==topic.id&&c.right.status!=='archived');
+   if(automatic){
+    // A previous source may have found this occurrence before its dossier was
+    // ready. Preserve that match even if lexical recall is asymmetric now.
+    const seen=new Set(recalled.items.map(c=>c.right.id));let deferredMatches=0;
+    for(const row of db.prepare("SELECT payload FROM research_pipeline_relations WHERE status='skipped' AND json_extract(payload,'$.awaitingTargetDossier')=1 AND json_extract(payload,'$.target.id')=?").all(topic.id)){
+     const previous=JSON.parse(row.payload);if(seen.has(previous.source.id))continue;
+     let target;try{target=research.get(previous.source.id);}catch{continue;}
+     if(target.status!=='active'||!target.eventExtraction)continue;
+     recalled.items.push({id:digest({kind:'ready-occurrence-recall-1',source:topic.id,target:target.id,version:target.version}),right:{id:target.id,version:target.version,title:target.title,status:target.status},reasons:['先前事项已召回本项；本项系统研判完成后接续比较']});seen.add(target.id);deferredMatches++;
+    }
+    recalled.coverage={...recalled.coverage,deferredMatches};
+   }
+   const plans=makePlans(item,topic,recalled.items.slice(0,RECALL_PAGE_SIZE),recalled.rulesHash),scan=automatic?continuation.plan(item,topic,recalled):null;
+   return {plans,...(scan?{scan}:{}),coverage:{...recalled.coverage,maximumComparisons:automatic?null:3,recalledTopics:recalled.items.length,selectedTopics:plans.length,...(scan?{automatic:true,scanId:scan.id,scopeAt:scan.payload.createdAt,remainingTopics:recalled.items.length-plans.length,pageSize:RECALL_PAGE_SIZE}: {})}};
   },
   // Caller holds the model-run transaction. Existing plans are immutable on retry.
   persist(item,plan){
-   for(const r of plan.plans){if(r.status==='queued')valid({payload:JSON.stringify(r.payload)});db.prepare('INSERT OR IGNORE INTO research_pipeline_relations VALUES(?,?,?,NULL,?)').run(r.id,r.itemId,r.status,JSON.stringify(r.payload));}
+   persistPlans(plan.plans);if(plan.scan)continuation.persist(plan.scan);
    audit(item.id,'relations-planned',{coverage:plan.coverage,relationIds:plan.plans.map(r=>r.id)});
   },
+  coverage(itemId){return continuation.coverage(itemId);},
   snapshot(){const counts={};for(const r of db.prepare(`SELECT CASE WHEN r.status!='running' THEN r.status WHEN s.status='running' AND s.expires_at<? THEN 'interrupted' ELSE coalesce(s.status,r.status) END status,count(*) n FROM research_pipeline_relations r LEFT JOIN semantic_runs s ON s.id=r.run_id GROUP BY 1`).all(now()))counts[r.status]=r.n;
-   return {counts,items:db.prepare('SELECT * FROM research_pipeline_relations ORDER BY rowid DESC LIMIT 30').all().map(view),maximumComparisons:3};
+   return {counts,items:db.prepare('SELECT * FROM research_pipeline_relations ORDER BY rowid DESC LIMIT 30').all().map(view),maximumComparisons:3,automaticPageSize:RECALL_PAGE_SIZE,recall:continuation.snapshot()};
   },
   retry(id){return transaction(()=>{const row=read(id),v=view(row);if(!['failed','cancelled','interrupted'].includes(v.status))throw Error('只有失败、取消或中断比较可以重试');valid(row);db.prepare("UPDATE research_pipeline_relations SET status='queued',run_id=NULL WHERE id=?").run(id);audit(row.item_id,'relation-retry',{relationId:id,previousRun:row.run_id});return view(read(id));});},
   step(context){
    context.assertActive();guard();
    const settled=settle(context);if(settled)return settled;
-   const row=db.prepare("SELECT * FROM research_pipeline_relations WHERE status='queued' AND coalesce(json_extract(payload,'$.retryAt'),0)<=? ORDER BY rowid LIMIT 1").get(now());if(!row)return null;
+   const recovered=continuation.recover(context);
+   // One small page is admitted per lane turn; quota waits keep its cursor intact.
+   const advanced=used()<settings().dailyCalls?continuation.advance(context):false;
+   const row=db.prepare("SELECT * FROM research_pipeline_relations WHERE status='queued' AND coalesce(json_extract(payload,'$.retryAt'),0)<=? ORDER BY rowid LIMIT 1").get(now());if(!row)return recovered||advanced?{ok:true,recallProgress:true}:continuation.hasPending()&&used()>=settings().dailyCalls?{skipped:'call-limit'}:null;
    if(used()>=settings().dailyCalls)return {skipped:'call-limit'};
    if(db.prepare('SELECT 1 FROM model_job_lease WHERE expires_at>=?').get(now()))return {skipped:'model-busy'};
    let p;

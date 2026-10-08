@@ -30,7 +30,11 @@ const succession=f=>f.queue.snapshot().clusters.items.find(j=>j.batchId&&j.mode=
 test('automatic eleven-member expansion keeps all 55 pairs and resumes only pending work across quota and restart',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'large-cluster-')),path=join(dir,'research.sqlite'),opts=options(10);let f=fixture({path,...opts});
  try{
-  const before=await seed(f,10),book=f.service.paper.snapshot();f.add(2);await f.until(()=>!!expansion(f));const job=expansion(f),batch=f.service.semanticBatches.get(job.batchId);
+  const before=await seed(f,10),book=f.service.paper.snapshot();f.add(2);await f.until(()=>!!f.store.db.prepare("SELECT 1 FROM research_pipeline_event_jobs WHERE kind='dossier' AND status='completed' AND json_extract(payload,'$.newsId')=?").get(f.news(2).id));
+  // Seed a lexical miss so complete pairing, rather than the recall queue,
+  // owns seven unfinished comparisons for this quota/restart regression.
+  const scan=f.store.db.prepare('SELECT * FROM research_relation_scans ORDER BY rowid DESC LIMIT 1').get(),scope=JSON.parse(scan.payload);scope.candidates=scope.candidates.slice(0,3);f.store.db.prepare("UPDATE research_relation_scans SET status='scheduled',payload=? WHERE id=?").run(JSON.stringify(scope),scan.id);
+  await f.until(()=>!!expansion(f));const job=expansion(f),batch=f.service.semanticBatches.get(job.batchId);
   assert.equal(batch.inputCount,11);assert.equal(batch.pairCount,55);assert.equal(batch.items.filter(i=>i.reusedRunId&&before.pairs.some(p=>p.basis.runId===i.runId)).length,45);
   assert(batch.counts.queued>0);const settings=f.queue.snapshot().settings;f.queue.configure({...settings,dailyCalls:f.queue.snapshot().callsInLast24Hours});
   await f.drive(3);const paused=f.service.semanticBatches.get(batch.id),runs=paused.items.filter(i=>i.runId).map(i=>({ordinal:i.ordinal,runId:i.runId,attempts:i.attempts})),calls=f.calls.semantic;

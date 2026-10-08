@@ -82,6 +82,8 @@ export function openPipelineSuccession({store,research,semantic,batches,clusters
     if(!error.pending)observe(context,id,{automatic:true,mode:'replace',clusterId:c.id,clusterVersion:c.version,clusterHash:c.snapshotHash,clusterTitle:c.title,sourceId:replaced[0].id,sourceTitle:'来源修订 · '+c.title,sourceJobIds:ids,createdAt:at()},error.message);
     continue;
    }
+   const sourceIds=JSON.stringify(sources.flatMap(s=>s.topics.map(t=>t.id)));
+   if(db.prepare("SELECT 1 FROM research_pipeline_relations WHERE json_extract(payload,'$.source.id') IN (SELECT value FROM json_each(?)) AND status IN ('queued','running')").get(sourceIds)||db.prepare("SELECT 1 FROM research_relation_scans WHERE json_extract(payload,'$.source.id') IN (SELECT value FROM json_each(?)) AND status='pending'").get(sourceIds))continue;
    const p={automatic:true,...(resuming?{resumedJobId:originalId}:{}),mode:'replace',clusterId:c.id,clusterVersion:c.version,clusterHash:c.snapshotHash,clusterTitle:c.title,sourceId:sources[0].topics[0]?.id||replaced[0].id,sourceTitle:'来源修订 · '+c.title,newsId:sources[0].newsId,newsRevision:sources[0].newsRevision,sources,replaced:replaced.map(m=>({id:m.id,documentId:m.documentId,materialRevision:m.materialRevision})),retained:[],createdAt:at()};
    let inputs,plan,reason='原归组决定、当前材料或成员分配已有变化';
    try{
@@ -89,7 +91,9 @@ export function openPipelineSuccession({store,research,semantic,batches,clusters
     p.retained=c.members.filter(m=>!replaced.some(r=>r.id===m.id)).map(m=>({id:m.id,eventHash:digest(eventComparisonSnapshot(db,ref(m)))}));
     p.phase=!p.retained.length||new Set(p.replaced.map(m=>m.documentId)).size!==p.replaced.length?'correspondence':'current';
     // Match the original new-source-first comparison direction so valid runs reuse their decisions.
-    inputs=[...sources.flatMap(s=>s.topics.map(ref)),...p.retained.map(ref)];
+    const newInputs=sources.flatMap(s=>s.topics.map(ref)),order=new Map(db.prepare("SELECT json_extract(payload,'$.source.id') topic_id,rowid FROM research_relation_scans ORDER BY rowid").all().map(r=>[r.topic_id,r.rowid]));
+    newInputs.sort((a,b)=>(order.get(b.id)||0)-(order.get(a.id)||0)||a.id.localeCompare(b.id));
+    inputs=[...newInputs,...p.retained.map(ref)];
     reason='修订后没有完整事项，保留观察，不截断候选';if(inputs.length<2||sources.some(s=>!s.topics.length))throw Error();
     reason='新旧材料或成员依据已经变化';valid(p);
     if(p.phase==='correspondence'){p.currentInputs=inputs;p.revision={clusterId:c.id,clusterVersion:c.version,clusterHash:c.snapshotHash};inputs=[...p.replaced.map(ref),...sources.flatMap(s=>s.topics.map(ref))];plan=batches.previewRevision({inputs},p.revision,SYSTEM_RESEARCH_ACTOR);}
@@ -106,7 +110,8 @@ export function openPipelineSuccession({store,research,semantic,batches,clusters
  function advanceMapping(context,row,p,batch,beforeCommit){
   const evidence=revisionMappingResult(batch,semantic);if(!evidence)return null;
   const next={...p,phase:'current',correspondenceBatchId:batch.id,correspondenceHash:digest(evidence),mappings:evidence.mappings},plan=batches.preview({inputs:p.currentInputs},SYSTEM_RESEARCH_ACTOR);
-  return batches.create({inputs:p.currentInputs,planHash:plan.planHash,requestId:digest({job:row.id,phase:'current'})},{owner:'research-pipeline',actor:SYSTEM_RESEARCH_ACTOR,beforeCommit:current=>{
+  const ids=JSON.stringify(p.currentInputs.map(r=>r.id)),reuseRunIds=db.prepare("SELECT run_id FROM research_pipeline_relations WHERE run_id IS NOT NULL AND json_extract(payload,'$.source.id') IN (SELECT value FROM json_each(?)) AND json_extract(payload,'$.target.id') IN (SELECT value FROM json_each(?)) ORDER BY rowid DESC").all(ids,ids).map(r=>r.run_id);
+  return batches.create({inputs:p.currentInputs,planHash:plan.planHash,requestId:digest({job:row.id,phase:'current'})},{owner:'research-pipeline',actor:SYSTEM_RESEARCH_ACTOR,reuseRunIds,beforeCommit:current=>{
    beforeCommit();valid(next);db.prepare('UPDATE research_pipeline_cluster_jobs SET batch_id=?,payload=? WHERE id=?').run(current.id,JSON.stringify(next),row.id);audit(row.id,'automatic-succession-mapped',{clusterId:p.clusterId,mappingBatchId:batch.id,batchId:current.id,mappings:evidence.mappings});
   }});
  }

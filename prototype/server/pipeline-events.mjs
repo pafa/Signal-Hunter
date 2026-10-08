@@ -45,7 +45,7 @@ export function openPipelineEvents(store,research,models,extractions,{config={},
   }catch{stale=true;}
   return {id:row.id,itemId:row.item_id,topicId:row.topic_id,kind:row.kind,title:p.title,status:row.status==='running'?(run?.status||row.status):row.status,automatic:!!p.automatic,retryAt:p.retryAt||null,identityOutcome:p.identityOutcome||null,unresolved:p.unresolved||[],runId:row.run_id,stale,
    reason:p.reason||run?.failure?.message||null,eventCount:row.kind==='extract'&&run?.status==='candidate'&&!run.stale?run.candidate.decomposition.events.length:null,
-   relationCoverage:p.relationCoverage||null,parentJobId:p.parentJobId||null,createdAt:p.createdAt,attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
+   relationCoverage:relations?.coverage(row.id)||p.relationCoverage||null,parentJobId:p.parentJobId||null,createdAt:p.createdAt,attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
  }
  const insert=(row,p)=>db.prepare('INSERT INTO research_pipeline_event_jobs VALUES(?,?,?,?,?,NULL,?)').run(row.id,row.item_id,row.topic_id,row.kind,row.status,JSON.stringify(p));
  const childPlan=(parent,topic,kind,origin)=>{
