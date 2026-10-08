@@ -36,16 +36,8 @@ export function synthesisPacket(cluster,members,{version,generatedAt,priorSynthe
  return validatePacket({schema:PACKET_VERSION,analysisMode:'assistant-review-required',generatedAt,input,inputHash:digest(input)});
 }
 
-export function openEventSynthesis(store,research,clusters,models,{config={},now=Date.now,guard,transaction,audit,used,settings}={}){
- const db=store.db,at=()=>new Date(now()).toISOString();
- db.exec(`CREATE TABLE IF NOT EXISTS event_cluster_research(id TEXT PRIMARY KEY,cluster_id TEXT NOT NULL,version INTEGER NOT NULL,basis_hash TEXT NOT NULL,execution_hash TEXT NOT NULL,status TEXT NOT NULL,run_id TEXT,payload TEXT NOT NULL,UNIQUE(cluster_id,version),UNIQUE(cluster_id,basis_hash,execution_hash));
- CREATE INDEX IF NOT EXISTS event_cluster_research_history ON event_cluster_research(cluster_id,version DESC);`);
- const executionHash=()=>digest({model:config.model,binary:config.binary,effort:config.effort||'high',timeout:config.timeoutMs??180000,prompt:CODEX_PROMPT_VERSION,schema:CODEX_SCHEMA_VERSION,synthesis:EVENT_SYNTHESIS_PROMPT_VERSION});
- const read=id=>{const row=db.prepare('SELECT * FROM event_cluster_research WHERE id=?').get(id);if(!row)throw Error('事件综合研判不存在');return row;};
- const rows=id=>db.prepare('SELECT * FROM event_cluster_research WHERE cluster_id=? ORDER BY version DESC').all(id);
- const payload=row=>JSON.parse(row.payload);
- const set=(row,status,extra={})=>{db.prepare('UPDATE event_cluster_research SET status=?,payload=? WHERE id=?').run(status,JSON.stringify({...payload(row),...extra,updatedAt:at()}),row.id);audit(row.id,`automatic-synthesis-${status}`,{clusterId:row.cluster_id,title:payload(row).title,...extra});};
- function basis(id){
+export function eventSynthesisBasis(store,research,clusters,id){
+ const db=store.db;
   const cluster=clusters.get(id);
   if(cluster.actor?.kind!=='system')throw Error('此事件由本人归组，当前自动综合只处理系统事件；各篇原研究仍可查看');
   if(cluster.status!=='active'||!cluster.health.current||cluster.members.length<2||cluster.members.some(m=>m.kind!=='event'))throw Error('当前事件归属或比较依据无效，暂不生成当前综合结果');
@@ -58,6 +50,16 @@ export function openEventSynthesis(store,research,clusters,models,{config={},now
   });
   return {cluster,members,hash:digest({cluster:cluster.snapshotHash,members:members.map(m=>({id:m.topic.id,version:m.topic.version,inputHash:m.packet.inputHash,eventHash:digest(m.scope)}))})};
  }
+
+export function openEventSynthesis(store,research,clusters,models,{config={},now=Date.now,guard,transaction,audit,used,settings}={}){
+ const db=store.db,at=()=>new Date(now()).toISOString(),basis=id=>eventSynthesisBasis(store,research,clusters,id);
+ db.exec(`CREATE TABLE IF NOT EXISTS event_cluster_research(id TEXT PRIMARY KEY,cluster_id TEXT NOT NULL,version INTEGER NOT NULL,basis_hash TEXT NOT NULL,execution_hash TEXT NOT NULL,status TEXT NOT NULL,run_id TEXT,payload TEXT NOT NULL,UNIQUE(cluster_id,version),UNIQUE(cluster_id,basis_hash,execution_hash));
+ CREATE INDEX IF NOT EXISTS event_cluster_research_history ON event_cluster_research(cluster_id,version DESC);`);
+ const executionHash=()=>digest({model:config.model,binary:config.binary,effort:config.effort||'high',timeout:config.timeoutMs??180000,prompt:CODEX_PROMPT_VERSION,schema:CODEX_SCHEMA_VERSION,synthesis:EVENT_SYNTHESIS_PROMPT_VERSION});
+ const read=id=>{const row=db.prepare('SELECT * FROM event_cluster_research WHERE id=?').get(id);if(!row)throw Error('事件综合研判不存在');return row;};
+ const rows=id=>db.prepare('SELECT * FROM event_cluster_research WHERE cluster_id=? ORDER BY version DESC').all(id);
+ const payload=row=>JSON.parse(row.payload);
+ const set=(row,status,extra={})=>{db.prepare('UPDATE event_cluster_research SET status=?,payload=? WHERE id=?').run(status,JSON.stringify({...payload(row),...extra,updatedAt:at()}),row.id);audit(row.id,`automatic-synthesis-${status}`,{clusterId:row.cluster_id,title:payload(row).title,...extra});};
  function valid(row){
   const p=payload(row);if(executionHash()!==row.execution_hash||basis(row.cluster_id).hash!==row.basis_hash||p.packet?.inputHash!==p.inputHash)throw Error('事件成员、材料、研究或模型配置已有变化');
   validatePacket(p.packet);return p;

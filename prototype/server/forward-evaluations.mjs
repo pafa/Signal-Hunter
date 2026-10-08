@@ -1,8 +1,9 @@
+import {eventSynthesisBasis,synthesisPacket} from './event-synthesis.mjs';
 import {claimsOf} from '../shared/claims.mjs';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {buildEvaluationBaseline,collectEvaluationSources} from './evaluation-baseline.mjs';
-import {digest,codexPrompt,CODEX_PROMPT_VERSION,CODEX_DRAFT_SCHEMA,CODEX_SCHEMA_VERSION,codexDraftSchema} from './codex-research.mjs';
+import {digest,codexPrompt,CODEX_PROMPT_VERSION,CODEX_DRAFT_SCHEMA,CODEX_SCHEMA_VERSION,EVENT_SYNTHESIS_PROMPT_VERSION,codexDraftSchema} from './codex-research.mjs';
 import {validateCandidate as validateModelCandidate} from './model-research-runs.mjs';
 import {immutableMaterialSnapshot} from './research-materials.mjs';
 import {forwardEligibility,evaluationTime,evaluationMemberKeys} from '../shared/evaluation.mjs';
@@ -12,6 +13,8 @@ let loadedSourceHash=null;
 try{loadedSourceHash=digest(collectEvaluationSources(root));}catch{/* A minimal runtime can start, but cannot freeze a complete source baseline. */}
 const same=(a,b)=>(a.kind||'news')===(b.kind||'news')&&a.id===b.id&&a.revision===b.revision;
 const stateKey='forward_evaluation_baseline';
+const subjectOf=run=>run.subject||'research';
+const synthesisScope=input=>({clusterId:input.clusterId,clusterVersion:input.clusterVersion,clusterHash:input.clusterHash,version:input.version,memberResearch:input.members.map(m=>({topicId:m.topicId,topicVersion:m.topicVersion,inputHash:m.inputHash})),priorVersion:input.priorSynthesis?.version||null,inputHash:digest(input)});
 const guarded=value=>({...value,snapshotHash:digest(value)});
 const checked=value=>{const {snapshotHash,...data}=value;if(snapshotHash!==digest(data))throw new Error('前向档案指纹不符');return value;};
 export function openForwardEvaluations(store,research,clusters,{enabled=false,config={},now=Date.now}={}){
@@ -22,7 +25,7 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
  const recipe=()=>({provider:'local-codex-cli',binary:config.binary||null,model:config.model||null,effort:config.effort||'high',timeoutMs:config.timeoutMs??180000,promptVersion:CODEX_PROMPT_VERSION,schemaHash:digest(CODEX_DRAFT_SCHEMA),schemaVersion:CODEX_SCHEMA_VERSION});
  const active=()=>db.prepare('SELECT value FROM settings WHERE key=?').get(stateKey)?.value||null;
  const baseline=id=>{const row=db.prepare('SELECT payload FROM forward_baselines WHERE id=?').get(id);if(!row)throw new Error('前向基线不存在');return checked(JSON.parse(row.payload));};
- const brief=b=>({id:b.id,title:b.title,frozenAt:b.baseline.frozenAt,rulesHash:b.baseline.rulesHash,sourceHash:b.sourceHash,execution:b.execution,forwardEligible:false});
+ const brief=b=>({id:b.id,title:b.title,frozenAt:b.baseline.frozenAt,rulesHash:b.baseline.rulesHash,sourceHash:b.sourceHash,execution:b.execution,subjects:b.subjects||['research'],forwardEligible:false});
  const api={
   list(){return {enabled,activeBaselineId:active(),totalBaselines:db.prepare('SELECT count(*) n FROM forward_baselines').get().n,totalRecords:db.prepare('SELECT count(*) n FROM forward_captures').get().n,baselines:db.prepare('SELECT payload FROM forward_baselines ORDER BY rowid DESC LIMIT 50').all().map(r=>brief(checked(JSON.parse(r.payload))))};},
   baseline,
@@ -45,8 +48,8 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
     else{
      const b=buildEvaluationBaseline(db,root,{frozenAt:new Date(now()).toISOString()}),execution=recipe();
      if(digest(b.sources)!==loadedSourceHash)throw new Error('源码已变化，请重启候选服务后冻结基线');
-     b.configuration.modelExecution=execution;b.configuration.scope='服务端冻结持久研究配置和指定模型执行参数；不采集凭据或继承的进程环境';b.rulesHash=digest({sources:b.sources,configuration:b.configuration});
-     saved=guarded({id:randomUUID(),title:data.title.trim(),baseline:b,execution,sourceHash:digest(b.sources)});
+     b.configuration.modelExecution=execution;b.configuration.forwardCaptureSubjects=['research','event-cluster'];b.configuration.scope='服务端冻结持久研究配置和指定模型执行参数；不采集凭据或继承的进程环境';b.rulesHash=digest({sources:b.sources,configuration:b.configuration});
+     saved=guarded({id:randomUUID(),title:data.title.trim(),baseline:b,execution,subjects:['research','event-cluster'],sourceHash:digest(b.sources)});
      db.prepare('INSERT INTO forward_baselines VALUES(?,?,?,?)').run(saved.id,data.requestId,requestHash,JSON.stringify(saved));
      db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(stateKey,saved.id);
     }
@@ -57,17 +60,30 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
   // Called inside the model run/lease transaction, before any provider invocation.
   capture(run){
    const baselineId=active();if(!baselineId)return;
-   guard();const b=baseline(baselineId),topic=research.get(run.topicId),reasons=[];
-   if(topic.version!==run.packet.input.topicVersion||research.packet(run.topicId).inputHash!==run.packet.inputHash)throw new Error('研究已更新，请刷新后再生成');
-   const execution={...recipe(),schemaHash:digest(codexDraftSchema(run.packet)),promptHash:digest(codexPrompt(run.packet))},sourceHash=digest(collectEvaluationSources(root));
+   guard();const b=baseline(baselineId),synthesis=subjectOf(run)==='event-cluster',reasons=[];
+   let topic,clusterSnapshots;
+   if(synthesis){
+    const input=run.packet.input.eventSynthesis,basis=eventSynthesisBasis(store,research,clusters,input.clusterId);
+    const current=synthesisPacket(basis.cluster,basis.members,{version:run.packet.input.topicVersion,generatedAt:run.packet.generatedAt,priorSynthesis:input.priorSynthesis});
+    if(current.inputHash!==run.packet.inputHash)throw new Error('事件综合输入已变化，请等待新版本');
+    const {history,...snapshot}=basis.cluster;clusterSnapshots=[snapshot];
+    topic={id:run.topicId,version:run.packet.input.topicVersion};
+    if(!b.subjects?.includes('event-cluster'))reasons.push('原冻结基线未包含事件综合调用');
+    if(input.priorSynthesis)reasons.push('包含先前综合判断，仅作后续版本留样');
+   }else{
+    topic=research.get(run.topicId);
+    if(topic.version!==run.packet.input.topicVersion||research.packet(run.topicId).inputHash!==run.packet.inputHash)throw new Error('研究已更新，请刷新后再生成');
+    clusterSnapshots=clusters.forResearch(topic).map(c=>{const {history,...snapshot}=clusters.get(c.id);return snapshot;});
+   }
+   const execution={...recipe(),promptVersion:CODEX_PROMPT_VERSION+(synthesis?'/'+EVENT_SYNTHESIS_PROMPT_VERSION:''),schemaHash:digest(codexDraftSchema(run.packet)),promptHash:digest(codexPrompt(run.packet))},sourceHash=digest(collectEvaluationSources(root));
    if(digest(recipe())!==digest(b.execution)||sourceHash!==b.sourceHash)reasons.push('代码或模型配置已不同于冻结基线');
    if(run.packet.input.sourceRevision)reasons.push('包含旧来源与历史判断');
    if(db.prepare('SELECT 1 FROM model_research_runs WHERE topic_id=? AND id<>?').get(run.topicId,run.id))reasons.push('该研究已有模型调用');
-   const clusterSnapshots=clusters.forResearch(topic).map(c=>{const {history,...snapshot}=clusters.get(c.id);return snapshot;});
    const selected=clusterSnapshots.length===1?clusterSnapshots[0]:null,refs=[];
-   const eventMember=topic.eventExtraction&&selected?.members.find(m=>m.kind==='event'&&m.id===topic.id);
+   if(selected?.actor?.kind==='system')reasons.push('系统事件归组尚未独立核验');
    for(const e of run.packet.input.evidence){
-    if(e.material){const m=e.material;refs.push(eventMember?.materialId===m.id&&eventMember.materialRevision===m.revision?{kind:'event',id:topic.id,revision:1,documentId:m.documentId}:{kind:'material',id:m.id,revision:m.revision,documentId:m.documentId});}
+    const eventMember=(synthesis||topic.eventExtraction)&&selected?.members.find(m=>m.kind==='event'&&m.id===(synthesis?e.memberTopicId:topic.id));
+    if(e.material){const m=e.material;refs.push(eventMember?.materialId===m.id&&eventMember.materialRevision===m.revision?{kind:'event',id:eventMember.id,revision:eventMember.revision,documentId:m.documentId}:{kind:'material',id:m.id,revision:m.revision,documentId:m.documentId});}
     else if(e.newsId)refs.push({kind:'news',id:e.newsId,revision:e.newsRevision});
     else reasons.push('存在未绑定原始来源的证据');
    }
@@ -99,13 +115,14 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
      reasons.push('同事件簇或来源已有前向调用记录');break;
     }
    }
-   const claimTimeline=db.prepare('SELECT version,recorded_at,payload FROM research_versions WHERE topic_id=? AND version<=? ORDER BY version').all(run.topicId,run.packet.input.topicVersion).map(row=>({version:row.version,recordedAt:row.recorded_at,claims:claimsOf(JSON.parse(row.payload))}));
-   const value=guarded({claimTimeline,runId:run.id,baselineId,topicId:run.topicId,topicVersion:run.packet.input.topicVersion,topicTitle:run.packet.input.title,packetHash:digest(run.packet),evidenceKeys:[...keys].sort(),record,execution,sourceHash,clusterSnapshots,inputEligibility:{eligible:reasons.length===0,reasons:[...new Set(reasons)]},forwardEligible:false,qualification:'输入准入仅供核对；尚无独立标签、结局或模型有效性验收'});
+   const claimTimeline=synthesis?[]:db.prepare('SELECT version,recorded_at,payload FROM research_versions WHERE topic_id=? AND version<=? ORDER BY version').all(run.topicId,run.packet.input.topicVersion).map(row=>({version:row.version,recordedAt:row.recorded_at,claims:claimsOf(JSON.parse(row.payload))}));
+   const value=guarded({subject:subjectOf(run),...(synthesis?{synthesis:synthesisScope(run.packet.input.eventSynthesis)}:{}),claimTimeline,runId:run.id,baselineId,topicId:run.topicId,topicVersion:run.packet.input.topicVersion,topicTitle:run.packet.input.title,packetHash:digest(run.packet),evidenceKeys:[...keys].sort(),record,execution,sourceHash,clusterSnapshots,inputEligibility:{eligible:reasons.length===0,reasons:[...new Set(reasons)]},forwardEligible:false,qualification:'输入准入仅供核对；尚无独立标签、结局或模型有效性验收'});
    db.prepare('INSERT INTO forward_captures VALUES(?,?,?,?)').run(run.id,baselineId,run.topicId,JSON.stringify(value));
   },
   get(runId){
    const row=db.prepare('SELECT payload FROM forward_captures WHERE run_id=?').get(runId);if(!row)throw new Error('前向记录不存在');const capture=checked(JSON.parse(row.payload)),b=baseline(capture.baselineId);
    const saved=db.prepare('SELECT payload FROM model_research_runs WHERE id=?').get(runId);if(!saved)throw new Error('前向记录缺少原模型调用');const run=JSON.parse(saved.payload),reasons=[];
+   try{if(subjectOf(run)!==(capture.subject||'research')||capture.subject==='event-cluster'&&digest(capture.synthesis)!==digest(synthesisScope(run.packet.input.eventSynthesis)))throw Error();}catch{reasons.push('调用对象或综合成员与冻结档案不符');}
    if(digest(run.packet)!==capture.packetHash||run.model!==capture.execution.model||run.effort!==capture.execution.effort||run.topicId!==capture.topicId||run.packet.input.topicVersion!==capture.topicVersion||digest(run.packet.input)!==capture.record.inputHash||run.packet.inputHash!==capture.record.inputHash||run.createdAt!==capture.record.decisionAt||b.baseline.rulesHash!==capture.record.rulesHash)reasons.push('模型调用或冻结输入与前向记录不符');
    const trace=run.candidate?.trace||run.failure?.trace;
    if(run.candidate){try{validateModelCandidate(run.candidate,run.packet,{model:capture.execution.model,topicId:capture.topicId});}catch{reasons.push('原模型候选完整性校验失败');}}
@@ -113,7 +130,7 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
    if(trace?.promptHash)for(const key of ['model','effort','promptVersion','promptHash','schemaHash',...(capture.execution.schemaVersion?['schemaVersion']:[])])if(trace[key]!==capture.execution[key])reasons.push('实际模型执行与冻结配置不符');
    return {...capture,modelStatus:run.status,resultTrace:trace||null,executionVerified:!!trace?.promptHash&&reasons.length===0,integrity:{valid:reasons.length===0,reasons:[...new Set(reasons)]},forwardEligible:false};
   },
-  records(){return db.prepare('SELECT run_id FROM forward_captures ORDER BY rowid DESC LIMIT 100').all().map(({run_id})=>{const c=api.get(run_id);return {runId:c.runId,baselineId:c.baselineId,topicId:c.topicId,topicVersion:c.topicVersion,topicTitle:c.topicTitle,modelStatus:c.modelStatus,inputEligibility:c.inputEligibility,integrity:c.integrity,forwardEligible:false};});}
+  records(){return db.prepare('SELECT run_id FROM forward_captures ORDER BY rowid DESC LIMIT 100').all().map(({run_id})=>{const c=api.get(run_id);return {subject:c.subject||'research',runId:c.runId,baselineId:c.baselineId,topicId:c.topicId,topicVersion:c.topicVersion,topicTitle:c.topicTitle,modelStatus:c.modelStatus,inputEligibility:c.inputEligibility,integrity:c.integrity,forwardEligible:false};});}
  };
  return api;
 }

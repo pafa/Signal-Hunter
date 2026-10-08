@@ -59,7 +59,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
     claimModelLease(db,run.id,now(),timeoutMs+30000);
     db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run.id,topicId,run.status,run.createdAt,now()+timeoutMs+30000,JSON.stringify(run));
     if(requestId)db.prepare('INSERT INTO model_research_requests VALUES(?,?,?,?,?)').run(requestId,topicId,version,run.id,packet.inputHash);
-    if(!systemPacket)onStart(run);beforeCommit(run);db.exec('COMMIT');
+    onStart(run);beforeCommit(run);db.exec('COMMIT');
    }catch(error){db.exec('ROLLBACK');throw error;}
    const controller=new AbortController();
    const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(result=>{
