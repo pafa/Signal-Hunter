@@ -1,3 +1,5 @@
+import {revisionMappingResult,comparisonBasis} from './revision-comparison.mjs';
+import {validateComparisonCandidate} from './semantic-events.mjs';
 import {researchActor} from './research-actor.mjs';
 import {clusterResearchHistory} from './event-cluster-lineage.mjs';
 import {randomUUID} from 'node:crypto';
@@ -31,6 +33,7 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
  const health=record=>{
   const {snapshotHash,...value}=record;
   if(snapshotHash!==digest(value))return {current:false,reason:'事件簇快照校验失败，保留记录供核对'};
+  for(const pair of record.replacement?.correspondence?.pairs||[]){try{const run=semantic.get(pair.basis.runId);validateComparisonCandidate(run.candidate,run.packet,run.model);if(run.status!=='candidate'||!run.decision||run.decision.runId!==run.id||run.decision.action!=='accept'||digest(comparisonBasis(run))!==digest(pair.basis))throw Error();}catch{return {current:false,reason:'修订对应的比较或决定已有变化，原事件与历史保留'};}}
   if(record.status==='archived')return {current:false,reason:'已归档；成员分配已释放，历史仍保留'};
   for(const pair of record.pairs){try{const run=semantic.get(pair.basis.runId);if(pairState(run)!=='same'||digest(basis(run))!==digest(pair.basis))throw Error();}catch{return {current:false,reason:'输入修订或比较决定变化，原事件簇与成员保留，需重新核对'};}}
   return {current:true,reason:'成员版本与全部组内比较仍匹配；不等于事实已核实'};
@@ -54,7 +57,7 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
  };
  const groupPairs=group=>group.pairs.map(p=>({left:comparisonSummary(group.members[group.indices.indexOf(p.left)]),right:comparisonSummary(group.members[group.indices.indexOf(p.right)]),basis:p.basis}));
  const replacementPlan=(id,input)=>{
-  if(!keys(input,'batchId,groupId,version,replacements')||!text(input.batchId,80)||!text(input.groupId,80)||!Number.isSafeInteger(input.version)||input.version<1||!Array.isArray(input.replacements)||!input.replacements.length||input.replacements.length>10)fail(7);
+  if(!keys(input,'batchId,groupId,version,replacements')&&!keys(input,'batchId,correspondenceBatchId,groupId,version,replacements')||!text(input.batchId,80)||!text(input.groupId,80)||!Number.isSafeInteger(input.version)||input.version<1||!Array.isArray(input.replacements)||!input.replacements.length||input.replacements.length>10)fail(7);
   const old=read(id),{snapshotHash,...oldValue}=old;
   if(snapshotHash!==digest(oldValue))fail(8);
   if(old.status!=='active'||old.version!==input.version)fail(5);
@@ -71,12 +74,17 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
   }
   if(missing.length!==mappings.length)fail(7);
   mappings.sort((a,b)=>a.before.id.localeCompare(b.before.id));
-  const value={clusterId:id,version:old.version,previousSnapshotHash:snapshotHash,batchId:input.batchId,groupId:group.id,groupHash:group.hash,planHash:preview.planHash,mappings,members:group.members,pairs:groupPairs(group)};
+  let correspondence=null;
+  if(input.correspondenceBatchId){
+   correspondence=revisionMappingResult(batches.get(input.correspondenceBatchId),semantic);
+   if(!correspondence||correspondence.revision.clusterId!==id||correspondence.revision.clusterHash!==snapshotHash||correspondence.revision.clusterVersion!==old.version||digest(correspondence.mappings.slice().sort((a,b)=>a.beforeId.localeCompare(b.beforeId)))!==digest(input.replacements.slice().sort((a,b)=>a.beforeId.localeCompare(b.beforeId))))fail(8);
+  }
+  const value={...(correspondence?{correspondence}:{}),clusterId:id,version:old.version,previousSnapshotHash:snapshotHash,batchId:input.batchId,groupId:group.id,groupHash:group.hash,planHash:preview.planHash,mappings,members:group.members,pairs:groupPairs(group)};
   return {...value,previewHash:digest(value)};
  };
  const api={
   preview(batchId){
-   const batch=batches.get(batchId),members=batch.inputs.map(comparisonSummary);
+   const batch=batches.get(batchId);if(batch.revision)throw Error('新旧修订对照不能直接作为当前事件归组');const members=batch.inputs.map(comparisonSummary);
    const pairs=batch.items.map(item=>{
     const run=item.runId?semantic.get(item.runId):null;
     const matching=run&&exact(run.packet.input.left,members[item.left])&&exact(run.packet.input.right,members[item.right]);
@@ -113,16 +121,16 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
   replacementPreview(id,input){return replacementPlan(id,input);},
   replace(id,input,actor,beforeCommit=()=>{}){
    const provenance=researchActor(actor);
-   if(!keys(input,'batchId,groupId,version,replacements,previewHash,note,requestId')||!text(input.previewHash,80)||!text(input.note,1200)||!Array.isArray(input.replacements))fail(7);
+   if(!keys(input,'batchId,groupId,version,replacements,previewHash,note,requestId')&&!(actor&&keys(input,'batchId,correspondenceBatchId,groupId,version,replacements,previewHash,note,requestId'))||!text(input.previewHash,80)||!text(input.note,1200)||!Array.isArray(input.replacements))fail(7);
    // Normalize command fields so retries do not depend on JSON property or mapping order.
-   const normalized={batchId:input.batchId,groupId:input.groupId,version:input.version,replacements:input.replacements.map(m=>{
+   const normalized={...(input.correspondenceBatchId?{correspondenceBatchId:input.correspondenceBatchId}:{}),batchId:input.batchId,groupId:input.groupId,version:input.version,replacements:input.replacements.map(m=>{
     if(!keys(m,'beforeId,afterId')||!text(m.beforeId,80)||!text(m.afterId,80))fail(7);return {beforeId:m.beforeId,afterId:m.afterId};
    }).sort((a,b)=>a.beforeId.localeCompare(b.beforeId)),previewHash:input.previewHash,note:input.note.trim(),requestId:input.requestId};
    return command('replace',id,normalized,()=>{
-    const {batchId,groupId,version,replacements}=normalized,plan=replacementPlan(id,{batchId,groupId,version,replacements});
+    const {batchId,groupId,version,replacements,correspondenceBatchId}=normalized,plan=replacementPlan(id,{batchId,groupId,version,replacements,...(correspondenceBatchId?{correspondenceBatchId}:{})});
     if(plan.previewHash!==normalized.previewHash)fail(1);
     const old=read(id),at=new Date(now()).toISOString();
-    const record={...provenance,id,version:old.version+1,status:'active',title:old.title,note:normalized.note,confirmedAt:old.confirmedAt,updatedAt:at,algorithm,method:actor?'system-model-event-succession':'human-reviewed-event-succession',batchId,planHash:plan.planHash,groupHash:plan.groupHash,members:plan.members,pairs:plan.pairs,previousVersion:old.version,replacement:{previousSnapshotHash:plan.previousSnapshotHash,previewHash:plan.previewHash,mappings:plan.mappings,method:actor?'system-complete-pair-same-document-new-revision':'human-reviewed-same-document-new-revision'}};
+    const record={...provenance,id,version:old.version+1,status:'active',title:old.title,note:normalized.note,confirmedAt:old.confirmedAt,updatedAt:at,algorithm,method:actor?'system-model-event-succession':'human-reviewed-event-succession',batchId,planHash:plan.planHash,groupHash:plan.groupHash,members:plan.members,pairs:plan.pairs,previousVersion:old.version,replacement:{...(plan.correspondence?{correspondence:plan.correspondence}:{}),previousSnapshotHash:plan.previousSnapshotHash,previewHash:plan.previewHash,mappings:plan.mappings,method:actor?'system-complete-pair-same-document-new-revision':'human-reviewed-same-document-new-revision'}};
     beforeCommit({id,version:record.version});return persist(record);
    },provenance);
   },

@@ -99,9 +99,13 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
   }
   if(batch.state!=='completed'||batch.items.some(i=>['failed','interrupted'].includes(i.status)))return null;
   if(p.mode==='replace'){
+   if(p.phase==='correspondence'){
+    const next=succession.advanceMapping(context,row,p,batch,()=>active(context,row,p));
+    return next?{ok:true,clusterJobId:row.id,phase:'current'}:finish(context,row,p,'observing','新旧事项对照未形成完整且唯一的一一对应；保留旧事件与研究，其他来源继续');
+   }
    const replacement=succession.replacement(p,batch);
    if(!replacement)return finish(context,row,p,'observing','新版事项与保留成员不一致或对应不唯一；保留旧事件身份和全部研究，不强行延续');
-   clusters.replace(p.clusterId,{...replacement,note:'系统核对新版全部事项与保留成员，唯一对应后延续同一事件；原研究、比较与成员历史保留，事实仍未核实。',requestId:row.id},SYSTEM_RESEARCH_ACTOR,saved=>{
+   clusters.replace(p.clusterId,{...replacement,note:'系统核对新旧对应及新版完整成员，唯一对应后延续同一事件；原研究、比较与成员历史保留，事实仍未核实。',requestId:row.id},SYSTEM_RESEARCH_ACTOR,saved=>{
     active(context,row,p);
     db.prepare("UPDATE research_pipeline_cluster_jobs SET status='completed',payload=? WHERE id=?").run(JSON.stringify({...p,savedVersion:saved.version,reason:'来源修订已自动延续；原事件身份与研究历史保留'}),row.id);
     audit(row.id,'automatic-succession-completed',{clusterId:saved.id,version:saved.version,batchId:batch.id});

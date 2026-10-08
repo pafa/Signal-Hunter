@@ -12,7 +12,7 @@ function evidenceIds(topic,record){
   return record.kind==='material'?e.materialId===record.id&&e.materialRevision===record.revision:e.newsId===record.id&&e.newsRevision===record.revision;
  }).map(e=>e.id).sort();
 }
-const usable=run=>run.active&&run.status==='candidate'&&positive.has(run.candidate?.comparison.relation);
+const usable=run=>run.packet.schema!=='event-revision-pair-1'&&run.active&&run.status==='candidate'&&positive.has(run.candidate?.comparison.relation);
 function basis(run,source,target,sourceSide){
  const sourceEvidenceIds=evidenceIds(source,run.packet.input[sourceSide]),targetEvidenceIds=evidenceIds(target,run.packet.input[other(sourceSide)]);
  if(!usable(run)||!sourceEvidenceIds.length||!targetEvidenceIds.length)fail();

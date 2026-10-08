@@ -6,7 +6,7 @@ const fail=()=>{throw new Error(semanticErrors[11]);};
 // A reviewed occurrence has its own identity; sharing a document does not share an event.
 // Scope v1 is immutable. Editing a research note does not revise the occurrence.
 // Archival, changed material or lost provenance makes it unavailable, preserving history.
-export function eventComparisonSnapshot(db,ref){
+export function eventComparisonSnapshot(db,ref,{historical=false}={}){
  try{
   const topic=JSON.parse(db.prepare('SELECT payload FROM research_topics WHERE id=?').get(ref.id)?.payload),origin=topic.eventExtraction;
   if(topic.id!==ref.id||ref.revision!==1||topic.status!=='active'||!['material-event-review','material-event-system'].includes(topic.origin)||!origin)fail();
@@ -24,7 +24,7 @@ export function eventComparisonSnapshot(db,ref){
   if(packet.schema==='material-events-1')for(const e of checked.events)e.timeRole=e.timeEvidence?.basis==='unknown'?'unknown':'unclear';
   else if(packet.schema!=='material-events-2')fail();
   validateMaterialEvents(checked,packet);
-  const m=materialComparisonSnapshot(db,packet.input.material);
+  const m=materialComparisonSnapshot(db,packet.input.material,{historical});
   if(digest(m)!==digest(packet.input.material)||!topic.evidence.some(e=>e.materialId===m.id&&e.materialRevision===m.revision))fail();
   const initial=JSON.parse(db.prepare('SELECT payload FROM research_versions WHERE topic_id=? AND version=1').get(topic.id)?.payload);
   if(digest(initial.eventExtraction)!==digest(origin))fail();

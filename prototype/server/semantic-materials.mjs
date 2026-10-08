@@ -3,11 +3,11 @@ import {semanticErrors} from '../shared/semantic-labels.mjs';
 const fail=()=>{throw new Error(semanticErrors[9]);};
 const exists=db=>!!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='research_materials'").get();
 export const comparisonSummary=record=>{const {body,...summary}=record;return record.kind==='event'?{...summary,title:record.eventFocus.title,sourceTitle:record.sourceTitle||record.title}:summary;};
-export function materialComparisonSnapshot(db,ref){
+export function materialComparisonSnapshot(db,ref,{historical=false}={}){
  if(!exists(db))fail();
  try{
   const m=immutableMaterialSnapshot(db,ref),latest=db.prepare('SELECT MAX(revision) n FROM research_materials WHERE document_id=?').get(m.documentId).n;
-  if(latest!==ref.revision)fail();
+  if(!historical&&latest!==ref.revision)fail();
   return {kind:'material',id:m.id,documentId:m.documentId,revision:m.revision,title:m.title,url:m.url,publisher:m.sourceName,publishedAt:m.publishedAt,...(m.publicationDateEvidence?{publicationDateEvidence:m.publicationDateEvidence}:{}),...(m.extractionEvidence?{extractionEvidence:m.extractionEvidence}:{}),datePrecision:m.datePrecision,availableAt:m.availableAt,receivedAt:m.receivedAt,contentScope:m.scope,contentHash:m.contentHash,body:m.body,method:m.method,readerVersion:m.readerVersion,verification:m.verification};
  }catch{fail();}
 }

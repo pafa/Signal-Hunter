@@ -196,3 +196,79 @@ test('a revised source with no new occurrence records one observation and leaves
 test('a user edit before revision planning becomes an explicit observation instead of indefinite waiting',async()=>{
  const f=fixture();try{const before=await two(f);f.revise(1);await f.until(()=>!!f.store.db.prepare("SELECT 1 FROM research_pipeline_event_jobs WHERE kind='dossier' AND status='completed' AND json_extract(payload,'$.newsRevision')=2").get());const row=f.store.db.prepare("SELECT topic_id FROM research_pipeline_event_jobs WHERE kind='dossier' AND json_extract(payload,'$.newsRevision')=2").get(),topic=f.service.research.get(row.topic_id);f.service.research.update(topic.id,{version:topic.version,nextEvidence:'本人保留的新方向'});await f.drive();const job=currentSuccession(f);assert.equal(job.status,'observing');assert.equal(job.batchId,null);assert.match(job.reason,/本人编辑/);assert.equal(f.service.research.get(topic.id).nextEvidence,'本人保留的新方向');assert.equal(cluster(f).version,before.version);assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);}finally{await f.close();}
 });
+
+
+function multipleOccurrences(p){
+ const first=extraction(p).decomposition.events[0],second={...first,title:'第二个合成事项',action:'取消',object:'其他项目',quote:'虚构甲取消项目。'};
+ return output(p,'decomposition',{events:p.input.material.revision>1?[second,first]:[first,second],scopeNote:'两个合成事项，只验证接续引擎',missingEvidence:['真实独立质量']});
+}
+const matrixComparison=p=>comparison(p,p.schema==='event-revision-pair-1'&&p.input.left.eventFocus.object!==p.input.right.eventFocus.object?'unrelated':'followup');
+async function sameDocumentCluster(f){
+ f.add(1);await f.drive(40);const topics=f.service.research.list().filter(t=>t.eventExtraction);assert.equal(topics.length,2);
+ if(allClusters(f).length)return cluster(f);
+ const inputs=topics.map(t=>({kind:'event',id:t.id,revision:1})),plan=f.service.semanticBatches.preview({inputs});
+ const b=f.service.semanticBatches.create({inputs,planHash:plan.planHash,requestId:'seed-two-original-occurrences'});
+ for(let i=0;i<4;i++){const r=f.service.semanticBatches.step({assertActive(){}},{actor:SYSTEM_RESEARCH_ACTOR});if(r.runId)await f.service.semanticEvents.wait(r.runId);}
+ for(const item of f.service.semanticBatches.get(b.id).items){const r=f.service.semanticEvents.get(item.runId);if(!r.decision)f.service.semanticEvents.decide(r.id,{version:0,action:'accept',note:'冻结初始系统测试依据'},SYSTEM_RESEARCH_ACTOR);}
+ const group=f.service.eventClusters.preview(b.id).groups.find(g=>g.state==='ready');assert(group);
+ const saved=f.service.eventClusters.save({batchId:b.id,groupId:group.id,previewHash:group.hash,clusterId:'',version:0,title:'合成多事项原簇',note:'冻结原始测试归组，不代表真实语义正确',requestId:'seed-original-cluster-mapping'},SYSTEM_RESEARCH_ACTOR);
+ return f.service.eventClusters.get(saved.id);
+}
+test('same-document multi-occurrence revision compares the complete old-by-new matrix and preserves one-to-one history without an anchor',async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{
+  const before=await sameDocumentCluster(f),old=before.members.map(m=>f.service.research.get(m.id)),book=f.service.paper.snapshot();f.revise(1);await f.drive(100);const after=cluster(f);
+  assert.equal(after.id,before.id);assert.equal(after.version,2,JSON.stringify(f.queue.snapshot().clusters));assert(after.health.current);assert.equal(after.replacement.mappings.length,2);
+  assert(after.replacement.mappings.every(m=>m.before.eventFocus.object===m.after.eventFocus.object&&m.after.materialRevision===2));
+  assert.equal(after.replacement.correspondence.pairs.length,4);assert.deepEqual(after.history.at(-1),before.history[0]);assert.deepEqual(old.map(t=>f.service.research.get(t.id)),old);assert.deepEqual(f.service.paper.snapshot(),book);
+  const job=currentSuccession(f),batch=f.service.semanticBatches.get(job.correspondenceBatchId);assert.equal(batch.pairCount,4);assert.equal(batch.revision.clusterHash,before.snapshotHash);assert.equal(job.status,'completed');assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);assert.equal(f.service.workbenchQueue({kind:'relation'}).total,0);assert.throws(()=>f.service.eventClusters.preview(batch.id),/不能直接/);
+  assert(f.service.snapshot().overview.eventClusters[0].history.every(h=>h.currentTopicId!==h.topicId));
+ }finally{await f.close();}
+});
+for(const outcome of ['ambiguous','uncertain','unrelated','related'])test(`a ${outcome} revision matrix does not choose by order or shrink the old cluster`,async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:p=>comparison(p,p.schema==='event-revision-pair-1'?(outcome==='ambiguous'?'followup':outcome):'followup')});try{
+  const before=await sameDocumentCluster(f);f.revise(1);await f.drive(100);assert.equal(cluster(f).snapshotHash,before.snapshotHash);assert.deepEqual(cluster(f).history,before.history);assert.equal(cluster(f).health.current,false);assert.equal(currentSuccession(f).status,'observing');assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);
+ }finally{await f.close();}
+});
+
+async function pendingMatrix(f){const before=await sameDocumentCluster(f);f.revise(1);await f.until(()=>currentSuccession(f)?.phase==='correspondence'&&currentSuccession(f).batchId);return {before,job:currentSuccession(f)};}
+for(const action of ['pause','cancel'])test(`revision correspondence ${action} remains authoritative while other sources continue`,async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{const {before,job}=await pendingMatrix(f),calls=f.calls.semantic;f.service.semanticBatches.control(job.batchId,{action});f.advance(180001);await f.drive(15);assert.equal(f.calls.semantic,calls);assert.equal(currentSuccession(f).status,action==='pause'?'paused':'cancelled');assert.equal(cluster(f).snapshotHash,before.snapshotHash);f.add(2);await f.drive(60);assert.equal(f.store.db.prepare("SELECT count(*) n FROM research_pipeline_event_jobs WHERE kind='dossier' AND status='completed' AND json_extract(payload,'$.newsId')=?").get(f.news(2).id).n,2);}finally{await f.close();}
+});
+for(const mode of ['source','edit','withdraw','archive'])test(`revision correspondence rejects changed ${mode} before advancing`,async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{const {before,job}=await pendingMatrix(f);
+  if(mode==='source')f.revise(1);
+  if(mode==='edit'){const t=f.service.research.get(job.sources[0].topics[0].id);f.service.research.update(t.id,{version:t.version,nextEvidence:'本人保留的新方向'});}
+  if(mode==='withdraw'){const r=f.service.semanticEvents.get(before.pairs[0].basis.runId);f.service.semanticEvents.decide(r.id,{version:r.decisionVersion,action:'withdraw',note:'撤销原归组'});}
+  if(mode==='archive')f.service.eventClusters.archive(before.id,{version:before.version,note:'归档测试',requestId:'archive-mapping-original-cluster'});
+  await f.step();assert.equal(f.queue.snapshot().clusters.items.find(j=>j.id===job.id).status,'invalidated');assert.equal(f.store.db.prepare('SELECT count(*) n FROM event_cluster_versions WHERE cluster_id=?').get(before.id).n,mode==='archive'?2:1);
+ }finally{await f.close();}
+});
+test('revision correspondence shares quota and resumes completed pairs without a second call',async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{const {job}=await pendingMatrix(f),calls=f.calls.semantic,s=f.queue.snapshot();f.queue.configure({version:s.settings.version,dailyCalls:s.callsInLast24Hours,includeClues:false});await f.drive(20);assert.equal(f.calls.semantic,calls);assert.equal(currentSuccession(f).phase,'correspondence');assert.equal(f.service.semanticBatches.get(job.batchId).counts.candidate,1);
+ f.queue.configure({version:s.settings.version+1,dailyCalls:100,includeClues:false});await f.drive(80);assert.equal(currentSuccession(f).status,'completed');assert.equal(f.service.semanticBatches.get(job.batchId).items.flatMap(i=>i.attempts).length,4);assert.equal(f.calls.semantic-calls,4);
+ }finally{await f.close();}
+});
+test('failed revision correspondence retries three times, retains attempts and does not claim a mapping',async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:p=>{if(p.schema==='event-revision-pair-1')throw Error('synthetic revision failure');return comparison(p);}});try{const {before,job}=await pendingMatrix(f);await f.drive(20);f.advance(60001);await f.drive(20);f.advance(120001);await f.drive(40);const batch=f.service.semanticBatches.get(job.batchId);assert.equal(currentSuccession(f).status,'observing');assert(batch.items.some(i=>i.attempts.length===3));assert(batch.items.every(i=>i.attempts.length<=3));assert.equal(cluster(f).snapshotHash,before.snapshotHash);const calls=f.calls.semantic;await f.drive(10);assert.equal(f.calls.semantic,calls);}finally{await f.close();}
+});
+test('revision mapping and its next batch transition are atomic and recover without repeating model work',async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{const {job}=await pendingMatrix(f);f.store.db.exec("CREATE TRIGGER fail_mapping_transition BEFORE INSERT ON research_pipeline_audit WHEN NEW.action='automatic-succession-mapped' BEGIN SELECT RAISE(ABORT,'synthetic-transition'); END");await f.drive(25);const completed=f.service.semanticBatches.get(job.batchId);assert.equal(completed.counts.candidate,4);assert.equal(currentSuccession(f).phase,'correspondence');assert.equal(f.store.db.prepare("SELECT count(*) n FROM semantic_batches WHERE json_extract(payload,'$.requestId')=?").get(digest({job:job.id,phase:'current'})).n,0);
+ f.store.db.exec('DROP TRIGGER fail_mapping_transition');const calls=f.calls.semantic;await f.drive(40);assert.equal(currentSuccession(f).status,'completed');assert.equal(f.calls.semantic-calls,1);assert.equal(f.service.semanticBatches.get(job.batchId).items.flatMap(i=>i.attempts).length,4);
+ }finally{await f.close();}
+});
+test('a saved mapping survives restart and only its unfinished current comparison resumes',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'revision-matrix-restart-')),path=join(dir,'test.sqlite');let f=fixture({path,extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{const {before}=await pendingMatrix(f);await f.until(()=>currentSuccession(f)?.phase==='current');const job=currentSuccession(f),mapping=f.service.semanticBatches.get(job.correspondenceBatchId);f.service.controlOperation('discovery','pause');await f.close();f=fixture({path,extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});await f.drive(40);assert.equal(cluster(f).id,before.id);assert.equal(cluster(f).version,2);assert.equal(f.calls.semantic,1);assert.deepEqual(f.service.semanticBatches.get(job.correspondenceBatchId).items.map(i=>i.attempts),mapping.items.map(i=>i.attempts));assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);}finally{await f.close();rmSync(dir,{recursive:true,force:true});}
+});
+test('a many-to-one mapping is ambiguous and a missing matrix pair never proves uniqueness',async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:p=>comparison(p,p.schema==='event-revision-pair-1'&&p.input.right.eventFocus.object!=='虚构乙'?'unrelated':'followup')});try{const {before}=await pendingMatrix(f);await f.drive(60);assert.equal(currentSuccession(f).status,'observing');assert.equal(cluster(f).version,before.version);}finally{await f.close();}
+ const g=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{const {job}=await pendingMatrix(g);g.store.db.prepare('DELETE FROM semantic_batch_items WHERE batch_id=? AND ordinal=3').run(job.batchId);await g.drive(60);assert.equal(currentSuccession(g).status,'observing');assert.equal(cluster(g).version,1);}finally{await g.close();}
+});
+test('withdrawing saved revision evidence invalidates current grouping without rewriting the saved lineage',async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{await pendingMatrix(f);await f.drive(70);const saved=cluster(f),pair=saved.replacement.correspondence.pairs[0],r=f.service.semanticEvents.get(pair.basis.runId);assert(saved.health.current);f.service.semanticEvents.decide(r.id,{version:r.decisionVersion,action:'withdraw',note:'本人撤销修订对应依据'});assert.equal(cluster(f).health.current,false);assert.equal(cluster(f).snapshotHash,saved.snapshotHash);assert.deepEqual(cluster(f).history,saved.history);assert.equal(f.service.snapshot().overview.eventClusters[0].health.current,false);}finally{await f.close();}
+});
+test('historical input remains unavailable to ordinary comparisons and serialized actors cannot create revision calls',async()=>{
+ const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:matrixComparison});try{const {before,job}=await pendingMatrix(f),left={kind:'event',id:before.members[0].id,revision:1},right={kind:'event',id:job.sources[0].topics[0].id,revision:1};assert.throws(()=>f.service.semanticEvents.start({left,right}),/已变化|修订/);assert.throws(()=>f.service.semanticEvents.startRevision({left,right,revision:job.revision},()=>{},{...SYSTEM_RESEARCH_ACTOR}),/仅由/);const call=f.service.semanticBatches.get(job.batchId).items.find(i=>i.runId),run=f.service.semanticEvents.get(call.runId);assert.equal(run.packet.schema,'event-revision-pair-1');assert.equal(run.packet.input.left.materialRevision,1);assert.equal(run.packet.input.right.materialRevision,2);assert(run.packet.input.left.body);assert(run.packet.input.right.body);}finally{await f.close();}
+});
+test('a unique revision mapping still cannot save inconsistent current members',async()=>{
+ let revised=false;const f=fixture({extractionRunner:multipleOccurrences,semanticRunner:p=>p.schema==='event-revision-pair-1'?matrixComparison(p):comparison(p,revised?'unrelated':'followup')});try{const before=await sameDocumentCluster(f);revised=true;f.revise(1);await f.drive(100);assert.equal(currentSuccession(f).status,'observing');assert(currentSuccession(f).correspondenceBatchId);assert.equal(cluster(f).snapshotHash,before.snapshotHash);assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);}finally{await f.close();}
+});
