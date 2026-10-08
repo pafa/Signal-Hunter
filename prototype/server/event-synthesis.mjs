@@ -4,6 +4,7 @@ import {SYSTEM_RESEARCH_ACTOR} from './research-actor.mjs';
 import {PACKET_VERSION} from './research-materials.mjs';
 import {eventComparisonSnapshot} from './semantic-event-scopes.mjs';
 import {packetQuantities} from '../shared/source-quantities.mjs';
+import {companyAssessmentTargets} from './company-assessment.mjs';
 import {materialityReviewTargets} from './materiality-review.mjs';
 
 // Evidence aliases retain each member's interpretation without pretending that
@@ -15,7 +16,7 @@ export function synthesisPacket(cluster,members,{version,generatedAt,priorSynthe
   function refs(value){
    if(Array.isArray(value))return value.map(refs);
    if(!value||typeof value!=='object')return value;
-   return Object.fromEntries(Object.entries(value).map(([key,v])=>[key,['sourceIds','evidenceIds'].includes(key)&&Array.isArray(v)?v.map(id=>aliases.get(id)||id):refs(v)]));
+   return Object.fromEntries(Object.entries(value).map(([key,v])=>[key,['sourceIds','evidenceIds'].includes(key)&&Array.isArray(v)?v.map(id=>aliases.get(id)||id):key==='evidenceId'&&typeof v==='string'?(aliases.get(v)||v):refs(v)]));
   }
   for(const item of packet.input.evidence){
    const id=aliases.get(item.id),e={...item,id,memberTopicId:topic.id,originalEvidenceId:item.id};evidence.push(e);
@@ -32,7 +33,7 @@ export function synthesisPacket(cluster,members,{version,generatedAt,priorSynthe
   return {topicId:topic.id,topicVersion:topic.version,inputHash:packet.inputHash,title:topic.title,sourceNews,eventFocus:scope.eventFocus,evidenceIds:[...aliases.values()],priorJudgment:refs({summary:packet.input.summary,hypothesis:packet.input.hypothesis,claims:packet.input.claims,dossier:topic.dossier,nextEvidence:packet.input.nextEvidence})};
  });
  const input={topicId:`event-cluster:${cluster.id}`,topicVersion:version,title:cluster.title,eventSynthesis:{version:EVENT_SYNTHESIS_PROMPT_VERSION,clusterId:cluster.id,clusterVersion:cluster.version,clusterHash:cluster.snapshotHash,members:inputs,sourceGroups:[...sourceGroups.values()],priorSynthesis},companies:[...companies.values()],evidence};
- input.quantityEvidence=packetQuantities(evidence);input.materialityReview=materialityReviewTargets(input);
+ input.quantityEvidence=packetQuantities(evidence);input.materialityReview=materialityReviewTargets(input);input.companyAssessment=companyAssessmentTargets(input);
  return validatePacket({schema:PACKET_VERSION,analysisMode:'assistant-review-required',generatedAt,input,inputHash:digest(input)});
 }
 

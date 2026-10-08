@@ -1,3 +1,4 @@
+import {unknownCompanyAssessments} from './helpers/company-assessment-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -23,7 +24,7 @@ function identity(p){
  return {status:'candidate',reviewStatus:'unreviewed',resolution,rawOutput,trace:{model:config.model,inputHash:p.inputHash,outputHash:digest(rawOutput)}};
 }
 function dossier(p){
- const value={sections:['facts','materiality','companies','scenarios','conditions'].map(id=>({id,title:id,paragraphs:['合成研判；'+p.input.eventExtraction.event.title],sourceIds:[]})),missingEvidence:['事实及独立证据']},rawOutput=JSON.stringify(value);
+ const value={companyAssessments:unknownCompanyAssessments(p),sections:['facts','materiality','companies','scenarios','conditions'].map(id=>({id,title:id,paragraphs:['合成研判；'+p.input.eventExtraction.event.title],sourceIds:[]})),missingEvidence:['事实及独立证据']},rawOutput=JSON.stringify(value);
  return {status:'candidate',reviewStatus:'unreviewed',...value,rawOutput,trace:{model:config.model,inputHash:p.inputHash,topicId:p.input.topicId,topicVersion:p.input.topicVersion,outputHash:digest(rawOutput)}};
 }
 function fixture({path=':memory:',extractRunner=extraction,entityRunner=identity,modelRunner=dossier,reader}={}){
