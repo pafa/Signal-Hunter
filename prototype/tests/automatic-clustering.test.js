@@ -14,10 +14,10 @@ function output(packet,key,value){const rawOutput=JSON.stringify(value);return {
 function extraction(p){return output(p,'decomposition',{events:[{title:'虚构甲收购事项',actor:'虚构甲',action:'拟收购',object:'虚构乙',stage:'待核',eventTime:'未知',quote,quoteField:'body',boundaryReason:'单一具体事项',timeEvidence:{basis:'unknown',quote:'',quoteField:'none'},timeRole:'unknown'}],scopeNote:'合成材料',missingEvidence:['核验公告']});}
 function identity(p){return output(p,'resolution',{mentions:[],scopeNote:'未有确定证券身份',missingEvidence:['上市公司身份']});}
 function dossier(p){const value={sections:['facts','materiality','companies','scenarios','conditions'].map(id=>({id,title:id,paragraphs:['冻结的合成流程测试材料；未核实事实'],sourceIds:[]})),missingEvidence:['独立事实核验']},rawOutput=JSON.stringify(value);return {status:'candidate',reviewStatus:'unreviewed',...value,rawOutput,trace:{model:config.model,inputHash:p.inputHash,topicId:p.input.topicId,topicVersion:p.input.topicVersion,outputHash:digest(rawOutput)}};}
-function comparison(p,relation='followup'){const event=side=>({actor:'虚构甲',action:'拟收购',object:'虚构乙',eventTime:'未知',stage:'待核',quote:p.input[side].eventFocus.quote,quoteField:'body',timeEvidence:{basis:'unknown',quote:'',quoteField:'none'}});return output(p,'comparison',{relation,left:event('left'),right:event('right'),reason:'仅为引擎流程测试，两侧均引用冻结事项；不证明模型质量',missingEvidence:['真实公告与事实']});}
-function fixture({path=':memory:',semanticRunner=comparison}={}){
+function comparison(p,relation='followup'){const event=side=>({actor:p.input[side].eventFocus.actor,action:p.input[side].eventFocus.action,object:p.input[side].eventFocus.object,eventTime:'未知',stage:p.input[side].eventFocus.stage,quote:p.input[side].eventFocus.quote,quoteField:'body',timeEvidence:{basis:'unknown',quote:'',quoteField:'none'}});return output(p,'comparison',{relation,left:event('left'),right:event('right'),reason:'仅为引擎流程测试，两侧均引用冻结事项；不证明模型质量',missingEvidence:['真实公告与事实']});}
+function fixture({path=':memory:',semanticRunner=comparison,extractionRunner=extraction}={}){
  let clock=Date.parse(at);const store=openStore(path);assertDatabaseMode(store,'research');const calls={extract:0,identity:0,dossier:0,semantic:0};
- const service=createService(store,{mode:'research',modelConfig:config,now:()=>clock,sourceReader:async url=>({url,title:'合成公告',sourceName:'合成',body:quote+'这些文字是合成测试材料，不证明事实与投资表现。'.repeat(30),scope:'extracted-text'}),materialEventRunner:async p=>{calls.extract++;return extraction(p);},companyEntityRunner:async p=>{calls.identity++;return identity(p);},modelRunner:async p=>{calls.dossier++;return dossier(p);},semanticRunner:async p=>{calls.semantic++;return semanticRunner(p);}});
+ const service=createService(store,{mode:'research',modelConfig:config,now:()=>clock,sourceReader:async url=>({url,title:'合成公告',sourceName:'合成',body:quote+'虚构甲取消项目。'+'这些文字是合成测试材料，不证明事实与投资表现。'.repeat(30)+'材料版本 '+(store.newsById(digest('automatic-cluster-'+url.split('-').at(-1)))?.revision||1),scope:'extracted-text'}),materialEventRunner:async p=>{calls.extract++;return extractionRunner(p);},companyEntityRunner:async p=>{calls.identity++;return identity(p);},modelRunner:async p=>{calls.dossier++;return dossier(p);},semanticRunner:async p=>{calls.semantic++;return semanticRunner(p);}});
  const queue=service.researchPipeline;if(queue.snapshot().settings.version===1)queue.configure({version:1,dailyCalls:100,includeClues:false,extractEvents:true,automatic:true});
  const news=i=>({id:digest('automatic-cluster-'+i),title:`Synthetic acquisition bankruptcy report ${i}`,url:`https://example.com/synthetic-${i}`,publisher:'合成',publishedAt:at});
  const add=i=>{store.ingest([news(i)],new Date(clock).toISOString());service.research.process();};
@@ -25,7 +25,7 @@ function fixture({path=':memory:',semanticRunner=comparison}={}){
  const step=async()=>{service.controlOperation('discovery','resume');const result=await service.runOperation('discovery');await finish();return result;};
  const drive=async(n=24)=>{for(let i=0;i<n;i++)await step();return queue.snapshot();};
  const until=async predicate=>{for(let i=0;i<100;i++){if(predicate())return;const result=await step();if(result.error)assert.fail(JSON.stringify(result));}assert.fail('automatic pipeline did not reach expected state');};
- return {store,service,queue,calls,news,add,step,drive,finish,until,advance(ms){clock+=ms;},async close(){await service.close();store.close();}};
+ return {store,service,queue,calls,news,add,step,drive,finish,until,revise(i){const n=store.newsById(news(i).id);store.ingest([{...news(i),title:n.title+' revised'}],new Date(clock).toISOString());service.research.process();},advance(ms){clock+=ms;},async close(){await service.close();store.close();}};
 }
 const allClusters=f=>f.service.eventClusters.list().items;
 const cluster=f=>f.service.eventClusters.get(allClusters(f)[0].id);
@@ -117,4 +117,75 @@ test('workbench projects actual scoped cluster identity read-only and invalidate
   assert.equal(f.service.snapshot().overview.eventClusters.length,0);assert.equal(f.service.eventClusters.get(c.id).history.length,3);
   for(const id of projection[0].topicIds)assert.equal(f.service.research.get(id).status,'active');
  }finally{await f.close();}
+});
+
+
+test('automatic source revision retains the cluster ID, replaces only its old occurrence and preserves all research and history',async()=>{
+ const f=fixture();try{
+  const first=await two(f),old=f.service.research.get(first.members.find(m=>m.url.endsWith('-1')).id),book=f.service.paper.snapshot();
+  f.revise(1);await f.drive(60);const next=cluster(f);
+  assert.equal(next.id,first.id);assert.equal(next.version,2,JSON.stringify({jobs:f.queue.snapshot().clusters.items.map(j=>({mode:j.mode,status:j.status,reason:j.reason}))}));assert.equal(next.actor.kind,'system');assert.equal(next.method,'system-model-event-succession');assert(next.health.current);
+  assert.equal(f.calls.semantic,2,'reuse the existing comparison in its original direction');assert.equal(next.replacement.mappings.length,1);assert.equal(next.replacement.mappings[0].before.id,old.id);assert.equal(next.replacement.mappings[0].after.materialRevision,2);
+  assert.deepEqual(next.history[1],first.history[0]);assert.deepEqual(f.service.research.get(old.id),old);assert.deepEqual(f.service.paper.snapshot(),book);
+  assert.deepEqual(f.service.research.related(old.id).eventClusters[0].historicalVersions,[1]);assert.equal(f.service.research.related(old.id).eventClusters[0].bindingCurrent,false);
+  const job=f.queue.snapshot().clusters.items.find(j=>j.mode==='replace');assert.equal(job.status,'completed');assert.equal(job.confirmedVersion,2);assert.equal(job.stale,false);
+  assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);assert.equal(f.service.workbenchQueue({kind:'relation'}).total,0);
+  f.revise(1);await f.drive(60);const third=cluster(f);assert.equal(third.id,first.id);assert.equal(third.version,3);assert.equal(third.replacement.mappings[0].after.materialRevision,3);assert.deepEqual(third.history.slice(1),next.history);
+ }finally{await f.close();}
+});
+
+function revisedAlternatives(p){
+ const first=extraction(p).decomposition.events[0],events=p.input.material.revision>1?[{...first,title:'另一独立事项',action:'取消',object:'其他项目',quote:'虚构甲取消项目。'},first]:[first];
+ return output(p,'decomposition',{events,scopeNote:'合成多个事项',missingEvidence:['真实依据']});
+}
+test('automatic revision compares every new alternative and continues only the unique matching occurrence',async()=>{
+ const f=fixture({extractionRunner:revisedAlternatives,semanticRunner:p=>comparison(p,p.input.left.eventFocus.object===p.input.right.eventFocus.object?'followup':'unrelated')});try{
+  const before=await two(f);f.revise(1);await f.drive(80);const next=cluster(f);assert.equal(next.id,before.id);assert.equal(next.version,2);assert.equal(next.members.length,2);assert.equal(next.replacement.mappings[0].after.eventFocus.object,'虚构乙');
+  const job=f.queue.snapshot().clusters.items.find(j=>j.mode==='replace'),batch=f.service.semanticBatches.get(job.batchId);assert.equal(batch.inputCount,3);assert.equal(batch.items.length,3);assert.equal(job.confirmedVersion,2);assert.equal(job.stale,false);
+  assert(f.service.research.list().some(t=>t.title==='另一独立事项'));assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);
+ }finally{await f.close();}
+});
+for(const relation of ['uncertain','unrelated','reversal'])test(`source revision ${relation} keeps its proper continuity outcome without erasing history`,async()=>{
+ let revised=false;const f=fixture({semanticRunner:p=>comparison(p,revised?relation:'followup')});try{const before=await two(f);revised=true;f.revise(1);await f.drive(60);const after=cluster(f);assert.equal(after.version,relation==='reversal'?2:1);assert.deepEqual(after.history.at(-1),before.history[0]);if(relation!=='reversal')assert(f.queue.snapshot().clusters.items.some(j=>j.mode==='replace'&&j.status==='observing'));assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);}finally{await f.close();}
+});
+test('two plausible revised occurrences cannot choose an arbitrary successor',async()=>{
+ const f=fixture({extractionRunner:revisedAlternatives});try{const before=await two(f);f.revise(1);await f.drive(80);assert.equal(cluster(f).version,1);assert.deepEqual(cluster(f).history,before.history);assert(f.queue.snapshot().clusters.items.some(j=>j.mode==='replace'&&j.status==='observing'));}finally{await f.close();}
+});
+test('a withdrawal of original grouping evidence cannot be bypassed by a source revision',async()=>{
+ const f=fixture();try{const before=await two(f),r=f.service.semanticEvents.get(before.pairs[0].basis.runId);f.service.semanticEvents.decide(r.id,{version:r.decisionVersion,action:'withdraw',note:'本人撤回原同事件判断'});f.revise(1);await f.drive(60);assert.equal(cluster(f).version,1);assert(f.queue.snapshot().clusters.items.some(j=>j.mode==='replace'&&j.status==='observing'));assert.equal(f.service.semanticEvents.get(r.id).decision.action,'withdraw');}finally{await f.close();}
+});
+
+const currentSuccession=f=>f.queue.snapshot().clusters.items.find(j=>j.mode==='replace');
+async function pendingSuccession(f){
+ const before=await two(f);f.revise(1);
+ await f.until(()=>!!f.store.db.prepare("SELECT 1 FROM research_pipeline_cluster_jobs WHERE status='active' AND json_extract(payload,'$.mode')='replace'").get());
+ return {before,job:currentSuccession(f)};
+}
+const alternativeOptions={extractionRunner:revisedAlternatives,semanticRunner:p=>comparison(p,p.input.left.eventFocus.object===p.input.right.eventFocus.object?'followup':'unrelated')};
+for(const mode of ['source','user-edit','original-decision','archive'])test(`pending automatic succession respects ${mode} changes`,async()=>{
+ const f=fixture(alternativeOptions);try{const {before,job}=await pendingSuccession(f);
+  if(mode==='source')f.revise(1);
+  if(mode==='user-edit'){const t=f.service.research.get(job.sources[0].topics[0].id);f.service.research.update(t.id,{version:t.version,nextEvidence:'本人新的核验方向'});}
+  if(mode==='original-decision'){const r=f.service.semanticEvents.get(before.pairs[0].basis.runId);f.service.semanticEvents.decide(r.id,{version:r.decisionVersion,action:'withdraw',note:'本人撤回原关系'});}
+  if(mode==='archive')f.service.eventClusters.archive(before.id,{version:before.version,note:'本人归档',requestId:'archive-during-auto-succession'});
+  await f.step();assert.equal(currentSuccession(f).status,'invalidated');assert.equal(f.service.eventClusters.get(before.id).version,mode==='archive'?2:1);assert.equal(f.store.db.prepare('SELECT 1 FROM event_cluster_commands WHERE request_id=?').get(job.id),undefined);
+ }finally{await f.close();}
+});
+for(const action of ['pause','cancel'])test(`automatic succession ${action} does not restart or affect other research`,async()=>{
+ const f=fixture(alternativeOptions);try{const {before,job}=await pendingSuccession(f),calls=f.calls.semantic;f.service.semanticBatches.control(job.batchId,{action});f.advance(180001);await f.drive(10);assert.equal(cluster(f).version,before.version);assert.equal(f.calls.semantic,calls);assert.equal(currentSuccession(f).status,action==='pause'?'paused':'cancelled');f.add(3);await f.drive(40);assert(f.service.research.list().some(t=>t.sourceNewsId===f.news(3).id));}finally{await f.close();}
+});
+test('succession membership, history, command and completion roll back together, then resume without another call',async()=>{
+ const f=fixture(alternativeOptions);try{const {before,job}=await pendingSuccession(f),members=f.store.db.prepare('SELECT * FROM event_cluster_members ORDER BY member_key').all(),calls=f.calls.semantic,pending=f.service.semanticBatches.get(job.batchId).counts.queued;
+  f.store.db.exec("CREATE TRIGGER fail_succession_save BEFORE INSERT ON event_cluster_versions WHEN NEW.version=2 BEGIN SELECT RAISE(ABORT,'synthetic-succession'); END");await f.drive(6);
+  assert.equal(cluster(f).version,1);assert.deepEqual(cluster(f).history,before.history);assert.deepEqual(f.store.db.prepare('SELECT * FROM event_cluster_members ORDER BY member_key').all(),members);assert.equal(f.store.db.prepare('SELECT 1 FROM event_cluster_commands WHERE request_id=?').get(job.id),undefined);assert.equal(currentSuccession(f).status,'processing');assert.equal(f.calls.semantic,calls+pending);
+  f.store.db.exec('DROP TRIGGER fail_succession_save');await f.drive();assert.equal(cluster(f).version,2);assert.equal(currentSuccession(f).status,'completed');assert.equal(f.calls.semantic,calls+pending);assert.equal(cluster(f).actor.kind,'system');
+  assert.throws(()=>f.service.eventClusters.replace(before.id,{}, {...SYSTEM_RESEARCH_ACTOR}),/来源无效/);
+ }finally{await f.close();}
+});
+test('pending succession resumes after restart without duplicate comparisons or replacing old records',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'automatic-succession-')),path=join(dir,'test.sqlite');let f=fixture({path,...alternativeOptions});try{const {before,job}=await pendingSuccession(f),batch=f.service.semanticBatches.get(job.batchId),pending=batch.counts.queued,completed=batch.items.filter(i=>i.runId).map(i=>({ordinal:i.ordinal,runId:i.runId,attempts:i.attempts}));assert.equal(pending,1);f.service.controlOperation('discovery','pause');await f.close();f=fixture({path,...alternativeOptions});assert(f.service.operations().tasks.discovery.paused);await f.drive();const saved=cluster(f);assert.equal(saved.id,before.id);assert.equal(saved.version,2);assert.deepEqual(saved.history[1],before.history[0]);assert.deepEqual(f.calls,{extract:0,identity:0,dossier:0,semantic:pending});for(const item of completed){const restored=f.service.semanticBatches.get(job.batchId).items.find(i=>i.ordinal===item.ordinal);assert.equal(restored.runId,item.runId);assert.deepEqual(restored.attempts,item.attempts);}await f.drive();assert.deepEqual(cluster(f),saved);}finally{await f.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('queued revisions of both sources continue serially through retained members without losing identity',async()=>{
+ const f=fixture();try{const before=await two(f);f.revise(1);f.revise(2);await f.drive(80);const after=cluster(f);assert.equal(after.id,before.id);assert.equal(after.version,3);assert.equal(after.history.length,3);assert.deepEqual(after.history.at(-1),before.history[0]);assert(after.members.every(m=>m.materialRevision===2));assert(after.health.current);assert.equal(f.queue.snapshot().clusters.items.filter(j=>j.mode==='replace'&&j.status==='completed').length,2);assert.equal(f.service.workbenchQueue({kind:'cluster'}).total,0);}finally{await f.close();}
 });

@@ -110,7 +110,8 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
    },provenance);
   },
   replacementPreview(id,input){return replacementPlan(id,input);},
-  replace(id,input){
+  replace(id,input,actor,beforeCommit=()=>{}){
+   const provenance=researchActor(actor);
    if(!keys(input,'batchId,groupId,version,replacements,previewHash,note,requestId')||!text(input.previewHash,80)||!text(input.note,1200)||!Array.isArray(input.replacements))fail(7);
    // Normalize command fields so retries do not depend on JSON property or mapping order.
    const normalized={batchId:input.batchId,groupId:input.groupId,version:input.version,replacements:input.replacements.map(m=>{
@@ -120,8 +121,9 @@ export function openEventClusters(store,batches,semantic,{now=Date.now}={}){
     const {batchId,groupId,version,replacements}=normalized,plan=replacementPlan(id,{batchId,groupId,version,replacements});
     if(plan.previewHash!==normalized.previewHash)fail(1);
     const old=read(id),at=new Date(now()).toISOString();
-    return persist({id,version:old.version+1,status:'active',title:old.title,note:normalized.note,confirmedAt:old.confirmedAt,updatedAt:at,algorithm,method:'human-reviewed-event-succession',batchId,planHash:plan.planHash,groupHash:plan.groupHash,members:plan.members,pairs:plan.pairs,previousVersion:old.version,replacement:{previousSnapshotHash:plan.previousSnapshotHash,previewHash:plan.previewHash,mappings:plan.mappings,method:'human-reviewed-same-document-new-revision'}});
-   });
+    const record={...provenance,id,version:old.version+1,status:'active',title:old.title,note:normalized.note,confirmedAt:old.confirmedAt,updatedAt:at,algorithm,method:actor?'system-model-event-succession':'human-reviewed-event-succession',batchId,planHash:plan.planHash,groupHash:plan.groupHash,members:plan.members,pairs:plan.pairs,previousVersion:old.version,replacement:{previousSnapshotHash:plan.previousSnapshotHash,previewHash:plan.previewHash,mappings:plan.mappings,method:actor?'system-complete-pair-same-document-new-revision':'human-reviewed-same-document-new-revision'}};
+    beforeCommit({id,version:record.version});return persist(record);
+   },provenance);
   },
   archive(id,input){
    if(!keys(input,'version,note,requestId')||!Number.isSafeInteger(input.version)||input.version<1||!text(input.note,1200))fail(0);
