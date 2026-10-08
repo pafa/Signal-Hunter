@@ -72,7 +72,7 @@ test('search and queue activation are one transaction; retry does not duplicate 
 });
 
 test('restart retains finished follow-up and reuses all prior calls',async()=>{
- const dir=mkdtempSync(join(tmpdir(),'evidence-followup-')),path=join(dir,'test.sqlite');let f=fixture({path});try{await completed(f);const before=raw(f),snap=items(f);await f.close();f=fixture({path});await f.drive(5);assert.deepEqual(raw(f),before);assert.deepEqual(items(f),snap);assert.deepEqual(f.calls,{extract:0,identity:0,dossier:0,semantic:0});assert.equal(f.synthesisCalls,0);
+ const dir=mkdtempSync(join(tmpdir(),'evidence-followup-')),path=join(dir,'test.sqlite');let f=fixture({path});try{await completed(f);const before=raw(f),snap=items(f);await f.close();f=fixture({path});await f.drive(5);assert.deepEqual(raw(f),before);assert.deepEqual(items(f),snap);assert.deepEqual(f.calls,{extract:0,identity:0,dossier:0,semantic:0,semanticInvocations:0});assert.equal(f.synthesisCalls,0);
  }finally{await f.close();rmSync(dir,{recursive:true,force:true});}
 });
 

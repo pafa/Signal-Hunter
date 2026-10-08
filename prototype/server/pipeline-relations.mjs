@@ -3,6 +3,7 @@ import {SYSTEM_RESEARCH_ACTOR} from './research-actor.mjs';
 import {recallOccurrence} from './event-continuity.mjs';
 import {digest} from './codex-research.mjs';
 import {comparisonPacket,comparisonPrompt,MATERIAL_SEMANTIC_SCHEMA} from './semantic-events.mjs';
+import {comparisonGroup,COMPARISON_GROUP_SIZE} from './semantic-multiplex.mjs';
 
 // Opted-in plans settle through the same versioned semantic API; legacy plans remain candidates.
 export function openPipelineRelations(store,research,semantic,{config={},now=Date.now,guard,transaction,audit,used,settings,recall}={}){
@@ -24,7 +25,7 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
  const view=row=>{const p=JSON.parse(row.payload),run=row.run_id?semantic.get(row.run_id):null;let stale=!!run?.stale;
   if(p.refs)try{valid(row);}catch{stale=true;}
   return {id:row.id,itemId:row.item_id,status:row.status==='running'?(run?.status||row.status):row.status,automatic:!!p.automatic,retryAt:p.retryAt||null,active:!!run?.active,runId:row.run_id,source:p.source,target:p.target,reason:p.reason||run?.failure?.message||null,stale,
-   scopes:p.packet?[p.packet.input.left.contentScope,p.packet.input.right.contentScope]:null,comparison:run?.status==='candidate'&&!run.stale?run.candidate.comparison:null,createdAt:p.createdAt,
+   invocation:run?.invocation||null,scopes:p.packet?[p.packet.input.left.contentScope,p.packet.input.right.contentScope]:null,comparison:run?.status==='candidate'&&!run.stale?run.candidate.comparison:null,createdAt:p.createdAt,
    attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
  };
  function settle(context){
@@ -128,6 +129,24 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
    let p;
    try{p=valid(row);}catch{
     transaction(()=>{context.assertActive();db.prepare("UPDATE research_pipeline_relations SET status='invalidated' WHERE id=? AND status='queued'").run(row.id);audit(row.item_id,'relation-invalidated',{relationId:row.id});});return {ok:true,invalidated:true};
+   }
+   // Only current automatic event pairs from the same source share a call.
+   // Oversized packets fall back to smaller groups. Any retry runs alone so
+   // one malformed result cannot exhaust the other pairs' retry budgets.
+   const group=[{row,p}];
+   if(p.automatic&&p.refs.left.kind==='event'&&p.refs.right.kind==='event'&&!db.prepare('SELECT 1 FROM research_pipeline_attempts WHERE item_id=? LIMIT 1').get(row.id))for(const other of db.prepare("SELECT r.* FROM research_pipeline_relations r WHERE r.item_id=? AND r.id<>? AND r.status='queued' AND coalesce(json_extract(r.payload,'$.retryAt'),0)<=? AND NOT EXISTS (SELECT 1 FROM research_pipeline_attempts a WHERE a.item_id=r.id) ORDER BY r.rowid LIMIT ?").all(row.item_id,row.id,now(),COMPARISON_GROUP_SIZE-1)){
+    try{const next=valid(other);if(!next.automatic||next.refs.left.kind!=='event'||next.refs.right.kind!=='event')continue;comparisonGroup([...group.map(g=>g.p.packet),next.packet]);group.push({row:other,p:next});}catch{/* Retain this row for its own validation or single call. */}
+   }
+   if(group.length>1){
+    const runs=semantic.startGroup(group.map(g=>g.p.refs),started=>{
+     context.assertActive();guard();if(used()>=settings().dailyCalls)throw Error('自动研究调用额度已用完');
+     for(let i=0;i<group.length;i++){const {row,p}=group[i],run=started[i];valid(row);if(read(row.id).status!=='queued'||fingerprint(run.packet)!==p.executionHash)throw Error('比较计划已变化');
+      db.prepare("UPDATE research_pipeline_relations SET status='running',run_id=? WHERE id=?").run(run.id,row.id);
+      db.prepare('INSERT INTO research_pipeline_attempts(item_id,run_id,at) VALUES(?,?,?)').run(row.id,run.id,at());
+      audit(row.item_id,'relation-started',{relationId:row.id,runId:run.id,inputHash:run.packet.inputHash,invocation:run.invocation});
+     }
+    },SYSTEM_RESEARCH_ACTOR);
+    return {ok:true,relationId:row.id,runId:runs[0].id,groupedComparisons:runs.length};
    }
    const run=semantic.start(p.refs,started=>{
     context.assertActive();guard();valid(row);if(read(row.id).status!=='queued'||fingerprint(started.packet)!==p.executionHash)throw Error('比较计划已变化');

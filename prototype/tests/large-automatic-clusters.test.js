@@ -8,7 +8,7 @@ import {SYSTEM_RESEARCH_ACTOR} from '../server/research-actor.mjs';
 import {fixture,extraction,output,comparison,cluster} from './automatic-research-fixture.mjs';
 
 const context={assertActive(){}};
-const options=(count,semanticRunner=comparison)=>({semanticRunner,extractionRunner:p=>{
+const options=(count,semanticRunner=p=>comparison(p))=>({semanticRunner,extractionRunner:p=>{
  const base=extraction(p),events=p.input.material.url.endsWith('-1')?Array.from({length:count},(_,i)=>({...base.decomposition.events[0],title:`合成范围 ${i+1}`,object:`范围 ${i+1}`})):base.decomposition.events;
  return output(p,'decomposition',{...base.decomposition,events});
 }});

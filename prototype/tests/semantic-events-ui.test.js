@@ -21,6 +21,8 @@ test('semantic review displays source scope, unknown event time, stale input and
   const scoped={...material,kind:'event',revision:1,materialRevision:2};
   const revisionHtml=renderToStaticMarkup(React.createElement(ComparisonResult,{run:{id:'revision',status:'candidate',stale:true,createdAt:n.publishedAt,packet:{schema:'event-revision-pair-1',input:{left:{...scoped,materialRevision:1},right:scoped},inputHash:'revision-input'},model:'configured-model',history:[]}}));
   for(const text of ['新旧事项修订对照','原簇或输入版本已变化','左侧事项 v1 · 材料 v1','右侧事项 v1 · 材料 v2'])assert.ok(revisionHtml.includes(text),text);
+  const groupedHtml=renderToStaticMarkup(React.createElement(ComparisonResult,{run:{id:'grouped',status:'running',createdAt:n.publishedAt,invocation:{id:'shared-call',comparisons:3,index:1,inputHash:'group-hash'},packet:{input:{left:n,right:n},inputHash:'pair-hash'},model:'configured-model',history:[]}}));
+  for(const text of ['包含 3 对独立比较','当前为第 2 对','取消会停止本次调用中的全部配对','完整调用输入指纹：group-hash','输入指纹：pair-hash'])assert.ok(groupedHtml.includes(text),text);
   const {TimeEvidence}=await vite.ssrLoadModule('/src/integrated/SemanticEvents.jsx');
   for(const [basis,quote,expected] of [['relative','Today <script>quoted</script>','具体日历日期待核'],['explicit','2026年10月2日','原文明确日期'],['unknown','','缺少本侧时间依据']]){
    const rendered=renderToStaticMarkup(React.createElement(TimeEvidence,{event:{timeEvidence:{basis,quote}},input:n}));assert.ok(rendered.includes(expected));assert.ok(!rendered.includes('<script>'));if(basis==='relative'){assert.ok(rendered.includes('来源发布日期：2026-10-02 06:00:00 UTC'));assert.ok(rendered.includes('&lt;script&gt;'));}
