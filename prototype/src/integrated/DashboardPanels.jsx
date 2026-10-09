@@ -5,7 +5,7 @@ import {marketClock} from '../../shared/market-clock.mjs';
 import {laneNames} from '../../shared/activity-view.mjs';
 import {dataHealth} from './decision-model';
 
-export const money=value=>typeof value==='number'&&Number.isFinite(value)?`$${(value/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`:'未知';
+export const money=(value,currency='USD')=>typeof value==='number'&&Number.isFinite(value)?`${currency==='USD'?'$':currency+' '}${(value/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`:'未知';
 const percentage=value=>typeof value==='number'&&Number.isFinite(value)?`${value.toFixed(2)}%`:'未知';
 const price=value=>value==null?'未知':String(value);
 const accountName=(overview,id)=>overview?.accounts.find(a=>a.id===id)?.label||id;
@@ -54,25 +54,26 @@ export function DecisionSidebar({overview,onDecision,onRisk,onPosition,onAllRisk
 
 export function HoldingsSummary({overview,accountId,onAccount,selectedTopic,selectedSymbol,onSelect,onDetail,onPortfolio,expanded,onExpand}){
  const account=overview?.accounts.find(a=>a.id===accountId)||overview?.accounts.find(a=>a.id===overview.defaultAccount);
+ const actual=account?.kind==='actual',currency=actual?account.currency:'USD',format=v=>money(v,currency);
  const positions=[...(account?.positions||[])].sort((a,b)=>Number(!!b.risks.length)-Number(!!a.risks.length)||(a.reviewAt||'~').localeCompare(b.reviewAt||'~'));
  return <section className="dashboard-holdings i-panel" aria-label="持仓与退出跟踪">
   <div className="i-section-head"><h2>持仓与退出跟踪 <em>{positions.length}</em></h2>
    <select aria-label="持仓账户" value={account?.id||''} onChange={e=>onAccount(e.target.value)}>{overview?.accounts.map(a=><option key={a.id} value={a.id}>{a.label}{!a.configured?' · 未初始化':''}</option>)}</select>
-   <small>{account?.kind==='scenario'?'场景价格 + 固定 FX':'USD 基准 · 账户独立核算'}</small><Button onClick={()=>onPortfolio(account?.id)}>全部持仓 →</Button>
+   <small>{actual?`${currency} · 记录时点 ${time(account.valuationAt)}`:account?.kind==='scenario'?'场景价格 + 固定 FX':'USD 基准 · 账户独立核算'}</small><Button onClick={()=>onPortfolio(account?.id)}>全部持仓 →</Button>
   </div>
   <div className="dashboard-metrics">
-   <span>净值 <b>{money(account?.navCents)}</b></span>
-   <span title={account?.unavailable.dailyPnl}>当日变化 <b>{money(account?.dailyPnlCents)}</b></span>
-   <span>持仓浮盈 <b className="up">{money(account?.floatingProfitCents)}</b></span>
-   <span>持仓浮亏 <b className="down">{money(account?.floatingLossCents)}</b></span>
-   <span>已实现 <b>{money(account?.realizedCents)}</b></span>
+   <span>净值 <b>{format(account?.navCents)}</b></span>
+   <span title={account?.unavailable.dailyPnl}>当日变化 <b>{format(account?.dailyPnlCents)}</b></span>
+   <span>{actual?'记录浮盈':'持仓浮盈'} <b className="up">{format(account?.floatingProfitCents)}</b></span>
+   <span>{actual?'记录浮亏':'持仓浮亏'} <b className="down">{format(account?.floatingLossCents)}</b></span>
+   <span>已实现 <b>{format(account?.realizedCents)}</b></span>
    <span title={`${account?.drawdownBasis||''}；${account?.unavailable.maxDrawdown||''}`}>当前 / 最大回撤 <b>{percentage(account?.currentDrawdownPct)} / {percentage(account?.maxDrawdownPct)}</b></span>
   </div>
-  <div className="dashboard-holdings-scroll"><table className="i-table"><thead><tr><th>公司 / 数量</th><th>成本 USD / 现价</th><th>浮盈亏 USD / 比例</th><th>当前判断</th><th>退出窗口 / 下次复核</th><th>关键风险</th><th>展开</th></tr></thead><tbody>
+  <div className="dashboard-holdings-scroll"><table className="i-table"><thead><tr><th>公司 / 数量</th><th>成本 {currency} / {actual?'记录价':'现价'}</th><th>{actual?'记录':''}浮盈亏 {currency} / 比例</th><th>当前判断</th><th>退出窗口 / 下次复核</th><th>关键风险</th><th>展开</th></tr></thead><tbody>
    {positions.map(p=><React.Fragment key={p.id}><tr className={p.symbol===selectedSymbol?'selected':p.topicId===selectedTopic?'related':''}>
     <td><button className="dashboard-company" onClick={()=>onSelect(p)}>{p.name}<small>{p.symbol} · {p.qty} 股</small></button></td>
-    <td>{money(p.costCents)}<small title={`${p.priceSource||'来源未知'} · ${time(p.priceAt)}`}>{price(p.price)} {p.currency||''} · {p.priceBasis}</small></td>
-    <td className={p.unrealizedCents==null?'':p.unrealizedCents<0?'down':'up'}>{money(p.unrealizedCents)}<small>{percentage(p.returnPct)}</small></td>
+    <td>{format(p.costCents)}<small title={`${p.priceSource||'来源未知'} · ${time(p.priceAt)}`}>{price(p.price)} {p.currency||''} · {p.priceBasis}</small></td>
+    <td className={p.unrealizedCents==null?'':p.unrealizedCents<0?'down':'up'}>{format(p.unrealizedCents)}<small>{percentage(p.returnPct)}</small></td>
     <td>{p.judgement}<small>研究 v{p.currentVersion??'未知'}</small></td>
     <td title={p.holdingHorizon||'尚无确定退出窗口'}>{p.holdingHorizon||'退出窗口待评估'}<small>复核 {time(p.reviewAt)}</small></td>
     <td className={p.risks.length?'amber':''} title={p.risks.join('；')||p.invalidation||'失效条件待补'}>{p.risks[0]||p.invalidation||'失效条件待补'}</td>
@@ -80,19 +81,20 @@ export function HoldingsSummary({overview,accountId,onAccount,selectedTopic,sele
    </tr>{expanded===p.id&&<tr className="dashboard-position-expanded"><td colSpan="7"><b>建仓研究 v{p.openingVersion??'未知'} → 当前 v{p.currentVersion??'未知'}</b><span> · {p.trigger||'触发条件待补'}；失效：{p.invalidation||'待补'}</span><span> · 估值时间 {time(p.priceAt)} · {p.priceSource||'来源未知'}</span><Button onClick={()=>onDetail(p.id)}>深入查看持仓 →</Button></td></tr>}</React.Fragment>)}
    {!positions.length&&<tr><td colSpan="7" className="dashboard-empty">{!account?'正在读取持仓…':!account.configured?'账户尚未初始化，净值与盈亏未知。配置和行情就绪后才能开展市场模拟。':'此账户暂无持仓。已有买入不会通过示例数据自动补入。'}</td></tr>}
   </tbody></table></div>
-  <div className="dashboard-holdings-foot"><span>{account?.sourceNote||'按有效输入估值；未知不表示零风险'} · 已估值 {account?.valuedPositions??0}/{positions.length}</span><span>选择事件只高亮，不隐藏全局持仓</span></div>
+  <div className="dashboard-holdings-foot"><span>{[account?.sourceNote,account?.unavailable.aggregate].filter(Boolean).join('；')||'按有效输入估值；未知不表示零风险'} · 已估值 {account?.valuedPositions??0}/{positions.length}</span><span>选择事件只高亮，不隐藏全局持仓</span></div>
  </section>;
 }
 
 export function PositionDetails({position:p,account,onResearch,onAccount}){
  if(!p)return <p className="m-warning">持仓已变化或不在当前快照中；请返回组合核对，旧记录仍在原账本。</p>;
+ const actual=account.kind==='actual',currency=actual?account.currency:'USD';
  return <section className="dashboard-position-detail" aria-label="持仓长期档案">
   <p><b>{p.name} · {p.symbol}</b> · {account.label} · {p.qty} 股</p>
   <p>{account.sourceNote||'有效执行输入估值'}；估值 {time(p.priceAt)}，来源 {p.priceSource||'未知'}。</p>
-  <div className="dashboard-metrics"><span>成本 USD <b>{money(p.costCents)}</b></span><span>现价 <b>{price(p.price)} {p.currency}</b></span><span>浮盈亏 USD <b>{money(p.unrealizedCents)} / {percentage(p.returnPct)}</b></span></div>
+  <div className="dashboard-metrics"><span>成本 {currency} <b>{money(p.costCents,currency)}</b></span><span>{actual?'记录价':'现价'} <b>{price(p.price)} {p.currency}</b></span><span>{actual?'记录时点':''}浮盈亏 {currency} <b>{money(p.unrealizedCents,currency)} / {percentage(p.returnPct)}</b></span></div>
   <h3>原研究与当前判断</h3><p>建仓 {time(p.openedAt)} · 原研究 v{p.openingVersion??'未知'} → 当前 v{p.currentVersion??'未知'}。</p><p>{p.topicTitle} · {p.judgement}</p>
   <h3>退出计划与风险</h3><p>预计窗口：{p.holdingHorizon||'未形成有依据的退出窗口'}。复核：{time(p.reviewAt)}。</p><p>触发：{p.trigger||'未定义'}；失效：{p.invalidation||'未定义'}。</p>
   {p.risks.map((r,i)=><p className="m-warning" key={i}>{r}</p>)}<p className="m-note">复核时间不等于保证卖出日期；阅读本页、标记已读均不批准或执行买卖。</p>
-  <div className="detail-section-tools"><Button onClick={()=>onResearch(p)}>查看对应研究</Button><Button onClick={()=>onAccount(p.account)}>账户、订单与成交</Button></div>
+  <div className="detail-section-tools"><Button disabled={!p.topicId||p.currentVersion==null} onClick={()=>onResearch(p)}>查看对应研究</Button><Button onClick={()=>onAccount(p.account)}>{actual?'实际记录与修正历史':'账户、订单与成交'}</Button></div>
  </section>;
 }

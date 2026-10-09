@@ -26,7 +26,7 @@ function performance(positions,configured){
   unavailable:{dailyPnl:'尚无可核对的当日净值和现金流基准',maxDrawdown:'尚无完整同口径净值序列'}};
 }
 
-export function buildWorkbenchOverview({topics=[],eventClusters=[],paper=null,workflow=[],marketAccounts=[],operations={},checks={},offline=false,at}){
+export function buildWorkbenchOverview({topics=[],eventClusters=[],paper=null,workflow=[],marketAccounts=[],actualAccounts=[],operations={},checks={},offline=false,at}){
  if(!Number.isFinite(Date.parse(at)))throw Error('看板时间无效');
  const byTopic=new Map(topics.map(t=>[t.id,t])),byWorkflow=new Map(workflow.map(w=>[w.topicId,w]));
  const risks=[],decisions=[];
@@ -75,6 +75,7 @@ export function buildWorkbenchOverview({topics=[],eventClusters=[],paper=null,wo
    navCents:toCents(paper.nav),realizedCents:toCents(paper.realized),feesCents:toCents(paper.fees),currentDrawdownPct:null,
    drawdownBasis:'结构演练未建立完整回撤序列',sourceNote:'场景价格与固定汇率，不是市场成交或实际账户收益',positions,...performance(positions,true)});
  }
+ for(const a of actualAccounts){accounts.push(a);for(const p of a.positions)for(const [i,message] of p.risks.entries())risks.push({id:`${p.id}:risk:${i}`,account:a.id,positionId:p.id,topicId:p.topicId,symbol:p.symbol,message});}
  const allPositions=accounts.flatMap(a=>a.positions),riskTopics=new Set(risks.map(r=>r.topicId));
  const events=topics.map(t=>({id:t.id,version:t.version,updatedAt:t.updatedAt,status:t.status,
   positions:allPositions.filter(p=>p.topicId===t.id||t.companies?.some(c=>c.symbol===p.symbol)).length,

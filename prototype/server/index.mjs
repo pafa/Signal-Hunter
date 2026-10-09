@@ -1,5 +1,6 @@
 import {loadExecutionConfig} from './execution-inputs.mjs';
 import {historyRecallErrors} from '../shared/historical-recall.mjs';
+import {failActual} from '../shared/actual-holdings.mjs';
 import {safeErrorText,safeDiagnosticPayload} from '../shared/safe-errors.mjs';
 import {runtimeConfig,assertDatabaseMode,checkDatabaseFile} from './runtime.mjs';
 import http from 'node:http';
@@ -26,6 +27,9 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const url=new URL(req.url,'http://127.0.0.1:4179');
     if(!url.pathname.startsWith('/api/')&&staticHandler){staticHandler(req,res);return;}
     if(service.instance?.id&&(req.headers['x-signal-instance']||['POST','PATCH','DELETE'].includes(req.method))&&req.headers['x-signal-instance']!==service.instance.id){reply(409,{error:'数据集已切换或尚未核对，请刷新页面后再继续'});return;}
+    if(url.pathname.startsWith('/api/actual-holdings')&&url.search)failActual(0);
+    if(req.method==='GET'&&url.pathname==='/api/actual-holdings'){reply(200,service.actualHoldings.snapshot());return;}
+    if(req.method==='GET'&&/^\/api\/actual-holdings\/[a-f0-9]{64}\/history$/.test(url.pathname)){reply(200,service.actualHoldings.history(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/workbench-queue'){reply(200,service.workbenchQueue(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/activity'){reply(200,service.activity(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/forward-windows'){reply(200,service.forwardWindows.list());return;}
@@ -107,11 +111,13 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(!['POST','PATCH','DELETE'].includes(req.method)){reply(404,{error:'接口不存在'});return;}
     if(service.health().restoreReviewRequired&&!/^\/api\/operations\/(?:restore-review|[a-z]+)$/.test(url.pathname)){reply(409,{error:'恢复副本需先完成核对确认，暂不接受业务修改'});return;}
     if(req.headers['content-type']!=='application/json'){reply(415,{error:'需要 JSON 请求'});return;}
-    const maxBody=/^\/api\/research\/[^/]+\/(materials|dossier)$/.test(url.pathname)?300000:/^\/api\/research\/[^/]+\/companies$/.test(url.pathname)?64000:16384;
+    const maxBody=url.pathname==='/api/actual-holdings/preview'?400000:/^\/api\/research\/[^/]+\/(materials|dossier)$/.test(url.pathname)?300000:/^\/api\/research\/[^/]+\/companies$/.test(url.pathname)?64000:16384;
     const chunks=[];let bytes=0;for await(const chunk of req){const buffer=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);bytes+=buffer.length;if(bytes>maxBody){reply(413,{error:'请求过大'});return;}chunks.push(buffer);}const body=Buffer.concat(chunks).toString('utf8');
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&url.pathname==='/api/actual-holdings/preview'){reply(200,service.actualHoldings.preview(data));return;}
+    if(req.method==='POST'&&url.pathname==='/api/actual-holdings/apply'){const result=service.actualHoldings.apply(data);reply(200,{...service.actualHoldings.snapshot(),result});return;}
     if(req.method==='POST'&&historyComparison){if(url.search)throw Error(historyRecallErrors[9]);reply(202,service.historicalComparisons.start(historyComparison[1],data));return;}
     if(req.method==='POST'&&materialHistory&&!materialHistory[2]){reply(200,service.historicalRecall.freeze('material:'+materialHistory[1],data));return;}
     if(req.method==='POST'&&/^\/api\/news\/[a-f0-9]{64}\/history-recall$/.test(url.pathname)){reply(200,service.historicalRecall.freeze(url.pathname.split('/')[3],data));return;}

@@ -1,3 +1,4 @@
+import {actualHoldingErrors} from './actual-holdings.mjs';
 import {priceCollectionErrors} from './price-collection.mjs';
 import {forwardWindowErrors} from './forward-window.mjs';
 import {historyRecallErrors} from './historical-recall.mjs';
@@ -23,6 +24,7 @@ export function safeErrorText(value){
  if(!value)return '';
  if(Object.hasOwn(labels,value.kind))return labels[value.kind];
  const text=typeof value==='string'?value:typeof value.message==='string'?value.message:'';
+ if(actualHoldingErrors.includes(text))return text;
  // Only exact, owned labels survive a second presentation pass.
  if(Object.values(labels).includes(text)||directoryLabels.has(text)||companyEntityLabels.has(text)||materialEventLabels.has(text)||modelLabels.has(text)||forwardLabels.has(text)||forwardReviewErrors.includes(text)||forwardWindowErrors.includes(text)||eventPriceErrors.includes(text)||priceCollectionErrors.includes(text)||historyRecallErrors.includes(text)||newsIntakeErrors.includes(text)||materialityErrors.includes(text)||observationLabels.has(text)||semanticErrors.includes(text)||batchErrors.includes(text)||clusterErrors.includes(text)||marketErrors.includes(text)||evaluationErrors.includes(text))return text;
  if(value?.name==='TimeoutError'||/timeout|timed out|超时/i.test(text))return labels.timeout;

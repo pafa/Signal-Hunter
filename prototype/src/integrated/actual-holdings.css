@@ -1,0 +1,18 @@
+.actual-holdings {min-width:0;padding:16px;color:var(--text,#d7e0ee)}
+.actual-holdings p {line-height:1.65;overflow-wrap:anywhere}
+.actual-holdings .dashboard-page-head {align-items:center;gap:12px}
+.actual-editor {margin:12px 0;border:1px solid var(--line,#2b3545);padding:12px;border-radius:6px}
+.actual-editor summary {cursor:pointer;padding:4px 0}
+.actual-fields {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0}
+.actual-holdings label {display:flex;flex-direction:column;gap:6px;font-size:12px;min-width:0}
+.actual-holdings input,.actual-holdings select,.actual-holdings textarea {box-sizing:border-box;width:100%;min-width:0;background:#101620;color:inherit;border:1px solid #354154;border-radius:4px;padding:9px;font:inherit}
+.actual-holdings textarea {font:12px/1.7 ui-monospace,monospace;margin:8px 0}
+.actual-wide {grid-column:1/-1}
+.actual-table-scroll {max-width:100%;overflow-x:auto;margin:16px 0}
+.actual-holdings .i-table {min-width:780px}
+.actual-holdings .i-table small {display:block;color:#9aa8bb;margin-top:4px}
+.actual-preview article,.actual-holdings [aria-label="实际持仓历史"] article {border:1px solid #354154;padding:10px 12px;margin:10px 0;border-radius:4px}
+.actual-holdings button:disabled {opacity:.5}
+.portfolio-kind {padding:12px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #2b3545}
+@media(max-width:800px){.actual-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.actual-fields{grid-template-columns:1fr}.actual-holdings{padding:10px}.actual-holdings .dashboard-page-head{align-items:flex-start;flex-direction:column}.portfolio-kind{flex-wrap:wrap}}
