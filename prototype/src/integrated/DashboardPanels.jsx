@@ -1,4 +1,5 @@
 import React from 'react';
+import {ActualMonitoring} from './ActualObservationDetails';
 import {Button} from '../major/Primitives';
 import {time} from '../major/api';
 import {marketClock} from '../../shared/market-clock.mjs';
@@ -76,25 +77,26 @@ export function HoldingsSummary({overview,accountId,onAccount,selectedTopic,sele
     <td className={p.unrealizedCents==null?'':p.unrealizedCents<0?'down':'up'}>{format(p.unrealizedCents)}<small>{percentage(p.returnPct)}</small></td>
     <td>{p.judgement}<small>研究 v{p.currentVersion??'未知'}</small></td>
     <td title={p.holdingHorizon||'尚无确定退出窗口'}>{p.holdingHorizon||'退出窗口待评估'}<small>复核 {time(p.reviewAt)}</small></td>
-    <td className={p.risks.length?'amber':''} title={p.risks.join('；')||p.invalidation||'失效条件待补'}>{p.risks[0]||p.invalidation||'失效条件待补'}</td>
+    <td className={p.risks.length?'amber':''} title={p.risks.join('；')||p.invalidation||'失效条件待补'}>{p.risks[0]||p.invalidation||'失效条件待补'}{p.monitoring&&<small>{p.monitoring.label} · {time(p.monitoring.checkedAt)}</small>}</td>
     <td><Button aria-label={`${expanded===p.id?'收起':'展开'}持仓 ${p.symbol}`} aria-expanded={expanded===p.id} onClick={()=>onExpand(expanded===p.id?null:p.id)}>{expanded===p.id?'▴':'▾'}</Button></td>
-   </tr>{expanded===p.id&&<tr className="dashboard-position-expanded"><td colSpan="7"><b>建仓研究 v{p.openingVersion??'未知'} → 当前 v{p.currentVersion??'未知'}</b><span> · {p.trigger||'触发条件待补'}；失效：{p.invalidation||'待补'}</span><span> · 估值时间 {time(p.priceAt)} · {p.priceSource||'来源未知'}</span><Button onClick={()=>onDetail(p.id)}>深入查看持仓 →</Button></td></tr>}</React.Fragment>)}
+   </tr>{expanded===p.id&&<tr className="dashboard-position-expanded"><td colSpan="7"><b>{actual?'绑定研究':'建仓研究'} v{p.openingVersion??'未知'} → 当前 v{p.currentVersion??'未知'}</b><span> · {p.trigger||'触发条件待补'}；失效：{p.invalidation||'待补'}</span><span> · 估值时间 {time(p.priceAt)} · {p.priceSource||'来源未知'}</span><Button onClick={()=>onDetail(p.id)}>深入查看持仓 →</Button></td></tr>}</React.Fragment>)}
    {!positions.length&&<tr><td colSpan="7" className="dashboard-empty">{!account?'正在读取持仓…':!account.configured?'账户尚未初始化，净值与盈亏未知。配置和行情就绪后才能开展市场模拟。':'此账户暂无持仓。已有买入不会通过示例数据自动补入。'}</td></tr>}
   </tbody></table></div>
   <div className="dashboard-holdings-foot"><span>{[account?.sourceNote,account?.unavailable.aggregate].filter(Boolean).join('；')||'按有效输入估值；未知不表示零风险'} · 已估值 {account?.valuedPositions??0}/{positions.length}</span><span>选择事件只高亮，不隐藏全局持仓</span></div>
  </section>;
 }
 
-export function PositionDetails({position:p,account,onResearch,onAccount}){
+export function PositionDetails({position:p,account,onResearch,onAccount,onObservation}){
  if(!p)return <p className="m-warning">持仓已变化或不在当前快照中；请返回组合核对，旧记录仍在原账本。</p>;
  const actual=account.kind==='actual',currency=actual?account.currency:'USD';
  return <section className="dashboard-position-detail" aria-label="持仓长期档案">
   <p><b>{p.name} · {p.symbol}</b> · {account.label} · {p.qty} 股</p>
   <p>{account.sourceNote||'有效执行输入估值'}；估值 {time(p.priceAt)}，来源 {p.priceSource||'未知'}。</p>
   <div className="dashboard-metrics"><span>成本 {currency} <b>{money(p.costCents,currency)}</b></span><span>{actual?'记录价':'现价'} <b>{price(p.price)} {p.currency}</b></span><span>{actual?'记录时点':''}浮盈亏 {currency} <b>{money(p.unrealizedCents,currency)} / {percentage(p.returnPct)}</b></span></div>
-  <h3>原研究与当前判断</h3><p>建仓 {time(p.openedAt)} · 原研究 v{p.openingVersion??'未知'} → 当前 v{p.currentVersion??'未知'}。</p><p>{p.topicTitle} · {p.judgement}</p>
+  <h3>原研究与当前判断</h3><p>{actual?'持仓记录 v'+p.recordVersion:'建仓 '+time(p.openedAt)} · 原研究 v{p.openingVersion??'未知'} → 当前 v{p.currentVersion??'未知'}。</p><p>{p.topicTitle} · {p.judgement}</p>
   <h3>退出计划与风险</h3><p>预计窗口：{p.holdingHorizon||'未形成有依据的退出窗口'}。复核：{time(p.reviewAt)}。</p><p>触发：{p.trigger||'未定义'}；失效：{p.invalidation||'未定义'}。</p>
-  {p.risks.map((r,i)=><p className="m-warning" key={i}>{r}</p>)}<p className="m-note">复核时间不等于保证卖出日期；阅读本页、标记已读均不批准或执行买卖。</p>
+  {(actual?p.risks.slice(0,2):p.risks).map((r,i)=><p className="m-warning" key={i}>{r}</p>)}{actual&&p.risks.length>2&&<details><summary>更多风险与输入缺口 · {p.risks.length-2}</summary>{p.risks.slice(2).map((r,i)=><p className="m-warning" key={i}>{r}</p>)}</details>}<p className="m-note">复核时间不等于保证卖出日期；阅读本页、标记已读均不批准或执行买卖。</p>
+  {actual&&<ActualMonitoring monitoring={p.monitoring} onObservation={onObservation}/>}
   <div className="detail-section-tools"><Button disabled={!p.topicId||p.currentVersion==null} onClick={()=>onResearch(p)}>查看对应研究</Button><Button onClick={()=>onAccount(p.account)}>{actual?'实际记录与修正历史':'账户、订单与成交'}</Button></div>
  </section>;
 }

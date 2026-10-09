@@ -117,7 +117,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
     if(req.method==='POST'&&url.pathname==='/api/actual-holdings/preview'){reply(200,service.actualHoldings.preview(data));return;}
-    if(req.method==='POST'&&url.pathname==='/api/actual-holdings/apply'){const result=service.actualHoldings.apply(data);reply(200,{...service.actualHoldings.snapshot(),result});return;}
+    if(req.method==='POST'&&url.pathname==='/api/actual-holdings/apply'){const result=service.actualHoldings.apply(data);service.syncWatches();reply(200,{...service.actualHoldings.snapshot(),result});return;}
     if(req.method==='POST'&&historyComparison){if(url.search)throw Error(historyRecallErrors[9]);reply(202,service.historicalComparisons.start(historyComparison[1],data));return;}
     if(req.method==='POST'&&materialHistory&&!materialHistory[2]){reply(200,service.historicalRecall.freeze('material:'+materialHistory[1],data));return;}
     if(req.method==='POST'&&/^\/api\/news\/[a-f0-9]{64}\/history-recall$/.test(url.pathname)){reply(200,service.historicalRecall.freeze(url.pathname.split('/')[3],data));return;}

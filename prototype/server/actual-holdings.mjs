@@ -1,5 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {ACTUAL_COLUMNS,actualAmount,actualHoldingErrors,failActual,normalizeActualRow,parseActualCsv} from '../shared/actual-holdings.mjs';
+import {projectActualMonitoring} from '../shared/actual-monitoring.mjs';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const fields=(x,keys)=>x&&typeof x==='object'&&!Array.isArray(x)&&Object.keys(x).sort().join(',')===[...keys].sort().join(',');
@@ -10,7 +11,8 @@ export function openActualHoldings(store,{enabled=false,clock=()=>new Date().toI
  const db=store.db;
  db.exec(`CREATE TABLE IF NOT EXISTS actual_holding_batches(id TEXT PRIMARY KEY,base_version INTEGER NOT NULL,payload TEXT NOT NULL,hash TEXT NOT NULL,created_at TEXT NOT NULL,applied_version INTEGER,applied_at TEXT);
  CREATE TABLE IF NOT EXISTS actual_holding_records(record_id TEXT NOT NULL,version INTEGER NOT NULL,batch_id TEXT NOT NULL REFERENCES actual_holding_batches(id),payload TEXT NOT NULL,hash TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(record_id,version));
- CREATE INDEX IF NOT EXISTS actual_holding_batch_records ON actual_holding_records(batch_id);`);
+ CREATE INDEX IF NOT EXISTS actual_holding_batch_records ON actual_holding_records(batch_id);
+ CREATE TABLE IF NOT EXISTS actual_holding_watch_links(record_id TEXT PRIMARY KEY,symbol TEXT NOT NULL,created_at TEXT NOT NULL);`);
  const guard=()=>{if(!enabled)failActual(11);if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')failActual(12);};
  const version=()=>db.prepare('SELECT COALESCE(MAX(applied_version),0) n FROM actual_holding_batches').get().n;
  const read=r=>{const p=JSON.parse(r.payload);if(hash(p)!==r.hash||identity(p)!==r.record_id)failActual(15);return {...p,id:r.record_id,version:r.version,batchId:r.batch_id,recordedAt:r.recorded_at};};
@@ -37,7 +39,15 @@ export function openActualHoldings(store,{enabled=false,clock=()=>new Date().toI
  };
  const transact=fn=>{db.exec('BEGIN IMMEDIATE');try{const r=fn();db.exec('COMMIT');return r;}catch(e){db.exec('ROLLBACK');throw e;}};
  return {
-  snapshot(){return {enabled,version:version(),records:latest(),note:'本人记录的账户持仓快照；不是券商接入、成交账本或实时净值'};},
+  snapshot(){const records=latest(),watches=new Set(store.watchlist().map(w=>w.symbol));return {enabled,version:version(),records,watching:records.filter(r=>r.quantity!=='0').map(r=>({recordId:r.id,symbol:r.symbol,state:watches.has(r.symbol)?'watching':db.prepare('SELECT 1 FROM actual_holding_watch_links WHERE record_id=?').get(r.id)?'removed':'deferred',reason:watches.size>=40?'已达40个行情关注上限':'等待后台登记'})),note:'本人记录的账户持仓快照；不是券商接入、成交账本或实时净值'};},
+  syncWatches(){
+   if(!enabled)return;guard();
+   return transact(()=>{for(const r of latest().filter(r=>r.quantity!=='0')){
+    if(db.prepare('SELECT 1 FROM actual_holding_watch_links WHERE record_id=?').get(r.id))continue;
+    if(!store.watchlist().some(w=>w.symbol===r.symbol)&&store.watchlist().length>=40)continue;
+    store.addWatch(r.symbol);db.prepare('INSERT INTO actual_holding_watch_links VALUES(?,?,?)').run(r.id,r.symbol,clock());
+   }});
+  },
   history(id){if(typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id))failActual(13);const rows=db.prepare('SELECT * FROM actual_holding_records WHERE record_id=? ORDER BY version DESC').all(id).map(read);if(!rows.length)failActual(13);return rows;},
   preview(input){
    guard();if(!fields(input,['rows'])&&!fields(input,['csv']))failActual(0);
@@ -63,20 +73,21 @@ export function openActualHoldings(store,{enabled=false,clock=()=>new Date().toI
  };
 }
 
-export function projectActualAccounts(snapshot,topics,at){
+export function projectActualAccounts(snapshot,topics,at,monitoring={}){
  const groups=new Map(),byTopic=new Map(topics.map(t=>[t.id,t]));
  for(const r of snapshot.records.filter(r=>r.quantity!=='0')){
   const account='actual:'+hash([r.account,r.currency]),topic=byTopic.get(r.topicId),h=topic?.hypothesis||{},costCents=actualAmount(r.quantity,r.unitCost),valueCents=actualAmount(r.quantity,r.price);
   const pnl=costCents===null||valueCents===null?null:valueCents-costCents;
-  const risks=['记录时点估值；当前行情与持续退出监控尚未接入'];
+  const monitor=projectActualMonitoring(r,topic,{...monitoring,watching:snapshot.watching,at});
+  const risks=[...monitor.risks,'记录时点估值；未接入实时账户盈亏与自动退出计划'];
   if(costCents===null)risks.push('成本未知，无法计算记录时点浮盈亏');
   if(valueCents===null)risks.push('记录价格未知，不能计算估值');
   if(r.feeBasis!=='included')risks.push(r.feeBasis==='excluded'?'记录成本未含费用，浮盈亏未扣全部费用':'成本是否含费用未知');
   if(!r.topicId)risks.push('未绑定原研究；不自动猜测建仓依据');
-  else if(!topic||topic.version!==r.topicVersion||topic.status==='archived')risks.push('原研究与当前版本不同或不可用，需复核');
+  else if(!monitor.current&&(!topic||topic.version!==r.topicVersion||topic.status==='archived'))risks.push('原研究与当前版本不同或不可用，需复核');
   const p={id:'actual:'+r.id,recordId:r.id,recordVersion:r.version,account,symbol:r.symbol,name:topic?.companies?.find(c=>c.symbol===r.symbol)?.name||r.symbol,topicId:r.topicId,topicTitle:topic?.title||'未绑定研究',openingVersion:r.topicVersion,currentVersion:topic?.version??null,
    qty:r.quantity,currency:r.currency,costCents,valueCents,unrealizedCents:pnl,returnPct:pnl===null||!costCents?null:pnl/costCents*100,
-   price:r.price,priceAt:r.price?r.asOf:null,priceSource:r.source,priceBasis:'记录时点价',recordedAsOf:r.asOf,openedAt:null,
+   price:r.price,priceAt:r.price?r.asOf:null,priceSource:r.source,priceBasis:'记录时点价',recordedAsOf:r.asOf,openedAt:null,monitoring:monitor,
    judgement:({observe:'继续观察',buy:'评估买入',add:'评估增仓',reduce:'评估减仓',exit:'评估退出'})[h.action]||'判断待补',trigger:h.trigger||null,invalidation:h.invalidation||null,holdingHorizon:h.holdingHorizon||null,reviewAt:h.reviewAt||null,risks};
   if(!groups.has(account))groups.set(account,{id:account,label:`实际 · ${r.account} · ${r.currency}`,kind:'actual',configured:true,currency:r.currency,version:snapshot.version,updatedAt:r.recordedAt,positions:[],navCents:null,realizedCents:null,feesCents:null,currentDrawdownPct:null,drawdownBasis:'快照不能推导净值回撤',sourceNote:'持仓快照 · 记录时点参考盈亏；非实时、非已实现收益；不同币种分开查看'});
   groups.get(account).positions.push(p);

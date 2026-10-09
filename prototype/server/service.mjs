@@ -70,13 +70,14 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
   const researchPipeline=openResearchPipeline(store,research,modelResearch,{enabled:!offline&&!!modelConfig,config:modelConfig||{},now,materialEvents,entities:companyEntities,batches:semanticBatches,clusters:eventClusters,semantic:semanticEvents,recall:newsId=>{continuity.process(research.list());return continuity.recall(newsId);}});
   const intake=openNewsIntake(store,{clock});
   const continuity=openContinuity(store,{clock}),historicalRecall=openHistoricalRecall(store,{now,mode});
-  const observations=openObservationInbox(store,{clock,getTopic:id=>research.get(id),offline,clustersForTopic:topic=>eventClusters.forResearch(topic),getMarketSnapshots:at=>offline?[]:Object.values(marketSimulations).map(m=>m.observationSnapshot(at))});
+  const observations=openObservationInbox(store,{clock,getTopic:id=>research.get(id),getTopicVersion:(id,version)=>research.historyDetail(id,version).topic,getActualHoldings:()=>actualHoldings.snapshot(),actualPriceEnabled:(symbol,interval)=>!scheduler.snapshot()[interval==='1d'?'daily':'minutes']?.paused&&store.watchlist().some(w=>w.symbol===symbol),offline,clustersForTopic:topic=>eventClusters.forResearch(topic),getMarketSnapshots:at=>offline?[]:Object.values(marketSimulations).map(m=>m.observationSnapshot(at))});
   let newsJob=null;const quoteJobs=new Map();let lastNewsAttempt=0;const quoteAttempts=new Map();
   const dailyJobs=new Map(),dailyAttempts=new Map();
   const active=(name,context)=>{if(restorePending())throw new Error('恢复副本需先完成核对确认');context?.assertActive?.();if(scheduler.snapshot()[name]?.paused)throw new Error('任务已暂停，请先在运行控制中恢复');};
   const startedAt=clock();
   const errorText=error=>error.name==='TimeoutError'?'上游请求超时':error.message==='fetch failed'?'上游连接失败':String(error.message).slice(0,160);
   let autoWatch=restorePending()?{added:[],deferred:[],restoreReviewRequired:true}:syncResearchWatches(store,research.list());
+  if(!restorePending())actualHoldings.syncWatches();
   if(offline&&!restorePending())initializeDemoData(store);
   const service={
     mode,instance,actualHoldings,
@@ -121,17 +122,17 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       return result;
     },
     close(){return Promise.all([scheduler.stop(),referenceFx.close(),securityDirectory.close(),modelResearch.close(),materialEvents.close(),companyEntities.close(),semanticEvents.close()]);},
-    syncWatches(){if(!restorePending())autoWatch=syncResearchWatches(store,research.list());return autoWatch;},
+    syncWatches(){if(!restorePending()){autoWatch=syncResearchWatches(store,research.list());actualHoldings.syncWatches();}return autoWatch;},
     snapshot(){
       const at=clock(),topics=research.list(),news=store.news(),watchlist=store.watchlist(),book=paper.snapshot(),actual=actualHoldings.snapshot();
       const queue=continuity.queue({positions:book.positions,watchlist}),priorities=new Map(queue.map((n,i)=>[n.id,{priority:n.priority,rank:i}]));
       const researchView=research.snapshot({topics,news});
       researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));
-      const workflow=topics.map(t=>assessTopic(t,{book})),operations=scheduler.snapshot(),checks=store.checks();
+      const workflow=topics.map(t=>assessTopic(t,{book})),operations=scheduler.snapshot(),checks=store.checks(),observationInbox=observations.summary();
       const overview=buildWorkbenchOverview({topics,eventClusters:eventClusters.workbench(topics).map(c=>({...c,research:researchPipeline.synthesis?.overview(c.id)||null})),paper:book,workflow,operations,checks,offline,at,
-        marketAccounts:Object.values(marketSimulations).map(m=>m.observationSnapshot(at)),actualAccounts:projectActualAccounts(actual,topics,at)});
+        marketAccounts:Object.values(marketSimulations).map(m=>m.observationSnapshot(at)),actualAccounts:projectActualAccounts(actual,topics,at,{checks:observationInbox.actualChecks,rules:observationInbox.rules,operations})});
       return {overview,executionData:executionInputs.status(),priceCollection:priceCollection.snapshot(),storageMonitor:storageMonitor?.snapshot()??null,
-        researchPipeline:researchPipeline.snapshot(),observationInbox:observations.summary(),eventContinuity:{...continuity.summary(),health:checks.events||{state:'pending'}},
+        researchPipeline:researchPipeline.snapshot(),observationInbox,eventContinuity:{...continuity.summary(),health:checks.events||{state:'pending'}},
         runtime:{mode,offline,instance},paper:book,workflow,operations,operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,at,{offline}),serviceHealth:service.health(),
         newsIntake:intake.snapshot(),autoWatch,settings:store.getSettings(),news,watchlist:watchlist.map(w=>({...w,quote:store.quote(w.symbol),daily:store.daily(w.symbol)})),checks,
         serverTime:at,newsIntervalSeconds:newsCooldown/1000,quoteIntervalSeconds:quoteCooldown/1000,research:researchView};
