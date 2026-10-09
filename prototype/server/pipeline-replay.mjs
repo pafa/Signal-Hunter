@@ -63,7 +63,7 @@ export async function replayPipeline(root,recipe,{databasePath,signal}={}){
  const sourceReader=url=>article.readPublicArticle(url,{resolver:async()=>[{address:'93.184.216.34',family:4}],request:async url=>{const r=await fetchRaw(url.href);return {status:r.status,headers:r.headers,body:r.body};}});
  const contracts={
   research:p=>({prompt:codex.codexPrompt(p),schema:typeof codex.codexDraftSchema==='function'?codex.codexDraftSchema(p):codex.CODEX_DRAFT_SCHEMA,promptVersion:codex.CODEX_PROMPT_VERSION,...(codex.CODEX_SCHEMA_VERSION?{schemaVersion:codex.CODEX_SCHEMA_VERSION}:{})}),
-  semantic:p=>({prompt:semantic.comparisonPrompt(p),schema:p.schema===semantic.SEMANTIC_VERSION?semantic.SEMANTIC_SCHEMA:semantic.MATERIAL_SEMANTIC_SCHEMA,promptVersion:`${p.schema}/${time.TIME_PROMPT_VERSION}${p.schema!==semantic.SEMANTIC_VERSION?'/'+scope.ARTICLE_SCOPE_VERSION:''}`}),
+  semantic:p=>typeof semantic.comparisonContract==='function'?semantic.comparisonContract(p):({prompt:semantic.comparisonPrompt(p),schema:p.schema===semantic.SEMANTIC_VERSION?semantic.SEMANTIC_SCHEMA:semantic.MATERIAL_SEMANTIC_SCHEMA,promptVersion:`${p.schema}/${time.TIME_PROMPT_VERSION}${p.schema!==semantic.SEMANTIC_VERSION?'/'+scope.ARTICLE_SCOPE_VERSION:''}`}),
   material:p=>({prompt:material.materialEventsPrompt(p),schema:material.MATERIAL_EVENTS_SCHEMA,promptVersion:material.MATERIAL_EVENTS_VERSION}),
   company:p=>({prompt:company.companyEntitiesPrompt(p),schema:company.COMPANY_ENTITIES_SCHEMA,promptVersion:company.COMPANY_ENTITIES_VERSION})
  };

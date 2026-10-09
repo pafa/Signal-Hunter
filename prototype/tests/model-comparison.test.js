@@ -116,7 +116,7 @@ test('v3 compares different prompts with the same model and exact packets withou
  }finally{f.close();}
 });
 test('prompt recipes reject empty, extra, oversized, unnamed or identical experiments',()=>{
- const f=setup();try{promptSpec(f);for(const prompts of [null,{}, {baseline:null,candidate:null},{...f.spec.prompts,extra:null},{baseline:null,candidate:{version:'codex-research-8',instructions:'test'}},{baseline:null,candidate:{version:'experiment/a',instructions:''}},{baseline:null,candidate:{version:'experiment/a',instructions:'界'.repeat(22000)}},{baseline:null,candidate:{version:'experiment/a',instructions:'test',extra:1}}])assert.throws(()=>freezeModelComparison({...f.spec,prompts}));
+ const f=setup();try{promptSpec(f);for(const prompts of [null,{}, {baseline:null,candidate:null},{...f.spec.prompts,extra:null},{baseline:null,candidate:{version:'codex-research-11',instructions:'test'}},{baseline:null,candidate:{version:'experiment/a',instructions:''}},{baseline:null,candidate:{version:'experiment/a',instructions:'界'.repeat(22000)}},{baseline:null,candidate:{version:'experiment/a',instructions:'test',extra:1}}])assert.throws(()=>freezeModelComparison({...f.spec,prompts}));
   const same={version:'experiment/a',instructions:'same'};assert.throws(()=>freezeModelComparison({...f.spec,prompts:{baseline:same,candidate:{...same,version:'experiment/b'}}}));
  }finally{f.close();}
 });

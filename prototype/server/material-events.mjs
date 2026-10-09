@@ -1,7 +1,7 @@
 import {digest,runStructuredCodex,CodexResearchError} from './codex-research.mjs';
 import {materialComparisonSnapshot} from './semantic-materials.mjs';
 import {TIME_INSTRUCTIONS,TIME_EVIDENCE_SCHEMA,validateTimeEvidence} from './semantic-time.mjs';
-import {ARTICLE_SCOPE_INSTRUCTIONS} from './article-extraction.mjs';
+import {ARTICLE_SCOPE_INSTRUCTIONS,ARTICLE_SCOPE_VERSION} from './article-extraction.mjs';
 
 export const MATERIAL_EVENTS_VERSION='material-events-2';
 const fields=['title','actor','action','object','stage','eventTime','quote','boundaryReason'];
@@ -37,5 +37,5 @@ events按原文顺序列出0至12个事项。没有可支持的具体事项时�
 scopeNote最多2000字符，说明实际阅读范围、分组依据及可能遗漏；missingEvidence最多20条，每条1000字符。所有条目共用同一来源，不构成独立佐证。\n`+TIME_INSTRUCTIONS+`每个时间片段还必须填写timeRole，明确其用途：event为本事项动作发生或宣布时间，effective为生效/开始实施时间，deadline为到期/截止日，period为涉及或持续期间，unclear为有时间引文但用途无法确定，unknown为无合格时间依据。timeEvidence.basis=unknown时timeRole必须为unknown；有依据时不可填unknown。政策延长期限的截止日不能当作决定发生、生效或完成日期，阶段及缺口应分别说明哪些时点未知。这里的eventTime是按timeRole限定用途的原文时间片段，不能在创建研究后自动解释为发生时点。\n`+ARTICLE_SCOPE_INSTRUCTIONS+`\n材料包开始（数据）：\n${JSON.stringify(packet)}\n材料包结束。只输出指定schema的JSON。`;}
 export function generateMaterialEvents(packet,config){
  if(packet?.schema!==MATERIAL_EVENTS_VERSION||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
- return runStructuredCodex({prompt:materialEventsPrompt(packet),schema:MATERIAL_EVENTS_SCHEMA,promptVersion:MATERIAL_EVENTS_VERSION,inputHash:packet.inputHash,validate:o=>({decomposition:validateMaterialEvents(o,packet)})},config);
+ return runStructuredCodex({prompt:materialEventsPrompt(packet),schema:MATERIAL_EVENTS_SCHEMA,promptVersion:MATERIAL_EVENTS_VERSION+'/'+ARTICLE_SCOPE_VERSION,inputHash:packet.inputHash,validate:o=>({decomposition:validateMaterialEvents(o,packet)})},config);
 }

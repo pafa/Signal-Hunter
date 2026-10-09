@@ -29,7 +29,7 @@ export function openStore(path) {
   };
   const selectNews='SELECT n.*,r.received_at AS revision_first_seen FROM news n LEFT JOIN revisions r ON r.news_id=n.id AND r.version=n.revision';
   const mapNews=row=>({...JSON.parse(row.payload),firstSeen:row.first_seen,articleFirstSeen:row.first_seen,revisionFirstSeen:row.revision_first_seen||null,lastSeen:row.last_seen,revision:row.revision,selected:!!row.selected,read:!!row.read,note:row.note});
-  const newsRows=()=>db.prepare(selectNews+' ORDER BY n.last_seen DESC LIMIT 500').all().map(mapNews).sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt));
+  const newsRows=()=>db.prepare(selectNews+' ORDER BY n.last_seen DESC LIMIT 500').all().map(mapNews).sort((a,b)=>(b.publishedAt||'').localeCompare(a.publishedAt||''));
   return {
     db,getSettings,setSettings,
     news:newsRows,

@@ -1,3 +1,4 @@
+import {researchActor} from './research-actor.mjs';
 import {researchHistoryPage,researchHistoryDetail} from './research-history.mjs';
 import {validateDossierSections} from '../shared/research-dossier.mjs';
 import {researchReadiness} from '../shared/research-readiness.mjs';
@@ -13,6 +14,8 @@ import {validateResearchBrief} from './research-brief.mjs';
 import {openMaterials,immutableMaterialSnapshot} from './research-materials.mjs';
 import {checkMaterialitySources} from './materiality-source-check.mjs';
 import {validateMaterialityReviews} from './materiality-review.mjs';
+import {validateCompanyAssessments} from './company-assessment.mjs';
+import {validateSourceRequests} from './source-links.mjs';
 import {readPublicArticle,publicSourceUrl} from './source-reader.mjs';
 import {RELATION_KINDS,relatedCandidates} from '../shared/research-links.mjs';
 import {semanticResearchCandidates,freezeSemanticBasis,semanticBasisStatus} from './semantic-research.mjs';
@@ -90,15 +93,20 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   materialList(id,options){return materials.list(get(id),options);},
   materialDetail(id,materialId){return materials.detail(get(id),materialId);},
   packet(id){return materials.packet(withSemanticStatus(withAvailability(get(id))));},
-  adoptModelDraft(id,data,candidate,beforeWrite=()=>{}){
+  adoptModelDraft(id,data,candidate,beforeWrite=()=>{},actor){
+   const provenance=researchActor(actor);
    const topic=get(id),packet=materials.packet(withSemanticStatus(withAvailability(topic)));
    if(data.version!==topic.version||candidate?.trace?.inputHash!==packet.inputHash||candidate?.trace?.topicId!==id||candidate?.trace?.topicVersion!==topic.version||candidate?.status!=='candidate')throw new Error('模型候选与当前研究不匹配，请重新生成');
    const sections=validateDossierSections(candidate.sections,topic.evidence);
    const reviews=validateMaterialityReviews(candidate.materialityReviews,packet);
-   topic.dossier={sections,reviewStatus:'draft',revisionReason:'本人采纳 Codex 候选为待复核草稿',preparedBy:'Codex 模型候选 · 本人采纳，尚待复核',preparedAt:clock(),basedOnResearchVersion:topic.version+1,sourceModelRun:{id:data.runId,...candidate.trace},missingEvidence:candidate.missingEvidence};
+   const sourceRequests=validateSourceRequests(candidate.sourceRequests,packet);
+   const assessments=validateCompanyAssessments(candidate.companyAssessments,packet);
+   topic.dossier={sections,...provenance,reviewStatus:'draft',revisionReason:actor?'系统形成研判草稿；事实与交易条件未获人工确认':'本人采纳 Codex 候选为待复核草稿',preparedBy:actor?'Codex 模型研判 · 系统生成，尚待复核':'Codex 模型候选 · 本人采纳，尚待复核',preparedAt:clock(),basedOnResearchVersion:topic.version+1,sourceModelRun:{id:data.runId,...candidate.trace},missingEvidence:candidate.missingEvidence};
    if(reviews?.length)topic.dossier.materialityReview={...packet.input.materialityReview,checks:reviews,topicVersion:topic.version,inputHash:packet.inputHash};
+   if(sourceRequests!==undefined)topic.dossier.sourceRequests=sourceRequests;
+   if(assessments!==undefined)topic.dossier.companyAssessment={...packet.input.companyAssessment,assessments,inputHash:packet.inputHash,inputTopicVersion:topic.version,savedInResearchVersion:topic.version+1,sourceModelRunId:data.runId,preparedAt:topic.dossier.preparedAt};
    topic.researchUpdatedAt=clock();
-   return commit(topic,'采纳模型研判草稿：未标记完成、未提交交易',data.version,()=>{
+   return commit(topic,actor?'系统生成研判草稿：未标记完成、未提交交易':'采纳模型研判草稿：未标记完成、未提交交易',data.version,()=>{
     if(materials.packet(withSemanticStatus(withAvailability(get(id)))).inputHash!==candidate.trace.inputHash)throw new Error('研究或材料已变化；此候选保留在历史中，请重新生成');
     beforeWrite();
    });
@@ -208,10 +216,11 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   create(data){const at=clock(),title=assertText(data.title,'主题标题',140),summary=assertText(data.summary,'研究假设');
    return commit({id:randomUUID(),title,summary,type:'cluster',label:'自建主题',origin:'user',status:'active',createdAt:at,chain:[{id:'fact',title:'事实变化',question:'什么证据能证实变化？'},{id:'mechanism',title:'影响机制',question:'变化如何传到目标公司的业务？'},{id:'earnings',title:'财务兑现',question:'如何改变预期与盈利？'}],evidence:[],companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'添加支持、反对或待核实线索，建立可证伪的因果链。'},'用户创建主题');
   },
-  createFromMaterialEvent(snapshot,basis,beforeWrite){
+  createFromMaterialEvent(snapshot,basis,beforeWrite,actor){
+   const provenance=researchActor(actor);
    const m=materials.get(snapshot.id),at=clock(),title=assertText(basis.event.title,'事项标题',140),summary='待核对事项：'+title;
-   const topic={id:randomUUID(),title,summary,type:'event',label:'材料拆分 · 待核对',origin:'material-event-review',status:'active',createdAt:at,chain:defaultChain(),eventExtraction:structuredClone(basis),companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'核对原文事项边界、主体身份及反证；共享材料不构成独立佐证。',evidence:[{id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,datePrecision:m.datePrecision,firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:at,originKey:m.url?new URL(m.url).hostname:m.sourceName,verification:'unverified',contentScope:m.scope,stance:'unverified',family:'other',step:'fact',interpretation:basis.reviewNote}]};
-   return commit(topic,'本人选择材料拆分事项建立研究；共享原材料，未完成研判或创建交易',undefined,()=>beforeWrite(topic));
+   const topic={id:randomUUID(),title,summary,type:'event',label:actor?'系统识别事项 · 待核实':'材料拆分 · 待核对',origin:actor?'material-event-system':'material-event-review',status:'active',createdAt:at,chain:defaultChain(),eventExtraction:structuredClone({...basis,...provenance}),companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'核对原文事项边界、主体身份及反证；共享材料不构成独立佐证。',evidence:[{id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,datePrecision:m.datePrecision,firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:at,originKey:m.url?new URL(m.url).hostname:m.sourceName,verification:'unverified',contentScope:m.scope,stance:'unverified',family:'other',step:'fact',interpretation:basis.reviewNote}]};
+   return commit(topic,actor?'系统识别事项建立研究；共享原材料，未核实事实或创建交易':'本人选择材料拆分事项建立研究；共享原材料，未完成研判或创建交易',undefined,()=>beforeWrite(topic));
   },
   update(id,data){const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
    const allowed=['version','status','hypothesis','assessment','nextEvidence','dossier'];if(Object.keys(data).some(k=>!allowed.includes(k)))throw new Error('不支持的研究修改');
@@ -232,7 +241,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
     const d=data.dossier;if(!d||Object.keys(d).some(k=>!['sections','reviewStatus','revisionReason'].includes(k))||!['draft','complete'].includes(d.reviewStatus))throw new Error('研判修改字段无效');
     const sections=validateDossierSections(d.sections,topic.evidence,{allowIncomplete:d.reviewStatus==='draft'}),reason=assertText(d.revisionReason,'研判修订原因',1000);
     if(d.reviewStatus==='complete'&&(researchReadiness(topic).gaps.length||sections.some(s=>!s.sourceIds.length)))throw new Error('完成研判前需补齐研究记录并为每章关联来源；未知事项须说明核查方法');
-    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1,...(topic.dossier?.sourceModelRun?{sourceModelRun:topic.dossier.sourceModelRun}:{}),...(topic.dossier?.materialityReview?{materialityReview:topic.dossier.materialityReview}:{})};topic.researchUpdatedAt=clock();
+    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1,...(topic.dossier?.sourceModelRun?{sourceModelRun:topic.dossier.sourceModelRun}:{}),...(topic.dossier?.companyAssessment?{companyAssessment:topic.dossier.companyAssessment}:{}),...(topic.dossier?.materialityReview?{materialityReview:topic.dossier.materialityReview}:{})};topic.researchUpdatedAt=clock();
    }
    return commit(topic,data.status?'主题归档状态变更':data.dossier?'保存详细研判与人工完成状态（未提交交易）':data.assessment?'保存消息状态、概率与影响评估（未提交交易）':'保存交易假设（未提交交易申请）',data.version);
   },

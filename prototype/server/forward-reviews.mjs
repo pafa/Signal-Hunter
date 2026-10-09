@@ -44,12 +44,14 @@ export function openForwardReviews(store,research,captures,{enabled=false,now=Da
    if(!capture.inputEligibility.eligible)reasons.push('原输入未通过前向结构准入');
    return {...c,resolution:result,score:reasons.length?null:(c.probability/100-mature.label)**2,scoringReasons:reasons};
   });
-  return {runId:capture.runId,topicId:capture.topicId,topicTitle:capture.topicTitle,version:entries.length,captureHash:capture.snapshotHash,label,claims,history:entries,forwardEligible:false,independence:'评审者和未见结果为自述；未验证人员独立性、原文语义或实际事件时点。概率来自调用前的研究主张，不是五章模型输出。'};
+  return {subject:capture.subject||'research',runId:capture.runId,topicId:capture.topicId,topicTitle:capture.topicTitle,version:entries.length,captureHash:capture.snapshotHash,label,claims,history:entries,forwardEligible:false,independence:'评审者和未见结果为自述；未验证人员独立性、原文语义或实际事件时点。概率来自调用前的研究主张，不是五章模型输出。'};
  }
  const api={
   detail(id){const {capture,input}=original(id);return summary(capture,input,history(id,capture));},
-  inputs(id){const {capture}=original(id),topic=research.get(capture.topicId),refs=topic.evidence.flatMap(e=>e.materialId?[{kind:'material',id:e.materialId,revision:e.materialRevision}]:e.newsId?[{kind:'news',id:e.newsId,revision:e.newsRevision}]:[]),items=[],unavailable=[];
-   for(const ref of refs){try{items.push(source(ref));}catch{unavailable.push(ref);}}return {items,unavailable,scope:'当前研究已关联的确切新闻/正文版本；仅供选择结局证据，原调用输入不改变'};
+  inputs(id){const {capture,input}=original(id),synthesis=capture.subject==='event-cluster',evidence=synthesis?input.evidence:research.get(capture.topicId).evidence,unique=new Map();
+   for(const e of evidence){const m=e.material,ref=m?{kind:'material',id:m.id,revision:m.revision}:e.materialId?{kind:'material',id:e.materialId,revision:e.materialRevision}:e.newsId?{kind:'news',id:e.newsId,revision:e.newsRevision}:null;if(ref)unique.set(`${ref.kind}:${ref.id}:${ref.revision}`,ref);}
+   const refs=[...unique.values()],items=[],unavailable=[];
+   for(const ref of refs){try{items.push(source(ref));}catch{unavailable.push(ref);}}return {items,unavailable,scope:synthesis?'事件综合调用时冻结的新闻/正文版本；成员概率不合并成综合预测':'当前研究已关联的确切新闻/正文版本；仅供选择结局证据，原调用输入不改变'};
   },
   write(id,kind,data){
    guard();if(!['label','outcome'].includes(kind)||!keys(data,'requestId,version,value')||typeof data.requestId!=='string'||!/^[-a-zA-Z0-9_]{8,80}$/.test(data.requestId)||!Number.isSafeInteger(data.version)||data.version<0)fail(0);

@@ -1,10 +1,11 @@
+import {savedCompanyAssessment} from './company-assessment.mjs';
 import {companyIdentity} from './company-directory.mjs';
 
 export function companyResearch(symbol,topics,book={}){
  const identity=companyIdentity(symbol);
  const research=topics.filter(t=>t.companies.some(c=>c.symbol===identity.symbol)).map(t=>{
   const relation=t.companies.find(c=>c.symbol===identity.symbol),ids=new Set(relation.evidenceIds||[]);
-  return {topicId:t.id,title:t.title,version:t.version,status:t.status,updatedAt:t.updatedAt,relation,
+  return {topicId:t.id,title:t.title,version:t.version,status:t.status,updatedAt:t.updatedAt,relation,modelAssessment:savedCompanyAssessment(t,identity.symbol),
    evidence:t.evidence.filter(e=>ids.has(e.id)),contextEvidence:t.evidence.filter(e=>!ids.has(e.id)),
    hypothesis:t.hypothesis,changeSummary:t.changeSummary,nextEvidence:t.nextEvidence};
  }).sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));

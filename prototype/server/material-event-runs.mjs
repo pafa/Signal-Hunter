@@ -1,3 +1,4 @@
+import {researchActor} from './research-actor.mjs';
 import {randomUUID} from 'node:crypto';
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {digest,CodexResearchError,rejectedOutputDiagnostic} from './codex-research.mjs';
@@ -47,18 +48,19 @@ export function openMaterialEventRuns(store,research,{enabled=false,config={},ru
   },
   async wait(id){await jobs.get(id)?.done;const r=read(id);return api.get(r.topicId,id);},
   cancel(topicId,id){guard();api.get(topicId,id);const job=jobs.get(id);if(!job)throw new Error('此调用不在本实例运行');job.controller.abort();return {id,status:'cancelling'};},
-  decide(topicId,id,data){
+  decide(topicId,id,data,actor){
+   const provenance=researchActor(actor);
    guard();if(!data||Object.keys(data).sort().join(',')!=='action,eventIndex,note,version'||!['create','reject','reopen'].includes(data.action)||!Number.isSafeInteger(data.eventIndex)||data.eventIndex<0||!Number.isSafeInteger(data.version)||data.version<0||typeof data.note!=='string'||!data.note.trim()||data.note.length>1200)throw new Error('拆分核对参数无效');
    const r=read(id);if(r.topicId!==topicId)throw new Error('拆分记录不属于此研究');
    const event=r.candidate?.decomposition?.events[data.eventIndex];if(r.status!=='candidate'||!event)throw new Error('没有可核对的事件候选');
    validateSavedCandidate(r);const frozenHash=digest(r);
-   const latest=history(id,data.eventIndex)[0],requestHash=digest({eventIndex:data.eventIndex,version:data.version,action:data.action,note:data.note});
+   const latest=history(id,data.eventIndex)[0],requestHash=digest({eventIndex:data.eventIndex,version:data.version,action:data.action,note:data.note,...provenance});
    if(latest?.requestHash===requestHash)return api.get(topicId,id);
    const check=()=>{guard();if(digest(read(id))!==frozenHash)throw new CodexResearchError('output');const current=history(id,data.eventIndex)[0];if((current?.version||0)!==data.version||current?.action==='create')throw new Error('核对记录已变化；已创建的研究请在研究页处理');if(data.action==='create'&&(stale(r)||current?.action==='reject'))throw new Error('材料或研究已变化，或此候选已排除；请刷新核对');if(data.action==='reopen'&&current?.action!=='reject')throw new Error('只有已排除候选可以重新核对');};
-   const decision={version:data.version+1,action:data.action,note:data.note.trim(),at:new Date(now()).toISOString(),requestHash,inputHash:r.packet.inputHash};
+   const decision={...provenance,version:data.version+1,action:data.action,note:data.note.trim(),at:new Date(now()).toISOString(),requestHash,inputHash:r.packet.inputHash};
    const save=()=>db.prepare('INSERT INTO material_event_decisions VALUES(?,?,?,?)').run(id,data.eventIndex,decision.version,JSON.stringify(decision));
    if(data.action==='create'){
-    check();research.createFromMaterialEvent(r.packet.input.material,{runId:id,eventIndex:data.eventIndex,event,sourceTopicId:topicId,sourceTopicVersion:r.packet.input.topicVersion,inputHash:r.packet.inputHash,modelTrace:r.candidate.trace,reviewNote:decision.note},topic=>{check();decision.topicId=topic.id;save();});
+    check();research.createFromMaterialEvent(r.packet.input.material,{runId:id,eventIndex:data.eventIndex,event,sourceTopicId:topicId,sourceTopicVersion:r.packet.input.topicVersion,inputHash:r.packet.inputHash,modelTrace:r.candidate.trace,reviewNote:decision.note},topic=>{check();decision.topicId=topic.id;save();},actor);
    }else{db.exec('BEGIN IMMEDIATE');try{check();save();db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}}
    return api.get(topicId,id);
   },

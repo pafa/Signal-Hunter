@@ -43,9 +43,9 @@ export function compareReports(a,b){
 
 // Bounded recall for human-selected occurrences. Article-wide evidence and
 // sibling occurrences never supply matching terms or independent corroboration.
-export function recallOccurrence(topic,topics){
+export function recallOccurrence(topic,topics,{limit=500}={}){
  const focus=t=>{const e=t.eventExtraction.event;return terms([e.title,e.actor,e.action,e.object,e.quote].join(' '));};
- const source=topic.eventExtraction,words=focus(topic),all=topics.filter(t=>t.eventExtraction&&t.status==='active'&&t.id!==topic.id),pool=[...all].sort((a,b)=>(b.updatedAt||b.createdAt||'').localeCompare(a.updatedAt||a.createdAt||'')||a.id.localeCompare(b.id)).slice(0,500);
+ const source=topic.eventExtraction,words=focus(topic),all=topics.filter(t=>t.eventExtraction&&t.status==='active'&&t.id!==topic.id),ordered=[...all].sort((a,b)=>(b.updatedAt||b.createdAt||'').localeCompare(a.updatedAt||a.createdAt||'')||a.id.localeCompare(b.id)),pool=limit===null?ordered:ordered.slice(0,limit);
  const items=pool.flatMap(t=>{
   const origin=t.eventExtraction;
   if(origin.sourceTopicId===source.sourceTopicId||t.evidence.some(e=>e.materialId&&topic.evidence.some(a=>a.materialId===e.materialId)))return [];
