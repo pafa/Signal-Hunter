@@ -13,7 +13,7 @@ const packet=()=>{const input={topicId:'one',topicVersion:1,evidence:[{id:'mater
 const req={evidenceId:'material:one',url:'https://ir.acme.com/statement',reason:'核对公告中的生效条件'};
 
 test('captures literal article links with bounded context; unsafe, attachment, duplicate and self links are not targets',()=>{
- const result=capture(`<p>公告引用${link('/statement#section')}${link('/statement')}${link(base)}${link('http://public.com/no')}${link('https://127.0.0.1/no')}${link('https://internal.local/no')}${link('https://ir.acme.com/plan.pdf')}${link('javascript:alert(1)')}${link('/cdn-cgi/l/email-protection','[email protected]')}${link('#same')}</p>`);
+ const result=capture(`<p>公告引用${link('/statement#section')}${link('/statement')}${link(base)}${link('http://public.com/no')}${link('https://127.0.0.1/no')}${link('https://internal.local/no')}${link('https://ir.acme.com/plan.docx')}${link('javascript:alert(1)')}${link('/cdn-cgi/l/email-protection','[email protected]')}${link('#same')}</p>`);
  assert.equal(result.schema,SOURCE_LINK_SCHEMA);assert.equal(result.links.length,1);assert.equal(result.links[0].url,req.url);assert.match(result.links[0].context,/公告引用/);assert.deepEqual(validateSourceLinks(result),result);
  const bounded=capture(Array.from({length:35},(_,i)=>link('/'+i,'甲'.repeat(220))).join(''));assert.equal(bounded.links.length,30);assert.equal(bounded.truncated,true);assert.equal(bounded.links[0].label.length,200);
 });

@@ -86,6 +86,8 @@ Research mode attempts to retrieve **Reuters headline links aggregated through G
 
 Database mode checks prevent opening an existing database in the wrong mode. See the [operations guide](prototype/README.md) for the compatibility-only `legacy` mode, port settings, and `SIGNAL_DB_PATH`. The launcher reads process environment variables; it does not automatically load `.env` files.
 
+Public PDFs can enter the existing source-reading and research pipeline. Text-layer extraction preserves every page's text, empty-text warnings and the raw-file fingerprint in local storage and database backups. It does not validate table columns, scanned content, embedded attachments or signatures. File metadata is not treated as publication time. Bounded reading failures remain gaps while other research continues. Explicit PDF links in saved articles use the same one-level follow-up policy; this is not web-wide attachment search.
+
 Automatic relationship plans from one source can share one model call across up to three complete pairs. Each pair retains its scope, direction, citations and independent result, while the original whole-call output and trace remain available. Usage separates actual invocations from pair attempts. A failed shared call falls back to bounded individual retries; cancelling it stops all pairs in that invocation. The comparison scope is not reduced, and lower call counts do not establish real-time throughput or quality.
 
 ## Event continuity candidate

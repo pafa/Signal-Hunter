@@ -2,7 +2,7 @@ import {digest,runStructuredCodex,CodexResearchError} from './codex-research.mjs
 import {materialEventsPacket} from './material-events.mjs';
 import {eventComparisonSnapshot} from './semantic-event-scopes.mjs';
 import {COMPANY_DIRECTORY,DIRECTORY_VERSION} from '../shared/company-directory.mjs';
-import {ARTICLE_SCOPE_INSTRUCTIONS} from './article-extraction.mjs';
+import {ARTICLE_SCOPE_INSTRUCTIONS,ARTICLE_SCOPE_VERSION} from './article-extraction.mjs';
 import {companyDirectoryTime,DIRECTORY_TIME_VERSION} from './company-directory-time.mjs';
 export const COMPANY_ENTITIES_VERSION='company-entities-2';
 const text={type:'string'},types=['company','subsidiary','product','other','unclear'],states=['candidate','ambiguous','unresolved','not-company'];
@@ -40,5 +40,5 @@ export function companyEntitiesPrompt(packet){return `你是公司与证券身�
 `+ARTICLE_SCOPE_INSTRUCTIONS+`\n冻结材料与目录开始（数据）：\n${JSON.stringify(packet)}\n数据结束。只返回指定schema的JSON。`;}
 export function generateCompanyEntities(packet,config){
  if(packet?.schema!==COMPANY_ENTITIES_VERSION||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
- return runStructuredCodex({prompt:companyEntitiesPrompt(packet),schema:COMPANY_ENTITIES_SCHEMA,promptVersion:COMPANY_ENTITIES_VERSION,inputHash:packet.inputHash,validate:o=>({resolution:validateCompanyEntities(o,packet)})},config);
+ return runStructuredCodex({prompt:companyEntitiesPrompt(packet),schema:COMPANY_ENTITIES_SCHEMA,promptVersion:COMPANY_ENTITIES_VERSION+'/'+ARTICLE_SCOPE_VERSION,inputHash:packet.inputHash,validate:o=>({resolution:validateCompanyEntities(o,packet)})},config);
 }

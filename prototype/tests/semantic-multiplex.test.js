@@ -1,3 +1,4 @@
+import {ARTICLE_SCOPE_VERSION} from '../server/article-extraction.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -19,7 +20,7 @@ const read=(f,id)=>f.store.db.prepare('SELECT * FROM research_pipeline_relations
 test('one frozen group carries every original pair, shared materials once, exact output coverage and orientations',async()=>{
  const ps=packets(),p=comparisonGroup(ps),candidate=await groupedComparisonFixture(q=>comparison(q,'unrelated'))(p);
  assert.deepEqual(comparisonGroupPackets(p),ps);assert.equal(Object.keys(p.input.records).length,4);assert.equal(p.input.pairs.length,3);assert.deepEqual(comparisonGroupSchema(p).properties.comparisons.required,['p0','p1','p2']);assert.match(comparisonGroupPrompt(p),/不能跳过、合并或改换配对/);
- assert.equal(comparisonContract(p).promptVersion,COMPARISON_GROUP_VERSION);assert.equal(comparisonContract(p).prompt,comparisonGroupPrompt(p));
+ assert.equal(comparisonContract(p).promptVersion,COMPARISON_GROUP_VERSION+'/'+ARTICLE_SCOPE_VERSION);assert.equal(comparisonContract(p).prompt,comparisonGroupPrompt(p));
  for(let i=0;i<3;i++){const projected=projectComparisonGroup(candidate,p,'test-model',i);validateComparisonCandidate(projected,ps[i],'test-model',{requireTimeEvidence:true});assert.equal(projected.rawOutput,candidate.rawOutput);assert.equal(projected.trace.inputHash,p.inputHash);assert.throws(()=>validateComparisonCandidate(projected,ps[(i+1)%3],'test-model'));}
  for(const mutate of [v=>delete v.comparisons.p1,v=>v.comparisons.p3=v.comparisons.p0,v=>v.comparisons.p1.right.quote=v.comparisons.p2.right.quote,v=>v.comparisons.p0.left.timeEvidence={basis:'explicit',quote:'2099-01-01',quoteField:'body'}]){const v=JSON.parse(candidate.rawOutput);mutate(v);assert.throws(()=>validateComparisonGroup(v,p));}
  for(const mutate of [v=>v.comparison.relation='followup',v=>v.group.pairId='p1',v=>v.trace.inputHash='wrong',v=>v.rawOutput='{}']){const v=projectComparisonGroup(candidate,p,'test-model',0);mutate(v);assert.throws(()=>validateComparisonCandidate(v,ps[0],'test-model'));}

@@ -1,16 +1,19 @@
 import {publicSourceUrl} from './public-source-url.mjs';
 
-export const SOURCE_LINK_SCHEMA='article-source-links/1';
-export const SOURCE_LINK_INSTRUCTIONS='material.sourceLinks只记录正文中出现的网页链接、标签及邻近原文，不是已读来源或事实依据。sourceRequests可选择其中最多3个直接有助于核对当前missingEvidence的链接，每项包含evidenceId、url、reason；没有可用链接或不需要补充时输出空数组。evidenceId和url必须逐字来自当前材料，不得编造地址、添加查询参数或把链接名称当内容。模型不要自行浏览，后台会独立读取、研究并比较；同发布方不增加独立支持，链接也不证明来源可靠。';
+export const SOURCE_LINK_SCHEMA='article-source-links/2';
+export const SOURCE_LINK_INSTRUCTIONS='material.sourceLinks只记录正文中出现的网页或PDF链接、标签及邻近原文，不是已读来源或事实依据。sourceRequests可选择其中最多3个直接有助于核对当前missingEvidence的链接，每项包含evidenceId、url、reason；没有可用链接或不需要补充时输出空数组。evidenceId和url必须逐字来自当前材料，不得编造地址、添加查询参数或把链接名称当内容。模型不要自行浏览，后台会有界读取HTML或PDF文字层、独立研究并比较，扫描图及未读附件保留缺口；同发布方不增加独立支持，链接也不证明来源可靠。';
 const keys=(v,n)=>!!v&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===n;
-const nonArticle=/\.(?:pdf|docx?|xlsx?|csv|pptx?|txt|zip|png|jpe?g|gif|svg|webp|mp[34])$/i;
-const isNonArticle=url=>nonArticle.test(new URL(url).pathname)||/^\/cdn-cgi\/l\/email-protection\/?$/.test(new URL(url).pathname);
+const nonArticle=/\.(?:docx?|xlsx?|csv|pptx?|txt|zip|png|jpe?g|gif|svg|webp|mp[34])$/i;
+const pathname=url=>{const path=new URL(url).pathname;try{return decodeURIComponent(path);}catch{return path;}};
+const isPdf=url=>/\.pdf$/i.test(pathname(url));
+const legacyNonArticle=url=>/\.(?:pdf|docx?|xlsx?|csv|pptx?|txt|zip|png|jpe?g|gif|svg|webp|mp[34])$/i.test(new URL(url).pathname)||/^\/cdn-cgi\/l\/email-protection\/?$/.test(new URL(url).pathname);
+const isNonArticle=url=>nonArticle.test(pathname(url))||/^\/cdn-cgi\/l\/email-protection\/?$/.test(new URL(url).pathname);
 export function sourceLinks(root,base){
  const links=[],seen=new Set();let inspected=0,omitted=0,truncated=false;
  for(const a of root.querySelectorAll('a[href]')){
   const raw=a.getAttribute('href')?.trim();if(!raw||raw.startsWith('#'))continue;inspected++;
   let url;try{url=publicSourceUrl(new URL(raw,base).href).href;}catch{omitted++;continue;}
-  if(url===base||seen.has(url)||a.hasAttribute('download')||isNonArticle(url))continue;
+  if(url===base||seen.has(url)||a.hasAttribute('download')&&!isPdf(url)||isNonArticle(url))continue;
   seen.add(url);const label=a.textContent.trim().replace(/\s+/g,' '),context=(a.closest('p,li,td,blockquote')?.textContent||label).trim().replace(/\s+/g,' ');
   if(!label||url.length>2000){omitted++;continue;}
   if(links.length>=30){truncated=true;continue;}
@@ -21,10 +24,10 @@ export function sourceLinks(root,base){
 }
 export function validateSourceLinks(v){
  const fail=()=>{throw Error('正文来源链接记录无效');};
- if(!keys(v,'inspected,links,omitted,schema,scope,truncated')||v.schema!==SOURCE_LINK_SCHEMA||v.scope!=='extracted-html-links'||!Array.isArray(v.links)||v.links.length>30||typeof v.truncated!=='boolean'||![v.inspected,v.omitted].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=18000)||v.links.length>v.inspected||v.omitted>v.inspected)fail();
+ if(!keys(v,'inspected,links,omitted,schema,scope,truncated')||![SOURCE_LINK_SCHEMA,'article-source-links/1'].includes(v.schema)||v.scope!=='extracted-html-links'||!Array.isArray(v.links)||v.links.length>30||typeof v.truncated!=='boolean'||![v.inspected,v.omitted].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=18000)||v.links.length>v.inspected||v.omitted>v.inspected)fail();
  const seen=new Set();for(const a of v.links){
   if(!keys(a,'context,label,url')||typeof a.url!=='string'||a.url.length>2000||typeof a.label!=='string'||!a.label.trim()||a.label.length>200||typeof a.context!=='string'||a.context.length>800)fail();
-  try{if(publicSourceUrl(a.url).href!==a.url||seen.has(a.url)||isNonArticle(a.url))fail();}catch{fail();}seen.add(a.url);
+  try{if(publicSourceUrl(a.url).href!==a.url||seen.has(a.url)||(v.schema==='article-source-links/1'?legacyNonArticle(a.url):isNonArticle(a.url)))fail();}catch{fail();}seen.add(a.url);
  }
  return structuredClone(v);
 }

@@ -11,7 +11,7 @@ import {PACKET_VERSION} from './research-materials.mjs';
 import {validateDossierSections} from '../shared/research-dossier.mjs';
 import {MATERIALITY_REVIEW_SCHEMA,validateMaterialityReviews} from './materiality-review.mjs';
 
-export const CODEX_PROMPT_VERSION='codex-research-10';
+export const CODEX_PROMPT_VERSION='codex-research-11';
 export const CODEX_SCHEMA_VERSION='codex-draft-evidence-3';
 export const digest=value=>createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
 const sectionIds=['facts','materiality','companies','scenarios','conditions'];

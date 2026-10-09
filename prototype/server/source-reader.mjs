@@ -8,8 +8,10 @@ import {articleTableText} from './article-table-text.mjs';
 import {JSDOM} from 'jsdom';
 import {Readability} from '@mozilla/readability';
 import {sourceLinks} from './source-links.mjs';
+import {extractPdf} from './pdf-source.mjs';
+import {MAX_PDF_BYTES} from '../shared/pdf-source.mjs';
 
-export const READER_VERSION='public-article-8';
+export const READER_VERSION='public-article-9';
 export const MAX_SOURCE_BYTES=1_000_000;
 function assertArticleHost(url){
  if(['news.google.com','consent.google.com','accounts.google.com'].includes(url.hostname))throw new Error('这是聚合或登录入口，请在阅读来源后粘贴发布方的文章链接');
@@ -18,17 +20,19 @@ function assertArticleHost(url){
 // Redirects re-enter this check. No browser cookies, credentials, scripts or subresources.
 function transport(url,address,signal){
  return new Promise((resolve,reject)=>{
-  const req=https.get(url,{agent:false,signal,headers:{'User-Agent':'SignalHunter/0.10 (personal public-source reader)','Accept':'text/html,application/xhtml+xml','Accept-Encoding':'identity'},lookup:(_host,options,callback)=>options.all?callback(null,[{address,family:4}]):callback(null,address,4)},res=>{
+  const req=https.get(url,{agent:false,signal,headers:{'User-Agent':'SignalHunter/0.11 (personal public-source reader)','Accept':'text/html,application/xhtml+xml,application/pdf','Accept-Encoding':'identity'},lookup:(_host,options,callback)=>options.all?callback(null,[{address,family:4}]):callback(null,address,4)},res=>{
    const status=res.statusCode,headers=res.headers;
    if(status>=300&&status<400||status!==200){res.resume();resolve({status,headers,body:''});return;}
-   if(!/^(text\/html|application\/xhtml\+xml)(?:;|$)/i.test(headers['content-type']||'')){res.resume();reject(new Error('当前仅支持 HTML 正文；PDF 等材料可阅读后粘贴摘录'));return;}
+   const pdf=/^application\/pdf(?:;|$)/i.test(headers['content-type']||'');
+   if(!pdf&&!/^(text\/html|application\/xhtml\+xml)(?:;|$)/i.test(headers['content-type']||'')){res.resume();reject(new Error('当前支持 HTML 和有文字层的 PDF，其他格式保留读取缺口'));return;}
    if(headers['content-encoding']&&headers['content-encoding']!=='identity'){res.resume();reject(new Error('来源未返回可读取的未压缩页面'));return;}
    const charset=/charset\s*=\s*["']?([^\s;"']+)/i.exec(headers['content-type']||'')?.[1];
-   if(charset&&!/^(utf-?8|us-ascii)$/i.test(charset)){res.resume();reject(new Error('来源不是 UTF-8 编码，请手动补充以避免乱码'));return;}
-   if(Number(headers['content-length'])>MAX_SOURCE_BYTES){res.destroy();reject(new Error('来源页面超过 1 MB，请手动补充必要材料'));return;}
+   if(!pdf&&charset&&!/^(utf-?8|us-ascii)$/i.test(charset)){res.resume();reject(new Error('来源不是 UTF-8 编码，保留读取缺口以避免乱码'));return;}
+   const maximum=pdf?MAX_PDF_BYTES:MAX_SOURCE_BYTES,message=pdf?'PDF超过8 MB，保留读取缺口':'来源页面超过 1 MB，保留读取缺口';
+   if(Number(headers['content-length'])>maximum){res.destroy();reject(new Error(message));return;}
    let bytes=0;const chunks=[];
-   res.on('data',chunk=>{bytes+=chunk.length;if(bytes>MAX_SOURCE_BYTES){res.destroy(new Error('来源页面超过 1 MB，请手动补充必要材料'));return;}chunks.push(chunk);});
-   res.on('error',reject);res.on('end',()=>resolve({status,headers,body:Buffer.concat(chunks).toString('utf8')}));
+   res.on('data',chunk=>{bytes+=chunk.length;if(bytes>maximum){res.destroy(new Error(message));return;}chunks.push(chunk);});
+   res.on('error',reject);res.on('end',()=>{const data=Buffer.concat(chunks);resolve({status,headers,body:pdf?data:data.toString('utf8')});});
   });req.on('error',reject);
  });
 }
@@ -62,6 +66,7 @@ export async function readPublicArticle(value,{resolver=lookup,request=transport
    url=publicSourceUrl(new URL(response.headers.location,url).href);continue;
   }
   if(response.status!==200)throw new Error(`来源返回 HTTP ${response.status}，未读取正文；可自行阅读后补充材料`);
-  return {...extractArticle(response.body,url.href),url:url.href,requestedUrl:publicSourceUrl(value).href};
+  const material=/^application\/pdf(?:;|$)/i.test(response.headers['content-type']||'')?await extractPdf(response.body,url.href,{signal}):extractArticle(response.body,url.href);
+  return {...material,url:url.href,requestedUrl:publicSourceUrl(value).href};
  }
 }

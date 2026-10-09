@@ -4,5 +4,6 @@ test('reading scope renders unread attachments, cleanup counts, limits and escap
  const {default:View}=await vite.ssrLoadModule('/src/major/ArticleReadingScope.jsx'),render=p=>renderToStaticMarkup(React.createElement(View,p));assert.equal(render({}),'');assert.match(render({showMissing:true}),/旧材料未记录附件范围/);
  const evidence={removedControls:{fontSize:1,share:1},attachments:[{label:'<script>附件</script>',url:'https://news.acme.com/a.pdf',formatHint:'pdf',status:'unread'}],truncated:true,omittedAttachmentLinks:2},html=render({evidence});for(const t of ['1 个附件入口尚未读取','附件未下载或读取','1 处字号控件','1 处分享控件','2 个附件入口','本列表不完整','&lt;script&gt;','PDF 链接','rel="noreferrer"'])assert.ok(html.includes(t),t);assert.doesNotMatch(html,/<script>/);
  const empty=render({evidence:{...evidence,removedControls:{fontSize:0,share:0},attachments:[],truncated:false,omittedAttachmentLinks:0}});assert.match(empty,/没有列出附件也不表示原文没有附件/);assert.doesNotMatch(empty,/已移除|本列表不完整/);
+ const pdf=render({evidence:{schema:'pdf-text-layer/1',pages:[{page:1,characters:42},{page:2,characters:0}],emptyPages:[2],warnings:['parser note'],bytes:2048,sha256:'a'.repeat(64),parser:'pdfjs-dist/6.4.299'}});for(const text of ['PDF文字层','2 页','第 2 页没有提取到文字','不能认定为空白页','表格列对应可能不完整','原始文件 SHA-256','1 条诊断'])assert.ok(pdf.includes(text),text);assert.doesNotMatch(pdf,/旧材料|附件入口尚未读取/);
  }finally{await vite.close();}
 });

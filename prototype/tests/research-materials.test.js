@@ -40,7 +40,7 @@ test('article extraction returns plain text, never executes scripts and refuses 
  assert.throws(()=>extractArticle('<html>Sign in</html>','https://ir.acme.com/a'),/未提取/);
  assert.throws(()=>extractArticle('x'.repeat(1_000_001),'https://ir.acme.com/a'),/1 MB/);
  assert.throws(()=>extractArticle(html,'https://news.google.com/rss/articles/abc'),/聚合/);
- const result=await readPublicArticle('https://ir.acme.com/a',{resolver:async()=>[{address:'93.184.216.34'}],request:async()=>({status:200,headers:{},body:html})});assert.equal(result.method,'public-article-8');
+ const result=await readPublicArticle('https://ir.acme.com/a',{resolver:async()=>[{address:'93.184.216.34'}],request:async()=>({status:200,headers:{},body:html})});assert.equal(result.method,'public-article-9');
 });
 test('offset publication times remain valid and bilingual source-path recall exposes its lexical basis',()=>{
  assert.equal(materialInput({...input,publishedAt:'2026-09-25T00:30:00+08:00'},at).publishedAt,'2026-09-25T00:30:00+08:00');

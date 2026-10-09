@@ -20,7 +20,7 @@ function setup(){
   for(const [file,data] of Object.entries(sources)){mkdirSync(dirname(join(path,file)),{recursive:true});writeFileSync(join(path,file),data.text);}
   symlinkSync(join(root,'prototype/node_modules'),join(path,'prototype/node_modules'),'dir');
  }
- const changed=join(roots.candidate,'prototype/server/codex-research.mjs');writeFileSync(changed,readFileSync(changed,'utf8').replace("'codex-research-10'","'codex-research-10-source-test'").replace('你是新闻事件研究助手。','SOURCE_CANDIDATE 你是新闻事件研究助手。'));
+ const changed=join(roots.candidate,'prototype/server/codex-research.mjs');writeFileSync(changed,readFileSync(changed,'utf8').replace("'codex-research-11'","'codex-research-11-source-test'").replace('你是新闻事件研究助手。','SOURCE_CANDIDATE 你是新闻事件研究助手。'));
  const binary=join(directory,'fake-codex.mjs');writeFileSync(binary,`#!${process.execPath}
 import fs from 'node:fs';
 const args=process.argv.slice(2),value=k=>args[args.indexOf(k)+1];

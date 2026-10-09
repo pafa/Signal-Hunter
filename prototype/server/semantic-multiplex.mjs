@@ -1,3 +1,4 @@
+import {ARTICLE_SCOPE_VERSION} from './article-extraction.mjs';
 import {digest,CodexResearchError,runStructuredCodex} from './codex-research.mjs';
 import {EVENT_SEMANTIC_VERSION,MATERIAL_SEMANTIC_SCHEMA,comparisonPrompt,validateComparison} from './semantic-events.mjs';
 
@@ -62,5 +63,5 @@ export function validateGroupedComparison(candidate,packet,model){
  if(digest(checked.comparisons[group.pairId])!==digest(candidate.comparison))fail();
 }
 export function generateComparisonGroup(packet,config){
- return runStructuredCodex({prompt:comparisonGroupPrompt(packet),schema:comparisonGroupSchema(packet),promptVersion:COMPARISON_GROUP_VERSION,inputHash:packet.inputHash,validate:output=>validateComparisonGroup(output,packet)},config);
+ return runStructuredCodex({prompt:comparisonGroupPrompt(packet),schema:comparisonGroupSchema(packet),promptVersion:COMPARISON_GROUP_VERSION+'/'+ARTICLE_SCOPE_VERSION,inputHash:packet.inputHash,validate:output=>validateComparisonGroup(output,packet)},config);
 }
