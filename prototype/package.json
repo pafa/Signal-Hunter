@@ -47,5 +47,8 @@
   "license": "MIT",
   "engines": {
     "node": ">=24.15.0 <25"
+  },
+  "overrides": {
+    "source-map-js": "1.2.2"
   }
 }

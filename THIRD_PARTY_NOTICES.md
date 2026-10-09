@@ -98,7 +98,7 @@
 | rolldown | 1.2.10 | MIT |
 | saxes | 6.0.0 | ISC |
 | scheduler | 0.28.0 | MIT |
-| source-map-js | 1.2.1 | BSD-3-Clause |
+| source-map-js | 1.2.2 | BSD-3-Clause |
 | strnum | 2.4.2 | MIT |
 | tinyglobby | 0.2.17 | MIT |
 | tldts | 7.4.15 | MIT |
