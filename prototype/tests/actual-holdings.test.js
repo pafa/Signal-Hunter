@@ -68,13 +68,13 @@ test('research binding freezes original version; unrelated or changed new refere
 test('same symbols in separate accounts and markets remain independent native currency groups',()=>fixture(({h,save})=>{
  save([row(),row({account:'Synthetic B'}),row({symbol:'00700.HK',unitCost:'200',price:'180'}),row({symbol:'600519.SH',unitCost:'',price:''})]);
  const accounts=projectActualAccounts(h.snapshot(),[],at);assert.equal(accounts.length,4);assert.equal(new Set(accounts.flatMap(a=>a.positions.map(p=>p.id))).size,4);
- const hk=accounts.find(a=>a.currency==='HKD');assert.equal(hk.floatingLossCents,-3000);assert.equal(hk.floatingProfitCents,0);assert.equal(hk.navCents,null);
+ const hk=accounts.find(a=>a.currency==='HKD');assert.equal(hk.recordValuation.floatingLossCents,-3000);assert.equal(hk.recordValuation.floatingProfitCents,0);assert.equal(hk.navCents,null);
  const cn=accounts.find(a=>a.currency==='CNY');assert.equal(cn.unrealizedCents,null);assert.equal(cn.floatingProfitCents,null);assert.equal(cn.positions[0].costCents,null);
  assert(accounts.every(a=>a.dailyPnlCents===null&&a.maxDrawdownPct===null&&a.realizedCents===null));
 }));
 test('different snapshot times and partially known positions cannot be summed into account profit',()=>fixture(({h,save})=>{
- save([row(),row({symbol:'MSFT.US',asOf:'2026-10-09T11:00:00Z'})]);let a=projectActualAccounts(h.snapshot(),[],at)[0];assert.equal(a.valuedPositions,2);assert.equal(a.unrealizedCents,null);assert.match(a.unavailable.aggregate,/时间不一致/);
- save(row({symbol:'MSFT.US',asOf:'2026-10-09T11:00:00Z',price:'',reason:'Unknown observation'}));a=projectActualAccounts(h.snapshot(),[],at)[0];assert.equal(a.valuedPositions,1);assert.equal(a.unrealizedCents,null);
+ save([row(),row({symbol:'MSFT.US',asOf:'2026-10-09T11:00:00Z'})]);let a=projectActualAccounts(h.snapshot(),[],at)[0];assert.equal(a.valuedPositions,0);assert(a.positions.every(p=>p.recordValuation.unrealizedCents!==null));assert.equal(a.unrealizedCents,null);assert.match(a.recordValuation.issue,/时间不一致/);
+ save(row({symbol:'MSFT.US',asOf:'2026-10-09T11:00:00Z',price:'',reason:'Unknown observation'}));a=projectActualAccounts(h.snapshot(),[],at)[0];assert.equal(a.valuedPositions,0);assert.equal(a.positions.filter(p=>p.recordValuation.unrealizedCents!==null).length,1);assert.equal(a.unrealizedCents,null);
 }));
 test('all-account risks include actual records; projection reads never write or create trading decisions',()=>fixture(({store,h,save})=>{
  save(row());const before=store.db.prepare('SELECT total_changes() n').get().n,a=projectActualAccounts(h.snapshot(),[],at),o=buildWorkbenchOverview({at,actualAccounts:a});

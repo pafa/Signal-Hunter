@@ -130,7 +130,7 @@ export function createService(store,{fetcher=fetch,newsCooldown=600000,quoteCool
       researchView.inbox=researchView.inbox.map(n=>({...n,researchPriority:priorities.get(n.id)?.priority})).sort((a,b)=>(priorities.get(a.id)?.rank??Infinity)-(priorities.get(b.id)?.rank??Infinity));
       const workflow=topics.map(t=>assessTopic(t,{book})),operations=scheduler.snapshot(),checks=store.checks(),observationInbox=observations.summary();
       const overview=buildWorkbenchOverview({topics,eventClusters:eventClusters.workbench(topics).map(c=>({...c,research:researchPipeline.synthesis?.overview(c.id)||null})),paper:book,workflow,operations,checks,offline,at,
-        marketAccounts:Object.values(marketSimulations).map(m=>m.observationSnapshot(at)),actualAccounts:projectActualAccounts(actual,topics,at,{checks:observationInbox.actualChecks,rules:observationInbox.rules,operations})});
+        marketAccounts:Object.values(marketSimulations).map(m=>m.observationSnapshot(at)),actualAccounts:projectActualAccounts(actual,topics,at,{checks:observationInbox.actualChecks,rules:observationInbox.rules,operations},{inputs:executionInputs.inputs(),operation:operations.execution,restorePending:restorePending()})});
       return {overview,executionData:executionInputs.status(),priceCollection:priceCollection.snapshot(),storageMonitor:storageMonitor?.snapshot()??null,
         researchPipeline:researchPipeline.snapshot(),observationInbox,eventContinuity:{...continuity.summary(),health:checks.events||{state:'pending'}},
         runtime:{mode,offline,instance},paper:book,workflow,operations,operationHistory:scheduler.history(),dataCapabilities:dataCapabilities(store,at,{offline}),serviceHealth:service.health(),

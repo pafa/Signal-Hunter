@@ -39,7 +39,7 @@ export function Operations({data,onClose,onControl,onPipeline,onPriceCollection,
  {name==='discovery'&&<small>{data.researchPipeline?.settings.automatic?'恢复后自动保存正文、拆分事项、识别公司并形成系统研判；失败限次重试，未知保留观察，最终买卖由本人决定。':'当前候选模式：恢复后扫描初筛候选、保存来源正文、调用本机 Codex；结果待复核。首页启动自动研究可启用系统续跑。'}</small>}
  {name==='pricecollection'&&<small>恢复后为新初筛保存起点与固定价格窗口。重启继续，缺价和错过窗口保留，不作为可成交报价。</small>}
  {name==='storage'&&<small>恢复后每小时检查数据库和备份、保存容量记录。只读检查，不自动删除。超过60秒中止本次扫描。</small>}
- {name==='execution'&&<small>恢复后每10秒检查两个模拟池。仅处理本人已批准订单；暂停只停止自动检查，手动检查仍可用。</small>}
+ {name==='execution'&&<small>恢复后每10秒更新已配置的执行行情并检查两个模拟池，仅处理本人已批准订单。暂停时实际持仓的当前参考估值显示不可用；手动模拟检查仍可用。</small>}
  {name==='semantic'&&<small>恢复后只推进本人建立的比较批次，有待办时每10秒至多启动一项，空闲检查最长60秒。暂停停止后续调用，当前模型调用仍保存结果；失败需在批次中显式重试。</small>}
  <small>{s.paused?'恢复后继续':s.blocked?(s.automaticRecovery?`后台退避至 ${time(s.nextRunAt)} 后重试`:'连续失败达到上限，请检查后重试'):s.running?'完成后安排下次检查':s.nextRunAt?`下次检查 ${time(s.nextRunAt)}`:'等待调度'}</small>
  {s.error&&<small className="m-warning">{safeErrorText(s.error)}</small>}

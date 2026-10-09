@@ -1,5 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {ACTUAL_COLUMNS,actualAmount,actualHoldingErrors,failActual,normalizeActualRow,parseActualCsv} from '../shared/actual-holdings.mjs';
+import {compareMarketTime} from './market-time.mjs';
+import {actualReferenceValuation} from './actual-valuation.mjs';
 import {projectActualMonitoring} from '../shared/actual-monitoring.mjs';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
@@ -73,27 +75,31 @@ export function openActualHoldings(store,{enabled=false,clock=()=>new Date().toI
  };
 }
 
-export function projectActualAccounts(snapshot,topics,at,monitoring={}){
+export function projectActualAccounts(snapshot,topics,at,monitoring={},valuation={}){
  const groups=new Map(),byTopic=new Map(topics.map(t=>[t.id,t]));
  for(const r of snapshot.records.filter(r=>r.quantity!=='0')){
   const account='actual:'+hash([r.account,r.currency]),topic=byTopic.get(r.topicId),h=topic?.hypothesis||{},costCents=actualAmount(r.quantity,r.unitCost),valueCents=actualAmount(r.quantity,r.price);
   const pnl=costCents===null||valueCents===null?null:valueCents-costCents;
+  const reference=actualReferenceValuation(r,{...valuation,at});
   const monitor=projectActualMonitoring(r,topic,{...monitoring,watching:snapshot.watching,at});
-  const risks=[...monitor.risks,'记录时点估值；未接入实时账户盈亏与自动退出计划'];
-  if(costCents===null)risks.push('成本未知，无法计算记录时点浮盈亏');
-  if(valueCents===null)risks.push('记录价格未知，不能计算估值');
+  const risks=[...monitor.risks,...reference.issues,'自动退出计划待补；数量与成本以本人最新记录为准'];
+  if(costCents===null)risks.push('成本未知，无法计算浮盈亏');
   if(r.feeBasis!=='included')risks.push(r.feeBasis==='excluded'?'记录成本未含费用，浮盈亏未扣全部费用':'成本是否含费用未知');
   if(!r.topicId)risks.push('未绑定原研究；不自动猜测建仓依据');
   else if(!monitor.current&&(!topic||topic.version!==r.topicVersion||topic.status==='archived'))risks.push('原研究与当前版本不同或不可用，需复核');
   const p={id:'actual:'+r.id,recordId:r.id,recordVersion:r.version,account,symbol:r.symbol,name:topic?.companies?.find(c=>c.symbol===r.symbol)?.name||r.symbol,topicId:r.topicId,topicTitle:topic?.title||'未绑定研究',openingVersion:r.topicVersion,currentVersion:topic?.version??null,
-   qty:r.quantity,currency:r.currency,costCents,valueCents,unrealizedCents:pnl,returnPct:pnl===null||!costCents?null:pnl/costCents*100,
-   price:r.price,priceAt:r.price?r.asOf:null,priceSource:r.source,priceBasis:'记录时点价',recordedAsOf:r.asOf,openedAt:null,monitoring:monitor,
+   qty:r.quantity,currency:r.currency,costCents,valueCents:reference.valueCents,unrealizedCents:reference.unrealizedCents,returnPct:reference.returnPct,
+   price:reference.price,priceAt:reference.priceAt,priceSource:reference.source,priceBasis:reference.state==='available'?'参考标记价':'当前价不可用',recordedAsOf:r.asOf,openedAt:null,monitoring:monitor,referenceValuation:reference,
+   recordValuation:{price:r.price,priceAt:r.price?r.asOf:null,priceSource:r.source,valueCents,unrealizedCents:pnl,returnPct:pnl===null||!costCents?null:pnl/costCents*100,feeBasis:r.feeBasis},
    judgement:({observe:'继续观察',buy:'评估买入',add:'评估增仓',reduce:'评估减仓',exit:'评估退出'})[h.action]||'判断待补',trigger:h.trigger||null,invalidation:h.invalidation||null,holdingHorizon:h.holdingHorizon||null,reviewAt:h.reviewAt||null,risks};
-  if(!groups.has(account))groups.set(account,{id:account,label:`实际 · ${r.account} · ${r.currency}`,kind:'actual',configured:true,currency:r.currency,version:snapshot.version,updatedAt:r.recordedAt,positions:[],navCents:null,realizedCents:null,feesCents:null,currentDrawdownPct:null,drawdownBasis:'快照不能推导净值回撤',sourceNote:'持仓快照 · 记录时点参考盈亏；非实时、非已实现收益；不同币种分开查看'});
+  if(!groups.has(account))groups.set(account,{id:account,label:`实际 · ${r.account} · ${r.currency}`,kind:'actual',configured:true,currency:r.currency,version:snapshot.version,updatedAt:r.recordedAt,positions:[],navCents:null,realizedCents:null,feesCents:null,currentDrawdownPct:null,drawdownBasis:'快照不能推导净值回撤',sourceNote:'按已录数量估算当前参考盈亏；非券商实时账户收益，未扣未来卖出费用；原币分别查看'});
   groups.get(account).positions.push(p);
  }
- return [...groups.values()].map(a=>{const ps=a.positions,known=ps.every(p=>p.unrealizedCents!==null),sameTime=new Set(ps.map(p=>p.recordedAsOf)).size===1,complete=known&&sameTime;
-  const sum=f=>{const n=ps.filter(f).reduce((v,p)=>v+BigInt(p.unrealizedCents),0n);return n>BigInt(Number.MAX_SAFE_INTEGER)||n< -BigInt(Number.MAX_SAFE_INTEGER)?null:Number(n);};
-  return {...a,valuationAt:sameTime?ps[0].recordedAsOf:null,valuedPositions:ps.filter(p=>p.unrealizedCents!==null).length,unrealizedCents:complete?sum(()=>true):null,floatingProfitCents:complete?sum(p=>p.unrealizedCents>0):null,floatingLossCents:complete?sum(p=>p.unrealizedCents<0):null,dailyPnlCents:null,maxDrawdownPct:null,unavailable:{dailyPnl:'缺少完整成交、现金流及净值基准',maxDrawdown:'持仓快照不是完整净值序列',aggregate:!sameTime?'记录时间不一致，账户盈亏不合计':!known?'存在未知成本或记录价格，账户盈亏不合计':null}};
+ return [...groups.values()].map(a=>{const ps=a.positions,known=ps.every(p=>p.unrealizedCents!==null),times=ps.map(p=>p.priceAt).filter(Boolean).sort(compareMarketTime);
+  const sum=(rows,f)=>{const n=rows.filter(f).reduce((v,p)=>v+BigInt(p.unrealizedCents),0n);return n>BigInt(Number.MAX_SAFE_INTEGER)||n< -BigInt(Number.MAX_SAFE_INTEGER)?null:Number(n);};
+  const records=ps.map(p=>p.recordValuation),sameRecordTime=new Set(ps.map(p=>p.recordedAsOf)).size===1,recordsComplete=sameRecordTime&&records.every(p=>p.unrealizedCents!==null);
+  return {...a,valuationAt:known?at:null,priceTimeRange:times.length?[times[0],times.at(-1)]:null,valuedPositions:ps.filter(p=>p.valueCents!==null).length,unrealizedCents:known?sum(ps,()=>true):null,floatingProfitCents:known?sum(ps,p=>p.unrealizedCents>0):null,floatingLossCents:known?sum(ps,p=>p.unrealizedCents<0):null,dailyPnlCents:null,maxDrawdownPct:null,
+   recordValuation:{at:sameRecordTime?ps[0].recordedAsOf:null,unrealizedCents:recordsComplete?sum(records,()=>true):null,floatingProfitCents:recordsComplete?sum(records,p=>p.unrealizedCents>0):null,floatingLossCents:recordsComplete?sum(records,p=>p.unrealizedCents<0):null,issue:!sameRecordTime?'记录时间不一致，原记录盈亏不合计':!recordsComplete?'存在未知成本或记录价格，原记录盈亏不合计':null},
+   unavailable:{dailyPnl:'缺少完整成交、现金流及净值基准',maxDrawdown:'持仓快照不是完整净值序列',aggregate:!known?'存在未知成本或当前行情，当前参考盈亏不合计':null}};
  });
 }
