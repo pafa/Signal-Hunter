@@ -5,7 +5,7 @@ import {digest,CodexResearchError,rejectedOutputDiagnostic} from './codex-resear
 import {MATERIAL_EVENTS_VERSION,materialEventsPacket,validateMaterialEvents,generateMaterialEvents} from './material-events.mjs';
 
 function validateSavedCandidate({packet,candidate,model,topicId}){
- if(!['material-events-1',MATERIAL_EVENTS_VERSION].includes(packet?.schema)||packet.input?.topicId!==topicId||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
+ if(!['material-events-1','material-events-2',MATERIAL_EVENTS_VERSION].includes(packet?.schema)||packet.input?.topicId!==topicId||packet.inputHash!==digest(packet.input)||Buffer.byteLength(JSON.stringify(packet))>524288)throw new CodexResearchError('packet');
  if(candidate?.status!=='candidate'||candidate.reviewStatus!=='unreviewed'||candidate.trace?.inputHash!==packet.inputHash||candidate.trace?.model!==model||typeof candidate.rawOutput!=='string'||digest(candidate.rawOutput)!==candidate.trace.outputHash)throw new CodexResearchError('output');
  let raw;try{raw=validateMaterialEvents(JSON.parse(candidate.rawOutput),packet,{allowLegacy:true});}catch{throw new CodexResearchError('output');}
  if(digest(raw)!==digest(candidate.decomposition))throw new CodexResearchError('output');

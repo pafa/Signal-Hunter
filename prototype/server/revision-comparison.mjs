@@ -26,18 +26,41 @@ function revisionCluster(db,id){
  });
 }
 
-// Historical input is available only through an exact, still-owned cluster
-// version. Ordinary comparison and clustering continue to require current input.
+// A standalone holding has no cluster anchor. Freeze all occurrences from its
+// original automatic extraction, including unheld alternatives, never just a
+// ticker/title match. Scope snapshots validate the immutable source and decisions.
+export function revisionSource(store,sourceRunId){
+ const db=store.db,row=db.prepare("SELECT payload FROM research_pipeline_event_jobs WHERE kind='extract' AND status='completed' AND run_id=?").get(sourceRunId);
+ const job=row&&JSON.parse(row.payload),run=JSON.parse(db.prepare('SELECT payload FROM material_event_runs WHERE id=?').get(sourceRunId)?.payload||'null');
+ if(!job?.automatic||!run||run.id!==sourceRunId||run.status!=='candidate'||digest(job.packet)!==digest(run.packet))fail();
+ const decisions=new Map(db.prepare('SELECT event_index,payload FROM material_event_decisions WHERE run_id=? ORDER BY version').all(sourceRunId).map(r=>[r.event_index,JSON.parse(r.payload)]));
+ const members=run.candidate.decomposition.events.map((_,i)=>{
+  const d=decisions.get(i);if(d?.action!=='create'||d.actor?.kind!=='system')fail();
+  const m=eventComparisonSnapshot(db,{kind:'event',id:d.topicId,revision:1},{historical:true});
+  if(m.eventProvenance.runId!==sourceRunId||m.eventProvenance.eventIndex!==i)fail();return comparisonSummary(m);
+ });
+ if(!members.length||new Set(members.map(m=>m.id)).size!==members.length)fail();
+ return {sourceRunId,sourceHash:digest({sourceRunId,members}),members};
+}
+export function revisionMembers(store,revision){
+ const keys=Object.keys(revision||{}).sort().join(',');
+ if(keys==='sourceHash,sourceRunId'){
+  const source=revisionSource(store,revision.sourceRunId);if(source.sourceHash!==revision.sourceHash)fail();return source.members;
+ }
+ if(keys!=='clusterHash,clusterId,clusterVersion')fail();
+ const c=revisionCluster(store.db,revision.clusterId);
+ if(c.status!=='active'||c.version!==revision.clusterVersion||c.snapshotHash!==revision.clusterHash)fail();return c.members;
+}
+// Historical input needs an exact cluster or complete automatic source anchor.
+// Ordinary comparison and clustering continue to require current input.
 export function revisionComparisonPacket(store,input){
- if(!input||Object.keys(input).sort().join(',')!=='left,revision,right'||Object.keys(input.revision||{}).sort().join(',')!=='clusterHash,clusterId,clusterVersion')fail();
- const {clusterId,clusterVersion,clusterHash}=input.revision,db=store.db;
- const record=revisionCluster(db,clusterId),{snapshotHash}=record;
- if(record.status!=='active'||record.version!==clusterVersion||snapshotHash!==clusterHash)fail();
+ if(!input||Object.keys(input).sort().join(',')!=='left,revision,right')fail();
+ const members=revisionMembers(store,input.revision),{clusterId}=input.revision,db=store.db;
  for(const ref of [input.left,input.right])if(!ref||Object.keys(ref).sort().join(',')!=='id,kind,revision'||ref.kind!=='event'||typeof ref.id!=='string'||ref.revision!==1)fail();
- const old=record.members.find(m=>m.kind==='event'&&m.id===input.left.id);
- if(!old||db.prepare('SELECT cluster_id FROM event_cluster_members WHERE member_key=?').get('event:'+old.id)?.cluster_id!==clusterId)fail();
+ const old=members.find(m=>m.kind==='event'&&m.id===input.left.id);
+ if(!old||clusterId&&db.prepare('SELECT cluster_id FROM event_cluster_members WHERE member_key=?').get('event:'+old.id)?.cluster_id!==clusterId)fail();
  const left=eventComparisonSnapshot(db,input.left,{historical:true}),right=eventComparisonSnapshot(db,input.right);
- if(digest(comparisonSummary(left))!==digest(old)||left.documentId!==right.documentId||right.materialRevision<=left.materialRevision||record.members.some(m=>m.kind==='event'&&m.id===right.id))fail();
+ if(digest(comparisonSummary(left))!==digest(old)||left.documentId!==right.documentId||right.materialRevision<=left.materialRevision||members.some(m=>m.kind==='event'&&m.id===right.id))fail();
  const data={left,right,revision:structuredClone(input.revision)},packet={schema:REVISION_COMPARISON_VERSION,input:data,inputHash:digest(data)};
  if(Buffer.byteLength(JSON.stringify(packet))>524288)fail();return packet;
 }

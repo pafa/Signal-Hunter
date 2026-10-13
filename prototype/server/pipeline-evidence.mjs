@@ -1,3 +1,5 @@
+import {businessFacts} from '../shared/business-facts.mjs';
+import {documentResearchOrigin} from './system-document-revisions.mjs';
 import {openLinkedEvidence,LINKED_EVIDENCE_POLICY,LINKED_EVIDENCE_HASH} from './pipeline-linked-evidence.mjs';
 import {digest} from './codex-research.mjs';
 import {describeNews} from './event-continuity.mjs';
@@ -6,7 +8,7 @@ import {recallEvidenceNews,EVIDENCE_RECALL_POLICY,EVIDENCE_RECALL_HASH} from './
 
 // Follow-up owns discovery plans only. Materials, model calls, comparisons and
 // grouping retain their existing owners, limits, immutable inputs and history.
-export function openPipelineEvidence(store,research,relations,{now=Date.now,guard,transaction,audit,settings,executionHash,setState,enqueueLinked}={}){
+export function openPipelineEvidence(store,research,relations,{now=Date.now,guard,transaction,audit,settings,executionHash,executionCompatible=key=>key===executionHash(),setState,enqueueLinked}={}){
  const db=store.db,at=()=>new Date(now()).toISOString(),parse=row=>JSON.parse(row.payload);
  db.exec(`CREATE TABLE IF NOT EXISTS research_evidence_searches(id TEXT PRIMARY KEY,anchor_id TEXT NOT NULL,status TEXT NOT NULL,payload TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS evidence_search_anchor ON research_evidence_searches(anchor_id);`);
@@ -16,9 +18,9 @@ export function openPipelineEvidence(store,research,relations,{now=Date.now,guar
  let settleCursor=0;
  function validAnchor(p){
   const n=store.newsById(p.anchor.newsId);if(!n||n.revision!==p.anchor.newsRevision)throw Error('原新闻已有修订，旧检索保留');
-  const t=research.get(p.anchor.topicId);if(t.status!=='active'||t.version!==p.anchor.topicVersion)throw Error('原研究已被修改或归档，旧检索保留');
+  let t=research.get(p.anchor.topicId);if(p.policy===LINKED_EVIDENCE_POLICY){const job=db.prepare('SELECT run_id FROM research_pipeline_event_jobs WHERE id=?').get(p.anchor.id);t=documentResearchOrigin(db,t,p.anchor.topicVersion,job?.run_id);}if(t.status!=='active'||t.version!==p.anchor.topicVersion)throw Error('原研究已被修改或归档，旧检索保留');
   if(p.anchor.kind==='event'&&digest(eventComparisonSnapshot(db,{id:t.id,revision:1}))!==p.anchor.eventBasisHash)throw Error('事项原文或选择依据已变化，旧检索保留');
-  if(p.executionHash!==executionHash()||p.rulesHash!==(p.policy===LINKED_EVIDENCE_POLICY?LINKED_EVIDENCE_HASH:EVIDENCE_RECALL_HASH))throw Error('模型或检索规则已变化，旧计划不继续');
+  if(!(p.executionHash===executionHash()||p.automatic===true&&executionCompatible(p.executionHash))||p.rulesHash!==(p.policy===LINKED_EVIDENCE_POLICY?LINKED_EVIDENCE_HASH:EVIDENCE_RECALL_HASH))throw Error('模型或检索规则已变化，旧计划不继续');
   if(p.anchor.kind==='source'){
    const source=item(p.anchor.id),s=source&&parse(source);
    if(!source||!['failed','observing','ready','preparing'].includes(source.status)||s.preparationFailure!=='source-unavailable')throw Error('原文准备状态已变化，替代检索仅供历史查看');
@@ -45,13 +47,13 @@ export function openPipelineEvidence(store,research,relations,{now=Date.now,guar
    if(topic.status!=='active'||topic.version!==(kind==='event'?p.adoptedVersion:p.preparedTopicVersion))return [];
    const news=store.newsById(kind==='event'?p.newsId:row.news_id),revision=kind==='event'?p.newsRevision:row.revision;
    if(!news||news.revision!==revision)return [];
-   const missing=kind==='event'?topic.dossier?.missingEvidence||[]:['原新闻正文未能读取'];
+   const missing=kind==='event'?[...new Set([...(topic.dossier?.missingEvidence||[]),...(topic.dossier?.companyAssessment?.assessments||[]).flatMap(a=>businessFacts(a).filter(f=>f.verdict!=='supported').map(f=>'业务事实待核对：'+f.claim+'；'+f.reason))])]:['原新闻正文未能读取'];
    if(!missing.length||kind==='event'&&!topic.eventExtraction)return [];
    let eventBasisHash=null;try{if(kind==='event')eventBasisHash=digest(eventComparisonSnapshot(db,{id:topic.id,revision:1}));}catch{return [];}
    return [{id:row.id,kind,topicId:topic.id,topicVersion:topic.version,title:topic.title,newsId:news.id,newsRevision:revision,missing,news,event:topic.eventExtraction?.event,eventBasisHash}];
   });
  }
- const linked=openLinkedEvidence(store,research,{anchors,validAnchor,executionHash,enqueueLinked,audit,guard,now});
+ const linked=openLinkedEvidence(store,research,{anchors,validAnchor,executionHash,executionCompatible,enqueueLinked,audit,guard,now});
  function scan(context){
   // Match only revisions that opted into automatic processing when discovered.
   // Turning automation on later never reactivates the old manual inbox.
@@ -87,7 +89,7 @@ export function openPipelineEvidence(store,research,relations,{now=Date.now,guar
   const topics=jobs.flatMap(j=>{try{const t=research.get(j.topic_id);eventComparisonSnapshot(db,{id:t.id,revision:1});return t.status==='active'&&t.version===parse(j).adoptedVersion?[t]:[];}catch{return [];}});
   if(!topics.length)return {...c,status:'observing',reason:'没有可比较的当前系统事项研判，保留已有研究'};
   c={...c,researchRefs:topics.map(t=>({id:t.id,version:t.version,eventBasisHash:digest(eventComparisonSnapshot(db,{id:t.id,revision:1}))}))};
-  const partial=source.status!=='completed'||topics.length!==jobs.length,scopeNote=partial?'本篇仅部分事项具有当前可用研判；其余缺口和失败保留。':'';
+  const partial=source.status!=='completed'||topics.length!==new Set(jobs.map(j=>j.topic_id)).size,scopeNote=partial?'本篇仅部分事项具有当前可用研判；其余缺口和失败保留。':'';
   if(p.anchor.kind==='source')return {...c,partial,scopeNote,status:'researched',reason:'替代线索已独立研判；原文仍不可用，不能确认替代或补齐了原报道'};
   const pairIds=[];
   for(const t of topics){
@@ -121,8 +123,11 @@ export function openPipelineEvidence(store,research,relations,{now=Date.now,guar
    settleCursor=row.seq;
   }
  }
+ function linkedRequests(row,recoverable=false){return db.prepare("SELECT * FROM research_evidence_searches WHERE json_extract(payload,'$.policy')=? AND (status='pending' OR (? AND status='observing'))").all(LINKED_EVIDENCE_POLICY,Number(recoverable)).filter(r=>{const p=parse(r);if(!p.candidates.some(c=>c.pipelineId===row.id&&c.newsId===row.news_id&&c.revision===row.revision&&!['cancelled','invalidated'].includes(c.status)))return false;try{validAnchor(p);return true;}catch{return false;}});}
  return {
-  hasActiveLinkedRequest(row){return db.prepare("SELECT * FROM research_evidence_searches WHERE json_extract(payload,'$.policy')=? AND status='pending'").all(LINKED_EVIDENCE_POLICY).some(r=>{const p=parse(r);if(!p.candidates.some(c=>c.pipelineId===row.id&&c.newsId===row.news_id&&c.revision===row.revision))return false;try{validAnchor(p);return true;}catch{return false;}});},
+  hasActiveLinkedRequest:row=>linkedRequests(row).length>0,
+  hasRecoverableLinkedRequest:row=>linkedRequests(row,true).length>0,
+  resumeLinkedRequest(row,context){const plans=linkedRequests(row,true);if(!plans.length)throw Error('原补读请求已变化');for(const plan of plans){if(plan.status==='pending')continue;context.assertActive();guard();const p=parse(plan);validAnchor(p);db.prepare("UPDATE research_evidence_searches SET status='pending',payload=? WHERE id=?").run(JSON.stringify({...p,updatedAt:at(),reason:'读取能力已恢复，继续原补读请求；旧尝试保留'}),plan.id);audit(row.id,'linked-evidence-capacity-recovered',{searchId:plan.id,previous:{status:plan.status,payload:p}});}},
   step(context){context.assertActive();guard();if(!settings().automatic)return;linked.scan(context);scan(context);settle(context);},
   snapshot(){const counts={};for(const r of db.prepare('SELECT status,count(*) n FROM research_evidence_searches GROUP BY status').all())counts[r.status]=r.n;return {counts,total:db.prepare('SELECT count(*) n FROM research_evidence_searches').get().n,items:db.prepare('SELECT * FROM research_evidence_searches ORDER BY rowid DESC LIMIT 30').all().map(view),scope:'已收新闻与原文明确链接的有界补充研究；不是全网搜索，未命中不代表没有证据'};},
  };

@@ -76,3 +76,9 @@ test('multiple market symbols sharing verified issuer identity aggregate before 
  f.setQuotes({'AAPL.US':f.q,'09988.HK':{...f.q,id:'synthetic-hk-quote',symbol:'09988.HK',currency:'HKD'}});
  const hits=f.candidates().filter(c=>c.state==='hit'&&c.hit.input.reviewKind==='issuer-cap');assert.equal(hits.length,1);assert.equal(hits[0].hit.input.metrics.observedPct,4);assert.equal(hits[0].hit.input.lots.length,2);assert.equal(hits[0].hit.symbols.length,2);
 });
+
+test('continuing into a composite preserves the opening counterevidence identity and keeps uncertain observations unknown',()=>{
+ const f=fixture(),e={id:'e',stance:'against',claim:'Already known risk',verification:'unverified'};f.t.evidence=[e];f.b.orders[0].researchSnapshot=structuredClone(f.t);
+ const snapshot=f.snapshot(),composite={...f.t,id:'event-cluster:composite',evidence:[{...e,id:'t:e'}]},link={lotId:'lot-1',status:'current',topicId:composite.id,current:{kind:'event-cluster',id:'composite',runId:'run',version:1},relation:{kind:'event-member'}};
+ snapshot.researchTopics=[composite];snapshot.holdingResearchLinks=[link];const counter=()=>marketReviewCandidates(snapshot,[f.t]).find(c=>c.hit.input.reviewKind==='counterevidence');assert.equal(counter().state,'clear');composite.evidence[0].claim='New changed risk';assert.equal(counter().state,'hit');link.status='waiting';assert.equal(counter().state,'unknown');assert.deepEqual(f.b.orders[0].researchSnapshot.evidence,[e]);
+});

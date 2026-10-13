@@ -1,18 +1,14 @@
+import {digest} from './codex-research.mjs';
+import {documentGenerationChanged} from './research-document-context.mjs';
 import {companyEntitiesPacket} from './company-entities.mjs';
 import {SYSTEM_RESEARCH_ACTOR as actor} from './research-actor.mjs';
 
-const terminal=new Set(['completed','no-signal','observing','invalidated','cancelled']);
+const terminal=new Set(['completed','no-signal','observing','invalidated','cancelled','reused']);
 const system=d=>d?.actor?.kind===actor.kind&&d.actor.policy===actor.policy;
-const normalized=v=>v.normalize('NFKC').trim().toLocaleLowerCase('en-US');
-// An exact alias must identify one security in the frozen directory, including
-// all A/H/ADR alternatives. This is a research association, never listing proof.
-export function automaticIdentity(mention,directory){
- if(mention.entityType!=='company'||mention.resolution!=='candidate'||mention.symbols.length!==1)return null;
- const matches=directory.filter(c=>[c.name,...(c.aliases||[])].some(n=>normalized(n)===normalized(mention.name)));
- return matches.length===1&&matches[0].symbol===mention.symbols[0]?matches[0].symbol:null;
-}
+import {automaticIdentityDecision} from './automatic-company-identity.mjs';
+export {automaticIdentity,automaticIdentityDecision} from './automatic-company-identity.mjs';
 
-export function openPipelineEventAutomation({db,store,research,models,extractions,entities,now,guard,transaction,audit,read,runOf,valid,insert,childPlan,relations}){
+export function openPipelineEventAutomation({db,store,research,models,extractions,entities,now,guard,transaction,audit,read,runOf,valid,insert,childPlan,relations,configHash}){
  const at=()=>new Date(now()).toISOString();
  const save=(row,status,extra,context)=>transaction(()=>{
   context.assertActive();guard();const latest=read(row.id);
@@ -21,10 +17,16 @@ export function openPipelineEventAutomation({db,store,research,models,extraction
   audit(row.item_id,'automatic-event-'+status,{jobId:row.id,kind:row.kind,...extra});
  });
  function advanceToDossier(row,p,context,extra={}){
-  const topic=research.get(row.topic_id),plan=childPlan(row,topic,'dossier',p);
+  const topic=research.get(row.topic_id);
+  if(p.identityFollowup&&topic.version===p.topicVersion){save(row,'completed',{...extra,finishedAt:at(),reason:'新身份核对未增加公司关联，保留原研判与未知项'},context);return;}
+  const plan=childPlan(row,topic,'dossier',p);
+  if(p.identityFollowup){
+   plan.id=digest({kind:'identity-dossier/1',identityJobId:row.id,version:topic.version});
+   Object.assign(plan.payload,{identityFollowup:{...p.identityFollowup,identityJobId:row.id,linkedVersion:topic.version,linkedHash:digest(topic),preparations:[]},prices:{attempts:[],results:topic.researchPrices||[]},financial:{attempts:[],results:topic.financialSources||[]},reason:'新身份核对补全公司关联，后台更新研判；旧结果保留'});
+  }
   transaction(()=>{
    context.assertActive();guard();const latest=read(row.id);if(latest.payload!==row.payload||latest.status!==row.status)throw Error('自动研究队列已变化');
-   valid({...plan,payload:JSON.stringify(plan.payload)});insert(plan,plan.payload);
+   insert(plan,plan.payload);valid({...plan,payload:JSON.stringify(plan.payload)});
    db.prepare("UPDATE research_pipeline_event_jobs SET status='completed',payload=? WHERE id=?").run(JSON.stringify({...p,...extra,finishedAt:at()}),row.id);
    audit(row.item_id,'automatic-identity-completed',{jobId:row.id,dossierJobId:plan.id,...extra});
   });
@@ -33,10 +35,10 @@ export function openPipelineEventAutomation({db,store,research,models,extraction
   // Resume only our own already committed links. A user's edit wins and stops
   // automatic mutation of this topic; unrelated source items continue.
   const decisions=run.reviews.flat().filter(d=>d.action==='link');
-  if(decisions.some(d=>!system(d)))throw Error('公司关系已有人工处理');
+  if(run.reviews.flat().some(d=>!system(d)))throw Error('公司关系已有人工处理');
   const version=p.topicVersion+decisions.length;
   if(research.get(row.topic_id).version!==version||store.newsById(p.newsId)?.revision!==p.newsRevision)throw Error('研究或来源已有新版本');
-  const packet=companyEntitiesPacket(store,research,row.topic_id,{...p.request,version});
+  const packet=companyEntitiesPacket(store,research,row.topic_id,{...p.request,version},p.packet);
   if(packet.inputHash!==p.packet.inputHash||run.stale)throw Error('身份依据已变化');
   // Validate configuration and the original packet without treating our own
   // version increments as a user edit.
@@ -49,6 +51,7 @@ export function openPipelineEventAutomation({db,store,research,models,extraction
     context.assertActive();guard();const p=JSON.parse(row.payload),run=runOf(row);
     if(!run||run.status==='running')continue;
     if(run.status==='cancelled'){save(row,'cancelled',{reason:'本次调用已取消，保留记录，不自动重启',finishedAt:at()},context);return {ok:true,settled:row.id};}
+    if(documentGenerationChanged(store,research,row,configHash())){save(row,'observing',{documentScopeChanged:true,reason:'附件范围已变化，后台追加新版输入；旧调用保留',finishedAt:at()},context);return {ok:true,settled:row.id};}
     if(['failed','interrupted'].includes(run.status)){
      try{valid(row);}catch{save(row,'invalidated',{reason:'来源、研究或配置已变化，保留旧调用',finishedAt:at()},context);return {ok:true,settled:row.id};}
      const attempts=db.prepare('SELECT count(*) n FROM research_pipeline_attempts WHERE item_id=?').get(row.id).n;
@@ -81,9 +84,9 @@ export function openPipelineEventAutomation({db,store,research,models,extraction
      for(let i=0;i<run.candidate.resolution.mentions.length;i++){
       context.assertActive();guard();const current=entities.get(row.topic_id,run.id);identityCurrent(row,p,current);
       if(current.reviews[i][0])continue;
-      const mention=run.candidate.resolution.mentions[i],symbol=automaticIdentity(mention,run.packet.input.directory);
-      if(!symbol||research.get(row.topic_id).companies.some(c=>c.symbol===symbol)){unresolved.push({mentionIndex:i,name:mention.name,resolution:mention.resolution,reason:symbol?'已有公司关系，保留现有判断':'身份或交易市场不唯一，保留观察'});continue;}
-      entities.decide(row.topic_id,run.id,{action:'link',mentionIndex:i,version:0,topicVersion:research.get(row.topic_id).version,symbol,note:'系统依据原文名称与冻结目录唯一对应，记录待核实公司关联；不表示已上市、可交易或受益'},actor);
+      const mention=run.candidate.resolution.mentions[i],identityDecision=automaticIdentityDecision(mention,run.packet.input.directory,run.packet.input.directorySnapshot,run.packet),{symbol}=identityDecision;
+      if(!symbol||research.get(row.topic_id).companies.some(c=>c.symbol===symbol)){const connection=mention.eventConnection;unresolved.push({mentionIndex:i,name:mention.name,resolution:mention.resolution,...(connection?{eventConnection:connection}:{}),identityDecision,reason:symbol?'已有公司关系，保留现有判断':identityDecision.reason});continue;}
+      entities.decide(row.topic_id,run.id,{action:'link',mentionIndex:i,version:0,topicVersion:research.get(row.topic_id).version,symbol,note:mention.eventConnection?.relation==='parent'?'系统记录原文明示控股关系的母公司候选；直接涉事主体另存，间接影响待研判，不表示受益或可交易':'系统依据原文名称与冻结目录唯一对应，记录待核实公司关联；不表示已上市、可交易或受益'},actor);
      }
      advanceToDossier(row,p,context,{identityOutcome:unresolved.length?'unresolved':'processed',unresolved,reason:unresolved.length?'部分身份不确定，研判继续并保留未知项':'身份处理完成，公司关系仍为待核实'});
     }else{
@@ -108,7 +111,7 @@ export function openPipelineEventAutomation({db,store,research,models,extraction
      let status=extract.status;
      if(status==='completed'){
       const children=db.prepare("SELECT count(*) n FROM material_event_decisions WHERE run_id=? AND json_extract(payload,'$.action')='create'").get(extract.run_id).n;
-      const dossiers=jobs.filter(j=>j.kind==='dossier');
+      const dossiers=jobs.filter(j=>j.kind==='dossier'&&!JSON.parse(j.payload).documentFollowup&&!JSON.parse(j.payload).identityFollowup);
       if(jobs.some(j=>j.kind==='identity'&&['invalidated','cancelled','observing'].includes(j.status)))status='observing';
       else if(dossiers.length!==children||dossiers.some(j=>!terminal.has(j.status)))continue;
       if(status!=='observing')status=dossiers.some(j=>j.status!=='completed')?'observing':'completed';

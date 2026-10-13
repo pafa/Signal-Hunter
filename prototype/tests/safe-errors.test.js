@@ -51,3 +51,7 @@ test('forward archive errors expose exact owned labels but not appended private 
  const label='前向档案指纹不符';assert.equal(safeErrorText(new Error(label)),label);
  assert.equal(safeErrorText(new Error(label+' FIXTURE_PRIVATE')),'任务失败，请检查来源或运行配置');
 });
+test('owned strategy explanations survive projection while appended or substituted private text stays hidden',()=>{
+ const messages=['相对成交价下跌 15.04%，达到 12% 退出复核线','浮盈曾达到 20%，现较已记录价格高点回撤 8.50%','策略池相对已记录净值高点回撤 10.25%','持有复核截止已到，需本人决定是否退出'];
+ for(const message of messages){assert.equal(safeDiagnosticPayload({kind:'loss-exit-review',message}).message,message);assert.notEqual(safeErrorText(message+' '+secret),message+' '+secret);assert.doesNotMatch(safeErrorText(message.replace(/[0-9]+/,secret)+' '+secret),/FIXTURE_PRIVATE/);}
+});

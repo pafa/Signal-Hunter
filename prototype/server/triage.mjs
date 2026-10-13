@@ -2,7 +2,7 @@
 import {routeEvent,acquisitionStage} from './event-routing.mjs';
 import {headlineCompanies} from '../shared/company-directory.mjs';
 import {headlineScreening} from '../shared/headline-screening.mjs';
-export const RULES_VERSION = 'major-triage/0.5.0';
+export const RULES_VERSION = 'major-triage/0.5.1';
 
 export function classifyHeadline(item) {
   const text=item.title||'', reasons=[],topicHints=[];

@@ -12,3 +12,8 @@ export function amount(qty,price,fx='1'){if(!Number.isSafeInteger(qty)||qty<0)mo
 export const cents=value=>amount(1,value);
 export const fee=(gross,bps)=>safe(rounded(BigInt(gross)*decimal(bps),10000000000n));
 export const sum=values=>safe(values.reduce((n,v)=>n+BigInt(v),0n));
+export function slippagePrice(price,bps,tick,side){
+ const raw=decimal(price)*(10000000000n+(side==='buy'?1n:-1n)*decimal(bps)),denominator=10000000000n,unit=decimal(tick);
+ const units=side==='buy'?(raw+denominator*unit-1n)/(denominator*unit):raw/(denominator*unit),micro=units*unit;
+ return `${micro/1000000n}.${String(micro%1000000n).padStart(6,'0')}`;
+}

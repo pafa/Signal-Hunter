@@ -1,4 +1,5 @@
 import {newsCoverageReport} from './news-coverage-report.mjs';
+import {newsInventory} from './news-inventory.mjs';
 import {randomUUID} from 'node:crypto';
 import {fetchText,hash,newsUrl,parseReutersFeedResult} from './providers.mjs';
 import {officialQueries,sourcePageUrl,parseOfficialPage,NEWS_ADAPTER_VERSION} from './news-sources.mjs';
@@ -23,7 +24,7 @@ export function openNewsIntake(store,{clock=()=>new Date().toISOString()}={}){
  };
  const latest=(id,success=false)=>read(db.prepare("SELECT payload FROM news_intake_runs WHERE query_id=?"+(success?" AND json_extract(payload,'$.state')='ok'":'')+' ORDER BY started_at DESC,rowid DESC LIMIT 1').get(id));
  return {
-  snapshot(){return {queries:newsQueries(store.getSettings(),clock()).map(q=>({...q,last:latest(q.id),lastSuccess:latest(q.id,true)})),recent:db.prepare('SELECT payload FROM news_intake_runs ORDER BY started_at DESC,rowid DESC LIMIT 30').all().map(read),coverage:'observed-only'};},
+  snapshot(){return {inventory:newsInventory(db),queries:newsQueries(store.getSettings(),clock()).map(q=>({...q,last:latest(q.id),lastSuccess:latest(q.id,true)})),recent:db.prepare('SELECT payload FROM news_intake_runs ORDER BY started_at DESC,rowid DESC LIMIT 30').all().map(read),coverage:'observed-only'};},
   report(input){return newsCoverageReport(db,newsQueries(store.getSettings(),clock()),input,clock(),payload=>read({payload}));},
   detail(id){const row=read(db.prepare('SELECT payload FROM news_intake_runs WHERE id=?').get(id));if(!row)throw new Error('采集记录不存在');return {...row,pages:db.prepare('SELECT page,url,response_hash AS responseHash,received_at AS receivedAt,payload FROM news_intake_pages WHERE run_id=? ORDER BY page').all(id).map(p=>({...p,payload:JSON.parse(p.payload)}))};},
   async run(query,fetcher,context){

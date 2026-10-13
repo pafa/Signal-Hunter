@@ -1,6 +1,6 @@
 import {COMPANY_ANALYSIS_FIELDS} from './company-directory.mjs';
 
-export const COMPANY_ASSESSMENT_VERSION='company-assessment/1';
+export const COMPANY_ASSESSMENT_VERSION='company-assessment/4';
 export const COMPANY_ASSESSMENT_FIELDS={...COMPANY_ANALYSIS_FIELDS,entryCondition:'进入观察条件',exitCondition:'减仓 / 退出条件',invalidation:'判断失效条件'};
 export const COMPANY_ASSESSMENT_BASES={source:'来源陈述 · 待核实',inference:'模型推断',unknown:'依据不足'};
 

@@ -13,6 +13,8 @@ import {openStore} from './store.mjs';
 import {createService} from './service.mjs';
 import {planExit} from './risk-rules.mjs';
 import {workbenchResponse} from './workbench-response.mjs';
+import {encodeWorkbenchBody} from './workbench-encoding.mjs';
+import {compactActualChecks} from './actual-check-response.mjs';
 import {screeningSamplePage} from './screening-history.mjs';
 
 export function createHandler(store,service,{apiPort=4179,frontendPort=4178,staticHandler=null}={}){
@@ -21,14 +23,18 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
  const origins=new Set([...hosts].map(host=>`http://${host}`));
  return async(req,res)=>{
   const sendJson=(code,body,headers={})=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(body);};
-  const reply=(code,body)=>sendJson(code,JSON.stringify(code<400?safeDiagnosticPayload(body):body));
+  const reply=(code,body)=>sendJson(code,JSON.stringify(code<400?safeDiagnosticPayload(compactActualChecks(body,req.headers['x-signal-holding-checks'])):body));
   if(!hosts.has(req.headers.host)||req.headers.origin&&!origins.has(req.headers.origin)){reply(403,{error:'仅允许本机工作台访问'});return;}
   try{
     const url=new URL(req.url,'http://127.0.0.1:4179');
     if(!url.pathname.startsWith('/api/')&&staticHandler){staticHandler(req,res);return;}
     if(service.instance?.id&&(req.headers['x-signal-instance']||['POST','PATCH','DELETE'].includes(req.method))&&req.headers['x-signal-instance']!==service.instance.id){reply(409,{error:'数据集已切换或尚未核对，请刷新页面后再继续'});return;}
     if(url.pathname.startsWith('/api/actual-holdings')&&url.search)failActual(0);
+    const actualCheckMatch=/^\/api\/actual-holdings\/([a-f0-9]{64})\/checks\/([a-f0-9]{64})\/([a-f0-9]{64})$/.exec(url.pathname);
+    if(req.method==='GET'&&actualCheckMatch){reply(200,{...service.observations.actualCheckDetail(...actualCheckMatch.slice(1)),instance:service.instance});return;}
+    if(req.method==='GET'&&/^\/api\/actual-performance\/actual:[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.actualPerformance.history(url.pathname.split('/')[3],Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/actual-holdings'){reply(200,service.actualHoldings.snapshot());return;}
+    if(req.method==='GET'&&/^\/api\/actual-holdings\/ledger\/[a-f0-9]{64}\/history$/.test(url.pathname)){reply(200,service.actualHoldings.ledger.history(url.pathname.split('/')[4]));return;}
     if(req.method==='GET'&&/^\/api\/actual-holdings\/[a-f0-9]{64}\/history$/.test(url.pathname)){reply(200,service.actualHoldings.history(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/workbench-queue'){reply(200,service.workbenchQueue(Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&url.pathname==='/api/activity'){reply(200,service.activity(Object.fromEntries(url.searchParams)));return;}
@@ -85,7 +91,7 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(req.method==='GET'&&url.pathname==='/api/bars'){const symbol=url.searchParams.get('symbol');if(!store.watchlist().some(w=>w.symbol===symbol))throw new Error('仅查看关注标的');const quote=store.quote(symbol);const rows=quote?store.db.prepare('SELECT provider_time AS time,close FROM quote_bars WHERE symbol=? AND provider=? AND timezone=? ORDER BY provider_time DESC LIMIT 6000').all(symbol,quote.provider||'legacy',quote.providerTimezone||'unverified'):[];reply(200,rows.reverse());return;}
     if(req.method==='GET'&&/^\/api\/research-pipeline\/items\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.researchPipeline.get(url.pathname.split('/')[4]));return;}
     if(req.method==='GET'&&url.pathname==='/api/research-pipeline'){reply(200,service.researchPipeline.snapshot());return;}
-    if(req.method==='GET'&&url.pathname==='/api/data'){const {body,headers}=workbenchResponse(service.snapshot(),req.headers['x-signal-topics-hash']);sendJson(200,body,headers);return;}
+    if(req.method==='GET'&&url.pathname==='/api/data'){const {body,headers}=workbenchResponse(service.snapshot(),req.headers['x-signal-topics-hash'],req.headers['x-signal-holding-checks']),encoded=await encodeWorkbenchBody(body,req.headers['accept-encoding']);if(!res.destroyed&&!res.writableEnded)sendJson(encoded.status,encoded.body,{...headers,...encoded.headers});return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}\/screening$/.test(url.pathname)){reply(200,screeningSamplePage(store.db,url.pathname.split('/')[3],service.research.screenings.rulesHash,Object.fromEntries(url.searchParams)));return;}
     if(req.method==='GET'&&/^\/api\/news\/[a-f0-9]{64}$/.test(url.pathname)){reply(200,service.research.newsItem(url.pathname.split('/')[3]));return;}
     if(req.method==='GET'&&url.pathname==='/api/news/search'){reply(200,service.research.newsPage(Object.fromEntries(url.searchParams)));return;}
@@ -111,11 +117,13 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     if(!['POST','PATCH','DELETE'].includes(req.method)){reply(404,{error:'接口不存在'});return;}
     if(service.health().restoreReviewRequired&&!/^\/api\/operations\/(?:restore-review|[a-z]+)$/.test(url.pathname)){reply(409,{error:'恢复副本需先完成核对确认，暂不接受业务修改'});return;}
     if(req.headers['content-type']!=='application/json'){reply(415,{error:'需要 JSON 请求'});return;}
-    const maxBody=url.pathname==='/api/actual-holdings/preview'?400000:/^\/api\/research\/[^/]+\/(materials|dossier)$/.test(url.pathname)?300000:/^\/api\/research\/[^/]+\/companies$/.test(url.pathname)?64000:16384;
+    const maxBody=['/api/actual-holdings/preview','/api/actual-holdings/ledger/preview'].includes(url.pathname)?400000:/^\/api\/research\/[^/]+\/(materials|dossier)$/.test(url.pathname)?300000:/^\/api\/research\/[^/]+\/companies$/.test(url.pathname)?64000:16384;
     const chunks=[];let bytes=0;for await(const chunk of req){const buffer=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);bytes+=buffer.length;if(bytes>maxBody){reply(413,{error:'请求过大'});return;}chunks.push(buffer);}const body=Buffer.concat(chunks).toString('utf8');
     const updatedSnapshot=()=>{service.syncWatches();return service.snapshot();};
     const data=JSON.parse(body||'{}');
     if(data===null||Array.isArray(data)||typeof data!=='object')throw new Error('JSON 对象无效');
+    if(req.method==='POST'&&url.pathname==='/api/actual-holdings/ledger/preview'){reply(200,service.actualHoldings.ledger.preview(data));return;}
+    if(req.method==='POST'&&url.pathname==='/api/actual-holdings/ledger/apply'){const result=service.actualHoldings.ledger.apply(data);service.syncWatches();reply(200,{...service.actualHoldings.snapshot(),result});return;}
     if(req.method==='POST'&&url.pathname==='/api/actual-holdings/preview'){reply(200,service.actualHoldings.preview(data));return;}
     if(req.method==='POST'&&url.pathname==='/api/actual-holdings/apply'){const result=service.actualHoldings.apply(data);service.syncWatches();reply(200,{...service.actualHoldings.snapshot(),result});return;}
     if(req.method==='POST'&&historyComparison){if(url.search)throw Error(historyRecallErrors[9]);reply(202,service.historicalComparisons.start(historyComparison[1],data));return;}
@@ -144,10 +152,12 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
     }
     if(req.method==='POST'&&url.pathname.startsWith('/api/market-simulation/')){
       const part=url.pathname.slice('/api/market-simulation/'.length),m=market;
-      const allowed={initialize:['requestId','version','initialUSD','config','confirmSimulation'],configure:['requestId','version','config','note'],orders:['requestId','version','order'],resume:['requestId','version','note'],process:[]};
-      const orderMatch=/^orders\/([-a-z0-9]{36})$/.exec(part),keys=orderMatch?['requestId','version','action','note','fingerprint','confirmSimulation']:Object.hasOwn(allowed,part)?allowed[part]:null;
+      const allowed={initialize:['requestId','version','initialUSD','config','confirmSimulation'],configure:['requestId','version','config','note'],autoPolicy:['requestId','version','policy','note','confirmSimulation'],orders:['requestId','version','order'],resume:['requestId','version','note'],process:[]};
+      const orderMatch=/^orders\/([-a-z0-9]{36})$/.exec(part),exitMatch=/^exit-candidates\/([a-f0-9]{64})$/.exec(part),researchMatch=/^research-candidates\/([a-f0-9]{64})$/.exec(part),keys=orderMatch||exitMatch||researchMatch?['requestId','version','action','note','fingerprint','confirmSimulation']:Object.hasOwn(allowed,part)?allowed[part]:null;
       if(!keys||Object.keys(data).some(k=>!keys.includes(k)))throw new Error('市场模拟执行数据必须由服务端适配器提供');
-      if(orderMatch)reply(200,m.decide(orderMatch[1],data));
+      if(researchMatch)reply(200,m.decideResearch(researchMatch[1],data));
+      else if(exitMatch)reply(200,m.decideExit(exitMatch[1],data));
+      else if(orderMatch)reply(200,m.decide(orderMatch[1],data));
       else if(part==='orders')reply(200,m.propose(data));
       else if(part==='process'){service.executionInputs.refresh();reply(200,m.process());}
       else reply(200,m[part](data));return;
@@ -235,7 +245,7 @@ if(process.argv[1]&&existsSync(process.argv[1])&&realpathSync(process.argv[1])==
   const store=openStore(config.dbPath);
   try{assertDatabaseMode(store,config.mode);}catch(error){store.close();throw error;}
   const staticHandler=config.production?createStaticHandler(fileURLToPath(new URL('../dist',import.meta.url))):null;
-  const modelConfig=process.env.SIGNAL_CODEX_BIN&&process.env.SIGNAL_CODEX_MODEL?{binary:process.env.SIGNAL_CODEX_BIN,model:process.env.SIGNAL_CODEX_MODEL,effort:process.env.SIGNAL_CODEX_EFFORT||'high',timeoutMs:Number(process.env.SIGNAL_CODEX_TIMEOUT_MS||180000)}:null;
+  const modelConfig=process.env.SIGNAL_CODEX_BIN&&process.env.SIGNAL_CODEX_MODEL?{binary:process.env.SIGNAL_CODEX_BIN,model:process.env.SIGNAL_CODEX_MODEL,effort:process.env.SIGNAL_CODEX_EFFORT||'high',timeoutMs:Number(process.env.SIGNAL_CODEX_TIMEOUT_MS||420000)}:null;
   const service=createService(store,{mode:config.mode,instance:config.instance,executionConfig,modelConfig,storageConfig:{databasePath:config.dbPath,backupRoot:resolve(dirname(config.dbPath),'backups')},backupTask:async()=>{
     const result=await createBackup(config.dbPath,resolve(dirname(config.dbPath),'backups'));
     store.status('backup',{state:'ok',receivedAt:result.createdAt,directory:result.directory,sha256:result.sha256});return {ok:true};

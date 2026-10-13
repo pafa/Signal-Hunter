@@ -14,6 +14,7 @@ try{loadedSourceHash=digest(collectEvaluationSources(root));}catch{/* A minimal 
 const same=(a,b)=>(a.kind||'news')===(b.kind||'news')&&a.id===b.id&&a.revision===b.revision;
 const stateKey='forward_evaluation_baseline';
 const subjectOf=run=>run.subject||'research';
+const repairOf=run=>run.repair?{previousRunId:run.repair.previousRunId??null,feedbackHash:digest(run.repair.feedback??null)}:null;
 const synthesisScope=input=>({clusterId:input.clusterId,clusterVersion:input.clusterVersion,clusterHash:input.clusterHash,version:input.version,memberResearch:input.members.map(m=>({topicId:m.topicId,topicVersion:m.topicVersion,inputHash:m.inputHash})),priorVersion:input.priorSynthesis?.version||null,inputHash:digest(input)});
 const guarded=value=>({...value,snapshotHash:digest(value)});
 const checked=value=>{const {snapshotHash,...data}=value;if(snapshotHash!==digest(data))throw new Error('前向档案指纹不符');return value;};
@@ -75,7 +76,9 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
     if(topic.version!==run.packet.input.topicVersion||research.packet(run.topicId).inputHash!==run.packet.inputHash)throw new Error('研究已更新，请刷新后再生成');
     clusterSnapshots=clusters.forResearch(topic).map(c=>{const {history,...snapshot}=clusters.get(c.id);return snapshot;});
    }
-   const execution={...recipe(),promptVersion:CODEX_PROMPT_VERSION+(synthesis?'/'+EVENT_SYNTHESIS_PROMPT_VERSION:''),schemaHash:digest(codexDraftSchema(run.packet)),promptHash:digest(codexPrompt(run.packet))},sourceHash=digest(collectEvaluationSources(root));
+   const repair=repairOf(run),feedback=run.repair?.feedback||null;
+   const execution={...recipe(),promptVersion:CODEX_PROMPT_VERSION+(synthesis?'/'+EVENT_SYNTHESIS_PROMPT_VERSION:''),schemaHash:digest(codexDraftSchema(run.packet,feedback)),promptHash:digest(codexPrompt(run.packet,feedback)),...(repair?{researchFeedbackHash:repair.feedbackHash}:{})},sourceHash=digest(collectEvaluationSources(root));
+   if(repair)reasons.push('自动纠错重试，仅作后续调用留样');
    if(digest(recipe())!==digest(b.execution)||sourceHash!==b.sourceHash)reasons.push('代码或模型配置已不同于冻结基线');
    if(run.packet.input.sourceRevision)reasons.push('包含旧来源与历史判断');
    if(db.prepare('SELECT 1 FROM model_research_runs WHERE topic_id=? AND id<>?').get(run.topicId,run.id))reasons.push('该研究已有模型调用');
@@ -116,7 +119,7 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
     }
    }
    const claimTimeline=synthesis?[]:db.prepare('SELECT version,recorded_at,payload FROM research_versions WHERE topic_id=? AND version<=? ORDER BY version').all(run.topicId,run.packet.input.topicVersion).map(row=>({version:row.version,recordedAt:row.recorded_at,claims:claimsOf(JSON.parse(row.payload))}));
-   const value=guarded({subject:subjectOf(run),...(synthesis?{synthesis:synthesisScope(run.packet.input.eventSynthesis)}:{}),claimTimeline,runId:run.id,baselineId,topicId:run.topicId,topicVersion:run.packet.input.topicVersion,topicTitle:run.packet.input.title,packetHash:digest(run.packet),evidenceKeys:[...keys].sort(),record,execution,sourceHash,clusterSnapshots,inputEligibility:{eligible:reasons.length===0,reasons:[...new Set(reasons)]},forwardEligible:false,qualification:'输入准入仅供核对；尚无独立标签、结局或模型有效性验收'});
+   const value=guarded({repair,subject:subjectOf(run),...(synthesis?{synthesis:synthesisScope(run.packet.input.eventSynthesis)}:{}),claimTimeline,runId:run.id,baselineId,topicId:run.topicId,topicVersion:run.packet.input.topicVersion,topicTitle:run.packet.input.title,packetHash:digest(run.packet),evidenceKeys:[...keys].sort(),record,execution,sourceHash,clusterSnapshots,inputEligibility:{eligible:reasons.length===0,reasons:[...new Set(reasons)]},forwardEligible:false,qualification:'输入准入仅供核对；尚无独立标签、结局或模型有效性验收'});
    db.prepare('INSERT INTO forward_captures VALUES(?,?,?,?)').run(run.id,baselineId,run.topicId,JSON.stringify(value));
   },
   get(runId){
@@ -124,10 +127,11 @@ export function openForwardEvaluations(store,research,clusters,{enabled=false,co
    const saved=db.prepare('SELECT payload FROM model_research_runs WHERE id=?').get(runId);if(!saved)throw new Error('前向记录缺少原模型调用');const run=JSON.parse(saved.payload),reasons=[];
    try{if(subjectOf(run)!==(capture.subject||'research')||capture.subject==='event-cluster'&&digest(capture.synthesis)!==digest(synthesisScope(run.packet.input.eventSynthesis)))throw Error();}catch{reasons.push('调用对象或综合成员与冻结档案不符');}
    if(digest(run.packet)!==capture.packetHash||run.model!==capture.execution.model||run.effort!==capture.execution.effort||run.topicId!==capture.topicId||run.packet.input.topicVersion!==capture.topicVersion||digest(run.packet.input)!==capture.record.inputHash||run.packet.inputHash!==capture.record.inputHash||run.createdAt!==capture.record.decisionAt||b.baseline.rulesHash!==capture.record.rulesHash)reasons.push('模型调用或冻结输入与前向记录不符');
+   if(Object.hasOwn(capture,'repair')&&digest(repairOf(run))!==digest(capture.repair))reasons.push('纠错来源或反馈与冻结记录不符');
    const trace=run.candidate?.trace||run.failure?.trace;
    if(run.candidate){try{validateModelCandidate(run.candidate,run.packet,{model:capture.execution.model,topicId:capture.topicId});}catch{reasons.push('原模型候选完整性校验失败');}}
    if(run.candidate&&!trace?.promptHash)reasons.push('实际模型执行依据缺失');
-   if(trace?.promptHash)for(const key of ['model','effort','promptVersion','promptHash','schemaHash',...(capture.execution.schemaVersion?['schemaVersion']:[])])if(trace[key]!==capture.execution[key])reasons.push('实际模型执行与冻结配置不符');
+   if(trace?.promptHash)for(const key of ['model','effort','promptVersion','promptHash','schemaHash',...(capture.execution.schemaVersion?['schemaVersion']:[]),...(capture.execution.researchFeedbackHash?['researchFeedbackHash']:[])])if(trace[key]!==capture.execution[key])reasons.push('实际模型执行与冻结配置不符');
    return {...capture,modelStatus:run.status,resultTrace:trace||null,executionVerified:!!trace?.promptHash&&reasons.length===0,integrity:{valid:reasons.length===0,reasons:[...new Set(reasons)]},forwardEligible:false};
   },
   records(){return db.prepare('SELECT run_id FROM forward_captures ORDER BY rowid DESC LIMIT 100').all().map(({run_id})=>{const c=api.get(run_id);return {subject:c.subject||'research',runId:c.runId,baselineId:c.baselineId,topicId:c.topicId,topicVersion:c.topicVersion,topicTitle:c.topicTitle,modelStatus:c.modelStatus,inputEligibility:c.inputEligibility,integrity:c.integrity,forwardEligible:false};});}

@@ -1,22 +1,28 @@
+import {selectHoldingSource} from './holding-news-priority.mjs';
+import {openPreparationRecovery} from './pipeline-preparation-recovery.mjs';
+import {INTAKE_SOURCE_VERSION} from './pipeline-intake-source.mjs';
 import {openEventSynthesis} from './event-synthesis.mjs';
-import {digest,CODEX_PROMPT_VERSION,CODEX_DRAFT_SCHEMA,CODEX_SCHEMA_VERSION} from './codex-research.mjs';
+import {digest} from './codex-research.mjs';
 import {RULES_VERSION} from './triage.mjs';
-import {READER_VERSION} from './source-reader.mjs';
+import {initializePipelineSourceGenerations,openPipelineSourceUpgrades,pipelineExecutionBasis} from './pipeline-source-upgrades.mjs';
 import {openPipelineRelations} from './pipeline-relations.mjs';
 import {openPipelineClusters} from './pipeline-clusters.mjs';
 import {openPipelineEvents} from './pipeline-events.mjs';
+import {openPipelineDirectories} from './pipeline-directories.mjs';
+import {openPipelineIntake} from './pipeline-intake.mjs';
 import {openPipelineEvidence} from './pipeline-evidence.mjs';
 
 // Research automation writes versioned system judgments; final order decisions stay separate.
-export function openResearchPipeline(store,research,models,{enabled=false,config={},now=Date.now,semantic=null,recall=null,materialEvents=null,entities=null,batches=null,clusters=null}={}){
+export function openResearchPipeline(store,research,models,{enabled=false,config={},now=Date.now,intakeRunner,sourceReader,semantic=null,recall=null,materialEvents=null,financialSources=null,holdingSymbols=()=>[],holdingReferences=()=>[],sourcePriorities=()=>new Map(),getReviewContext=()=>null,priceSources=null,securityDirectory=null,entities=null,batches=null,clusters=null}={}){
  const db=store.db,at=()=>new Date(now()).toISOString();
  db.exec(`CREATE TABLE IF NOT EXISTS research_pipeline_settings(slot INTEGER PRIMARY KEY CHECK(slot=1),version INTEGER NOT NULL,payload TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS research_pipeline_items(id TEXT PRIMARY KEY,news_id TEXT NOT NULL,revision INTEGER NOT NULL,rules_hash TEXT NOT NULL,status TEXT NOT NULL,topic_id TEXT,run_id TEXT,payload TEXT NOT NULL,UNIQUE(news_id,revision,rules_hash));
+ CREATE TABLE IF NOT EXISTS research_pipeline_items(id TEXT PRIMARY KEY,news_id TEXT NOT NULL,revision INTEGER NOT NULL,rules_hash TEXT NOT NULL,status TEXT NOT NULL,topic_id TEXT,run_id TEXT,payload TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS research_pipeline_attempts(id INTEGER PRIMARY KEY,item_id TEXT NOT NULL,run_id TEXT UNIQUE NOT NULL,at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS research_pipeline_audit(id INTEGER PRIMARY KEY,item_id TEXT,action TEXT NOT NULL,at TEXT NOT NULL,payload TEXT NOT NULL);`);
+ initializePipelineSourceGenerations(db);
  db.prepare('INSERT OR IGNORE INTO research_pipeline_settings VALUES(1,1,?)').run(JSON.stringify({dailyCalls:10,includeClues:false}));
- const settings=()=>{const r=db.prepare('SELECT * FROM research_pipeline_settings WHERE slot=1').get();return {automatic:false,extractEvents:false,version:r.version,...JSON.parse(r.payload)};};
- const executionHash=()=>digest({model:config.model,binary:config.binary,effort:config.effort||'high',timeoutMs:config.timeoutMs??180000,prompt:CODEX_PROMPT_VERSION,schema:CODEX_DRAFT_SCHEMA,schemaVersion:CODEX_SCHEMA_VERSION,reader:READER_VERSION});
+ const settings=()=>{const r=db.prepare('SELECT * FROM research_pipeline_settings WHERE slot=1').get();return {automatic:false,screenUnselected:true,extractEvents:false,financialSources:false,researchPrices:true,directoryMarkets:['US','CN','HK'],version:r.version,...JSON.parse(r.payload)};};
+ const executionHash=()=>digest(pipelineExecutionBasis(config));
  const audit=(id,action,payload={})=>db.prepare('INSERT INTO research_pipeline_audit(item_id,action,at,payload) VALUES(?,?,?,?)').run(id,action,at(),JSON.stringify(payload));
  const guard=()=>{if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw Error('恢复副本需先完成核对确认');};
  const transaction=fn=>{db.exec('BEGIN IMMEDIATE');try{guard();const r=fn();db.exec('COMMIT');return r;}catch(e){db.exec('ROLLBACK');throw e;}};
@@ -25,14 +31,19 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
  const used=()=>db.prepare(semantic?"SELECT count(DISTINCT coalesce('group:'||json_extract(s.payload,'$.invocation.id'),a.run_id)) n FROM research_pipeline_attempts a LEFT JOIN semantic_runs s ON s.id=a.run_id WHERE a.at>=?":'SELECT count(*) n FROM research_pipeline_attempts WHERE at>=?').get(new Date(now()-86400000).toISOString()).n;
  const view=row=>{const p=JSON.parse(row.payload),run=row.run_id?models.get(row.topic_id,row.run_id):null;let status=run?.status||row.status;
   if(status==='preparing'){const lane=db.prepare("SELECT token,lease_until,paused FROM operation_tasks WHERE name='discovery'").get();if(!lane||lane.paused||lane.token!==p.token||lane.lease_until<=now())status='interrupted';}
-  return {id:row.id,newsId:row.news_id,revision:row.revision,title:p.title,status,topicId:row.topic_id,runId:row.run_id,reason:p.reason||run?.failure?.message||null,createdAt:p.createdAt,relationCoverage:p.relationCoverage||null,selectionReason:p.selectionReason||null,attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
+  return {id:row.id,newsId:row.news_id,revision:row.revision,title:p.title,status,topicId:row.topic_id,runId:row.run_id,reason:status==='superseded'?'旧任务与判断已保留，新版任务将重新读取正文':p.reason||run?.failure?.message||null,createdAt:p.createdAt,relationCoverage:p.relationCoverage||null,selectionReason:p.selectionReason||null,duplicateSource:p.duplicateSource||null,researchResults:events?.sourceResults(row)||null,intakeScreening:p.intakeScreening||null,attempts:db.prepare('SELECT run_id,at FROM research_pipeline_attempts WHERE item_id=? ORDER BY id').all(row.id)};
  };
  const setState=(row,status,extra={})=>{db.prepare('UPDATE research_pipeline_items SET status=?,payload=? WHERE id=?').run(status,JSON.stringify({...JSON.parse(row.payload),...extra}),row.id);audit(row.id,status,extra);};
+ const upgrades=openPipelineSourceUpgrades(store,research,{config,settings,now,transaction,audit});
+ const intake=openPipelineIntake(store,research,{config,now,settings,guard,transaction,audit,used,setState,executionHash,executionCompatible:upgrades.compatible,sourceReader,...(intakeRunner?{runner:intakeRunner}:{})});
  const relations=semantic&&recall?openPipelineRelations(store,research,semantic,{config,now,guard,transaction,audit,used,settings,recall}):null;
- const events=materialEvents?openPipelineEvents(store,research,models,materialEvents,{config,now,guard,transaction,audit,used,settings,relations,entities}):null;
- const clusterJobs=batches&&clusters&&semantic?openPipelineClusters(store,research,semantic,batches,clusters,{now,guard,transaction,audit,used,settings}):null;
- const synthesis=clusters?openEventSynthesis(store,research,clusters,models,{config,now,guard,transaction,audit,used,settings}):null;
- const evidence=relations&&events?openPipelineEvidence(store,research,relations,{now,guard,transaction,audit,settings,executionHash,setState,enqueueLinked}):null;
+ const directories=securityDirectory?openPipelineDirectories(store,securityDirectory,{now,guard,settings,audit}):null;
+ const events=materialEvents?openPipelineEvents(store,research,models,materialEvents,{config,now,guard,transaction,audit,used,settings,relations,entities,financialSources,holdingSymbols,getReviewContext,priceSources,directories}):null;
+ const clusterJobs=batches&&clusters&&semantic?openPipelineClusters(store,research,semantic,batches,clusters,{now,guard,transaction,audit,used,settings,holdingReferences}):null;
+ const synthesis=clusters?openEventSynthesis(store,research,clusters,models,{config,now,guard,transaction,audit,used,settings,holdingSymbols,getReviewContext,priceSources}):null;
+ const evidence=relations&&events?openPipelineEvidence(store,research,relations,{now,guard,transaction,audit,settings,executionHash,executionCompatible:upgrades.compatible,setState,enqueueLinked}):null;
+ const recovery=openPreparationRecovery(store,research,{settings,now,transaction,audit,setState,compatible:upgrades.compatible,evidence});
+ const compatible=p=>p.executionHash===executionHash()||p.configuration.automatic&&upgrades.compatible(p.executionHash);
  function enqueueLinked(news,{searchId,context}){
   context.assertActive();guard(); // Called inside store.ingest's transaction.
   const prior=db.prepare('SELECT * FROM research_pipeline_items WHERE news_id=? AND revision=? ORDER BY rowid DESC LIMIT 1').get(news.id,news.revision);
@@ -48,15 +59,18 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
   return {id,activated:false,initialStatus:'new'};
  }
  async function prepareSource(context){
-   const row=db.prepare("SELECT * FROM research_pipeline_items WHERE status IN ('queued','ready') ORDER BY rowid LIMIT 1").get();if(!row)return null;
+   const automatic=settings().automatic,priorityKey='research_pipeline_source_burst',burst=Number(db.prepare('SELECT value FROM settings WHERE key=?').get(priorityKey)?.value)||0;
+   const rows=db.prepare("SELECT * FROM research_pipeline_items WHERE status IN ('queued','ready') ORDER BY rowid"+(automatic?'':' LIMIT 1')).all();if(!rows.length)return null;
+   const choice=automatic?selectHoldingSource(rows,holdingReferences(),burst,sourcePriorities()):null;
+   const row=choice?.row||rows[0];
    if(store.newsById(row.news_id)?.provider==='linked-public-source'&&!evidence?.hasActiveLinkedRequest(row)){transaction(()=>{context.assertActive();setState(read(row.id),'invalidated',{reason:'原补读请求依据已变化，停止尚未开始的读取；旧记录保留'});});return {skipped:'linked-request-invalidated'};}
    if(used()>=settings().dailyCalls)return {skipped:'call-limit'};
    if(db.prepare('SELECT 1 FROM model_job_lease WHERE expires_at>=?').get(now()))return {skipped:'model-busy'};
-   const valid=()=>{context.assertActive();guard();current(row);if(current(row).provider==='linked-public-source'&&!evidence?.hasActiveLinkedRequest(row))throw Error('原补读请求已失效');if(JSON.parse(read(row.id).payload).executionHash!==executionHash())throw Error('模型或提示词已变化，旧条目需重新核对');};
+   const valid=()=>{context.assertActive();guard();current(row);if(current(row).provider==='linked-public-source'&&!evidence?.hasActiveLinkedRequest(row))throw Error('原补读请求已失效');if(!compatible(JSON.parse(read(row.id).payload)))throw Error('模型或提示词已变化，旧条目需重新核对');recovery.validate(read(row.id));};
    try{
     valid();
     const owned=JSON.parse(read(row.id).payload);
-    if(owned.configuration.automatic)transaction(()=>{valid();setState(read(row.id),row.status,{prepareAttempts:(owned.prepareAttempts||0)+1});});
+    if(owned.configuration.automatic)transaction(()=>{valid();if(choice)db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(priorityKey,String(choice.nextBurst));setState(read(row.id),row.status,{prepareAttempts:(owned.prepareAttempts||0)+1,...(choice?{sourcePriority:{...choice.selection,selectedAt:at()}}:{})});});
     if(row.status==='queued'){
      const history=research.list().filter(t=>t.sourceNewsId===row.news_id).sort((a,b)=>b.sourceNewsRevision-a.sourceNewsRevision||b.version-a.version||a.id.localeCompare(b.id));
      const existing=history.find(t=>t.sourceNewsRevision===row.revision),previous=history.find(t=>t.sourceNewsRevision<row.revision);
@@ -70,14 +84,15 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
     if(topic.status==='archived'||topic.dossier)throw Error('研究已归档或已有研判，请人工核对');
     if(!topic.evidence.some(e=>e.materialId)){
      // The existing reader enforces public URLs, byte limits and immutable materials.
-     topic=await research.readMaterial(topic.id,{version:topic.version,url:current(row).url,stance:'unverified',family:'other',step:'fact',interpretation:'自动读取候选新闻来源；事实、公司影响及正文完整性仍待复核'},()=>{valid();if(owned.configuration.automatic)setState(read(row.id),'preparing',{token:context.token,preparedTopicVersion:topic.version+1});});
+     const data={version:topic.version,url:current(row).url,stance:'unverified',family:'other',step:'fact',interpretation:'自动读取候选新闻来源；事实、公司影响及正文完整性仍待复核'},beforeWrite=()=>{valid();if(owned.configuration.automatic)setState(read(row.id),'preparing',{token:context.token,preparedTopicVersion:topic.version+1});};
+     topic=owned.intakeSource?.status==='ready'?research.useStoredMaterial(topic.id,data,{id:owned.intakeSource.materialId,revision:owned.intakeSource.materialRevision},beforeWrite):await research.readMaterial(topic.id,data,beforeWrite);
     }
     transaction(()=>{valid();setState(read(row.id),'ready',{reason:null,preparationFailure:null,preparedTopicVersion:topic.version});});
     const relationPlan=!owned.configuration.automatic&&relations&&!JSON.parse(read(row.id).payload).relationCoverage?relations.plan(row,topic):null;
     const prepared=JSON.parse(read(row.id).payload),eventPlan=events&&prepared.configuration.extractEvents&&!prepared.eventJobId?events.plan(row,topic):null;
     if(prepared.configuration.automatic){
      if(!eventPlan)throw Error('自动研究事项队列不可用');
-     transaction(()=>{valid();const latest=read(row.id);if(latest.status!=='ready'||latest.run_id)throw Error('队列条目已变化');events.persist(eventPlan);setState(latest,'processing',{eventJobId:eventPlan.id,reason:'正文已入库，系统依次识别事项、公司与研判'});});
+     transaction(()=>{valid();const latest=read(row.id);if(latest.status!=='ready'||latest.run_id)throw Error('队列条目已变化');events.persist(eventPlan);setState(latest,'processing',{eventJobId:eventPlan.id,...(eventPlan.payload.duplicateOf?{duplicateSource:eventPlan.payload.duplicateOf}:{}),reason:eventPlan.payload.duplicateOf?eventPlan.payload.reason:'正文已入库，系统依次识别事项、公司与研判'});});
      return {ok:true,itemId:row.id,eventJobId:eventPlan.id};
     }
     const started=models.start(topic.id,{version:topic.version},run=>{
@@ -92,46 +107,53 @@ export function openResearchPipeline(store,research,models,{enabled=false,config
     context.assertActive();guard();
     if(error.message==='已有模型研判正在运行，请等待或取消后再试')return {skipped:'model-busy'};
     const unavailable=error.code==='SOURCE_READ_UNAVAILABLE';
-    transaction(()=>{const latest=read(row.id);if(latest.run_id)return;const p=JSON.parse(latest.payload);setState(latest,'failed',{preparationFailure:unavailable?'source-unavailable':'preparation-incomplete',...(p.configuration.automatic?{nextRetryAt:now()+60000*2**Math.max(0,(p.prepareAttempts||1)-1)}:{}),reason:p.configuration.automatic?'本篇准备未完成，后台限次重试；保留输入与失败记录，其他材料继续':unavailable?'原文读取失败；保留新闻及读取失败记录，本篇不调用模型，队列继续下一篇':'自动准备未完成；检查来源、研究版本或模型配置后重试'});});
+    transaction(()=>{const latest=read(row.id);if(latest.run_id)return;const p=JSON.parse(latest.payload);setState(latest,'failed',{preparationFailure:unavailable?'source-unavailable':'preparation-incomplete',...(p.configuration.automatic?{nextRetryAt:now()+60000*2**Math.max(0,recovery.attemptCount(latest)-1)}:{}),reason:p.configuration.automatic?'本篇准备未完成，后台限次重试；保留输入与失败记录，其他材料继续':unavailable?'原文读取失败；保留新闻及读取失败记录，本篇不调用模型，队列继续下一篇':'自动准备未完成；检查来源、研究版本或模型配置后重试'});});
     if(unavailable)return {skipped:'source-unavailable',itemId:row.id,itemStatus:'failed'};
     if(JSON.parse(read(row.id).payload).configuration.automatic)return {skipped:'preparation-incomplete',itemId:row.id};
     return {error:'自动研究准备失败，原新闻和已有研究保留'};
    }
  }
  const api={
-  synthesis,
+  synthesis,intake,
+  holdingSuccessions:ids=>clusterJobs?.holdingSuccessions(ids)||{},
   isAutomatic:()=>settings().automatic,
   get(id){return view(read(id));},
   snapshot(){const lane=db.prepare("SELECT token,lease_until,paused FROM operation_tasks WHERE name='discovery'").get(),counts={};
-   const rows=db.prepare(`SELECT CASE WHEN r.status='running' AND r.expires_at<? THEN 'interrupted' WHEN r.status IS NOT NULL THEN r.status WHEN i.status='preparing' AND (? OR json_extract(i.payload,'$.token') IS NOT ?) THEN 'interrupted' ELSE i.status END status,count(*) n FROM research_pipeline_items i LEFT JOIN model_research_runs r ON r.id=i.run_id GROUP BY 1`).all(now(),Number(!lane||!!lane.paused||lane.lease_until<=now()),lane?.token||null);for(const r of rows)counts[r.status]=r.n;return {enabled:enabled&&models.status().enabled,settings:settings(),callsInLast24Hours:used(),comparisonUsage:semantic?db.prepare("SELECT count(*) pairAttempts,count(DISTINCT coalesce('group:'||json_extract(s.payload,'$.invocation.id'),a.run_id)) invocations FROM research_pipeline_attempts a JOIN semantic_runs s ON s.id=a.run_id WHERE a.at>=?").get(new Date(now()-86400000).toISOString()):null,counts,relations:relations?.snapshot()||null,events:events?.snapshot()||null,clusters:clusterJobs?.snapshot()||null,synthesis:synthesis?.snapshot()||null,evidence:evidence?.snapshot()||null,items:db.prepare('SELECT * FROM research_pipeline_items ORDER BY rowid DESC LIMIT 30').all().map(view)};},
-  configure(input,beforeCommit=()=>{}){if(!input||!['dailyCalls,includeClues,version','dailyCalls,extractEvents,includeClues,version','automatic,dailyCalls,extractEvents,includeClues,version'].includes(Object.keys(input).sort().join(','))||!Number.isSafeInteger(input.dailyCalls)||input.dailyCalls<1||input.dailyCalls>100||typeof input.includeClues!=='boolean'||Object.hasOwn(input,'extractEvents')&&typeof input.extractEvents!=='boolean')throw Error('自动研究配置无效');if(Object.hasOwn(input,'automatic')&&(typeof input.automatic!=='boolean'||input.automatic&&(!entities||!events||!input.extractEvents)))throw Error('自动研究需要事项拆分与身份识别');return transaction(()=>{if(input.version!==settings().version)throw Error('自动研究配置已变化，请刷新');if((input.automatic??settings().automatic)&&!(input.extractEvents??settings().extractEvents))throw Error('自动研究需要事项拆分与身份识别');db.prepare('UPDATE research_pipeline_settings SET version=version+1,payload=? WHERE slot=1').run(JSON.stringify({dailyCalls:input.dailyCalls,includeClues:input.includeClues,extractEvents:input.extractEvents??settings().extractEvents,automatic:input.automatic??settings().automatic}));audit(null,'configure',input);beforeCommit();return api.snapshot();});},
+   const rows=db.prepare(`SELECT CASE WHEN r.status='running' AND r.expires_at<? THEN 'interrupted' WHEN r.status IS NOT NULL THEN r.status WHEN i.status='preparing' AND (? OR json_extract(i.payload,'$.token') IS NOT ?) THEN 'interrupted' ELSE i.status END status,count(*) n FROM research_pipeline_items i LEFT JOIN model_research_runs r ON r.id=i.run_id GROUP BY 1`).all(now(),Number(!lane||!!lane.paused||lane.lease_until<=now()),lane?.token||null);for(const r of rows)counts[r.status]=r.n;return {enabled:enabled&&models.status().enabled,settings:settings(),callsInLast24Hours:used(),comparisonUsage:semantic?db.prepare("SELECT count(*) pairAttempts,count(DISTINCT coalesce('group:'||json_extract(s.payload,'$.invocation.id'),a.run_id)) invocations FROM research_pipeline_attempts a JOIN semantic_runs s ON s.id=a.run_id WHERE a.at>=?").get(new Date(now()-86400000).toISOString()):null,counts,intake:intake.snapshot(),directories:directories?.snapshot()||null,relations:relations?.snapshot()||null,events:events?.snapshot()||null,clusters:clusterJobs?.snapshot()||null,synthesis:synthesis?.snapshot()||null,evidence:evidence?.snapshot()||null,items:db.prepare('SELECT * FROM research_pipeline_items ORDER BY rowid DESC LIMIT 30').all().map(view)};},
+  configure(input,beforeCommit=()=>{}){const supplied=input;if(input&&Object.hasOwn(input,'screenUnselected')){if(typeof input.screenUnselected!=='boolean')throw Error('入口复核配置无效');input={...input};delete input.screenUnselected;}if(input&&Object.hasOwn(input,'researchPrices')){if(typeof input.researchPrices!=='boolean')throw Error('研究价量配置无效');input={...input};delete input.researchPrices;}if(input&&Object.hasOwn(input,'directoryMarkets')){if(!Array.isArray(input.directoryMarkets)||input.directoryMarkets.length>3||new Set(input.directoryMarkets).size!==input.directoryMarkets.length||input.directoryMarkets.some(m=>!['US','CN','HK'].includes(m)))throw Error('证券目录市场配置无效');input={...input};delete input.directoryMarkets;}if(input&&Object.hasOwn(input,'financialSources')){if(typeof input.financialSources!=='boolean')throw Error('财务来源配置无效');input={...input};delete input.financialSources;}if(!input||!['dailyCalls,includeClues,version','dailyCalls,extractEvents,includeClues,version','automatic,dailyCalls,extractEvents,includeClues,version'].includes(Object.keys(input).sort().join(','))||!Number.isSafeInteger(input.dailyCalls)||input.dailyCalls<1||input.dailyCalls>100||typeof input.includeClues!=='boolean'||Object.hasOwn(input,'extractEvents')&&typeof input.extractEvents!=='boolean')throw Error('自动研究配置无效');if(Object.hasOwn(input,'automatic')&&(typeof input.automatic!=='boolean'||input.automatic&&(!entities||!events||!input.extractEvents)))throw Error('自动研究需要事项拆分与身份识别');return transaction(()=>{if(input.version!==settings().version)throw Error('自动研究配置已变化，请刷新');if((input.automatic??settings().automatic)&&!(input.extractEvents??settings().extractEvents))throw Error('自动研究需要事项拆分与身份识别');db.prepare('UPDATE research_pipeline_settings SET version=version+1,payload=? WHERE slot=1').run(JSON.stringify({dailyCalls:input.dailyCalls,includeClues:input.includeClues,extractEvents:input.extractEvents??settings().extractEvents,automatic:input.automatic??settings().automatic,screenUnselected:supplied.screenUnselected??settings().screenUnselected,financialSources:supplied.financialSources??settings().financialSources,researchPrices:supplied.researchPrices??settings().researchPrices,directoryMarkets:supplied.directoryMarkets??settings().directoryMarkets}));audit(null,'configure',supplied);beforeCommit();return api.snapshot();});},
   retry(id){return transaction(()=>{if(!enabled)throw Error('当前未启用自动研究');const row=read(id),s=view(row).status;if(!['failed','cancelled','interrupted'].includes(s))throw Error('只有失败、取消或中断条目可以重试');current(row);if(JSON.parse(row.payload).executionHash!==executionHash())throw Error('模型或提示词已变化，旧条目需重新核对');db.prepare('UPDATE research_pipeline_items SET run_id=NULL WHERE id=?').run(id);setState(row,row.topic_id?'ready':'queued',{reason:null});return view(read(id));});},
   retryEvent(id){guard();if(!enabled||!events)throw Error('当前未启用自动研究');return events.retry(id);},
   retryRelation(id){guard();if(!enabled||!relations)throw Error('当前未启用自动研究');return relations.retry(id);},
   scan(context){context.assertActive();guard();if(!enabled)return 0;
    const s=settings(),key=`${RULES_VERSION}@${research.screenings.rulesHash}`;
-   return transaction(()=>{context.assertActive();const pending=db.prepare(`SELECT n.id,n.revision,t.payload triage FROM news n JOIN triage t ON t.news_id=n.id AND t.news_revision=n.revision AND t.rules_version=? WHERE NOT EXISTS(SELECT 1 FROM research_pipeline_items p WHERE p.news_id=n.id AND p.revision=n.revision AND p.rules_hash=?) ORDER BY n.rowid LIMIT 200`).all(key,research.screenings.rulesHash);
-    for(const n of pending){const news=store.newsById(n.id),triage=JSON.parse(n.triage),tracked=n.revision>1&&!!db.prepare("SELECT 1 FROM research_topics WHERE json_extract(payload,'$.sourceNewsId')=? AND json_extract(payload,'$.sourceNewsRevision')<? AND json_extract(payload,'$.status')='active' LIMIT 1").get(n.id,n.revision),selected=tracked||triage.bucket==='review'||s.includeClues&&triage.bucket==='clue',id=digest({news:n.id,revision:n.revision,rules:research.screenings.rulesHash});const payload={title:news.title,createdAt:at(),screening:triage,configuration:s,selectionReason:tracked?'source-revision':'screening',executionHash:executionHash(),reason:selected?null:'当前筛选配置未选择；保留记录供漏筛复核'};db.prepare('INSERT INTO research_pipeline_items VALUES(?,?,?,?,?,NULL,NULL,?)').run(id,n.id,n.revision,research.screenings.rulesHash,selected?'queued':'skipped',JSON.stringify(payload));audit(id,'discovered',{bucket:triage.bucket,selected});}
+   return transaction(()=>{context.assertActive();upgrades.capture();const pending=db.prepare(`SELECT n.id,n.revision,t.payload triage FROM news n JOIN triage t ON t.news_id=n.id AND t.news_revision=n.revision AND t.rules_version=? WHERE NOT EXISTS(SELECT 1 FROM research_pipeline_items p WHERE p.news_id=n.id AND p.revision=n.revision AND p.rules_hash=?) ORDER BY n.rowid LIMIT 200`).all(key,research.screenings.rulesHash);
+    for(const n of pending){const news=store.newsById(n.id),triage=JSON.parse(n.triage),tracked=n.revision>1&&!!db.prepare("SELECT 1 FROM research_topics WHERE json_extract(payload,'$.sourceNewsId')=? AND json_extract(payload,'$.sourceNewsRevision')<? AND json_extract(payload,'$.status')='active' LIMIT 1").get(n.id,n.revision),selected=tracked||triage.bucket==='review'||s.includeClues&&triage.bucket==='clue',id=digest({news:n.id,revision:n.revision,rules:research.screenings.rulesHash});const payload={title:news.title,createdAt:at(),screening:triage,configuration:s,...(!selected&&s.automatic&&s.screenUnselected?{intakeSourceVersion:INTAKE_SOURCE_VERSION}:{}),selectionReason:tracked?'source-revision':'screening',executionHash:executionHash(),reason:selected?null:'当前筛选配置未选择；保留记录供漏筛复核'};db.prepare('INSERT INTO research_pipeline_items VALUES(?,?,?,?,?,NULL,NULL,?)').run(id,n.id,n.revision,research.screenings.rulesHash,selected?'queued':'skipped',JSON.stringify(payload));audit(id,'discovered',{bucket:triage.bucket,selected});}
     return pending.length;
    });
   },
   async step(context){
    context.assertActive();guard();if(!enabled||!models.status().enabled)return {skipped:'model-disabled'};
    api.scan(context);
+   const upgraded=upgrades.step(context);if(upgraded)return upgraded;
+   const continued=upgrades.recordContinuations(context);if(continued)return continued;
+   const recovered=recovery.step(context);if(recovered)return recovered;
    // Recover only opted-in preparation owned by this queue. Manual cancellations
    // and changed research are retained; no user edit is silently overwritten.
    for(const candidate of db.prepare("SELECT * FROM research_pipeline_items WHERE status IN ('failed','preparing') AND json_extract(payload,'$.configuration.automatic')=1 ORDER BY rowid LIMIT 200").all()){
-    const p=JSON.parse(candidate.payload);if(candidate.status==='preparing'&&view(candidate).status!=='interrupted'||p.nextRetryAt>now())continue;
-    transaction(()=>{context.assertActive();let acceptable=true;try{current(candidate);if(p.executionHash!==executionHash()||candidate.topic_id&&research.get(candidate.topic_id).version!==p.preparedTopicVersion)acceptable=false;}catch{acceptable=false;}
+    const p=JSON.parse(candidate.payload);if(candidate.status==='preparing'&&view(candidate).status!=='interrupted'||p.nextRetryAt>now()&&recovery.attemptCount(candidate)<3)continue;
+    transaction(()=>{context.assertActive();let acceptable=true;try{current(candidate);recovery.validate(candidate);if(!compatible(p)||candidate.topic_id&&research.get(candidate.topic_id).version!==p.preparedTopicVersion)acceptable=false;}catch{acceptable=false;}
      if(!acceptable)setState(candidate,'invalidated',{reason:'来源、模型配置或研究已变化，保留旧准备记录'});
-     else if((p.prepareAttempts||0)>=3)setState(candidate,'observing',{reason:'准备已达 3 次尝试，保留观察；其他材料继续'});
+     else if(recovery.attemptCount(candidate)>=3)setState(candidate,'observing',{nextRetryAt:null,reason:'准备已达 3 次尝试，保留观察；其他材料继续'});
      else setState(candidate,candidate.topic_id?'ready':'queued',{reason:'后台恢复未完成的正文准备',nextRetryAt:null});
     });
    }
    evidence?.step(context);
+   // Import already available attachments before dispatching another model lane;
+   // otherwise a new synthesis can immediately become stale on the next tick.
+   const documents=events?.prepareDocuments(context);if(documents)return documents;
    // The durable rotation gives each automatic lane a turn. A blocked lane
    // does not prevent another lane from saving an already finished result.
-   const lanes=[['events',()=>events?.step(context)],['relations',()=>relations?.step(context)],['clusters',()=>clusterJobs?.step(context)],['synthesis',()=>synthesis?.step(context)],['sources',()=>prepareSource(context)]];
+   const lanes=[['intake',()=>intake.step(context)],['directories',()=>directories?.step(context)],['events',()=>events?.step(context)],['holdings-financial',()=>events?.refreshHoldingsFinancial(context)],['holdings-review',()=>events?.reviewHoldings(context)],['relations',()=>relations?.step(context)],['clusters',()=>clusterJobs?.step(context)],['synthesis',()=>synthesis?.step(context)],['sources',()=>prepareSource(context)]];
    const automatic=settings().automatic,key='research_pipeline_next_lane';
    const saved=automatic?db.prepare('SELECT value FROM settings WHERE key=?').get(key)?.value:null;
    const start=Math.max(0,lanes.findIndex(([name])=>name===saved));let deferred=null;

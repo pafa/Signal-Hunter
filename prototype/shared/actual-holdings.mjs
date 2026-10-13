@@ -17,6 +17,12 @@ export const actualHoldingErrors=[
  '持仓记录或预览不存在',
  'CSV 格式无效；请使用模板表头，每批最多100行',
  '持仓记录指纹不符，请核对存储',
+ '逐笔账本字段、类型、币种或编号无效',
+ '逐笔账本金额或数量无效；金额最多两位小数，未知费用请留空',
+ '逐笔账本须先明确期初、全部期初持仓及成本核算方式',
+ '逐笔账本记录冲突；修正须使用原编号的下一修订并填写说明',
+ '逐笔账本顺序、余额、卖出数量或成本不成立，请核对整批记录',
+ '此账户币种已启用逐笔账本，请在账本中修正；原快照保留',
 ];
 export const failActual=n=>{throw Error(actualHoldingErrors[n]);};
 export const ACTUAL_COLUMNS=['account','symbol','quantity','unitCost','price','asOf','source','feeBasis','reason','topicId','topicVersion'];
@@ -35,6 +41,10 @@ export function actualAmount(quantity,unit){
  const q=decimal(quantity,true).value,p=decimal(unit,true).value,n=(q*p+5000000000n)/10000000000n;
  if(n>limit)failActual(2);return Number(n);
 }
+export {decimal as actualDecimal,text as actualText};
+export function actualTime(raw,at){ if(typeof raw!=='string'||!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)$/.test(raw)||!Number.isFinite(Date.parse(raw))||Date.parse(raw)>Date.parse(at)||new Date(raw.slice(0,10)+'T00:00:00Z').toISOString().slice(0,10)!==raw.slice(0,10))failActual(3);
+ return new Date(raw).toISOString();
+}
 export function normalizeActualRow(input,at){
  if(!plain(input)||Object.keys(input).some(k=>!ACTUAL_COLUMNS.includes(k)))failActual(0);
  const account=text(input.account,60,true),source=text(input.source,160,true),reason=text(input.reason,300);
@@ -42,8 +52,7 @@ export function normalizeActualRow(input,at){
  const quantity=decimal(input.quantity,true).text,unitCost=decimal(input.unitCost)?.text??null,price=decimal(input.price)?.text??null;
  if(price==='0')failActual(2);
  actualAmount(quantity,unitCost);actualAmount(quantity,price);
- const raw=input.asOf;
- if(typeof raw!=='string'||!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)$/.test(raw)||!Number.isFinite(Date.parse(raw))||Date.parse(raw)>Date.parse(at)||new Date(raw.slice(0,10)+'T00:00:00Z').toISOString().slice(0,10)!==raw.slice(0,10))failActual(3);
+ const raw=actualTime(input.asOf,at);
  const feeBasis=input.feeBasis||'unknown';if(!['included','excluded','unknown'].includes(feeBasis))failActual(4);
  const topicId=text(input.topicId,100),v=input.topicVersion;
  if(!topicId&&v!=null&&v!==''||topicId&&(!/^\d{1,9}$/.test(String(v))||Number(v)<1))failActual(5);
@@ -52,7 +61,7 @@ export function normalizeActualRow(input,at){
 
 // Strict bounded CSV, including quoted commas/newlines and escaped quotes. No
 // formula execution or broker-specific column inference takes place here.
-export function parseActualCsv(input){
+export function parseActualCsv(input,columns=ACTUAL_COLUMNS){
  if(typeof input!=='string'||input.length>100000)failActual(14);
  const s=input.replace(/^\uFEFF/,''),rows=[];let row=[],field='',quoted=false,closed=false;
  const cell=()=>{row.push(field);field='';closed=false;};
@@ -66,6 +75,6 @@ export function parseActualCsv(input){
   else {if(closed)failActual(14);field+=c;}
  }
  if(quoted)failActual(14);if(field||row.length||closed)line();
- const header=rows.shift();if(!header||header.join(',')!==ACTUAL_COLUMNS.join(',')||!rows.length)failActual(14);
+ const header=rows.shift();if(!header||header.join(',')!==columns.join(',')||!rows.length)failActual(14);
  return rows.map(r=>{if(r.length!==header.length)failActual(14);return Object.fromEntries(header.map((key,i)=>[key,r[i]]));});
 }

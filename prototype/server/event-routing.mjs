@@ -15,6 +15,10 @@ const rules = [
  ['capital','资本回报',/buybacks?|share repurchases?|回购/iu,'授权与实际执行、资金来源及稀释抵消'],
  ['regulatory','监管调查',/(?=.*(?:probes?|investigat|antitrust|调查|反垄断))(?=.*(?:regulator|regulatory|authorit|government|EU\b|US\b|China|监管|政府))/iu,'调查与处罚分开、业务敞口与适用范围'],
 ];
+// Select concrete financial enforcement notices, not speeches or procedural guidance.
+// Selection only requests research; proposals, denials and removal of orders remain unverified.
+const financialAuthority=/\b(?:Federal Reserve|OCC|SEC|FCA|FINRA|SFC|HKMA|financial regulators?)\b|证监会|金融监管|金管局/iu;
+const targetedEnforcement=/\b(?:announc(?:e[sd]?)|issu(?:e[sd]?)|takes?|took|impos(?:e[sd]?)|terminat(?:e[sd]?)|lift(?:s|ed)?|rescind(?:s|ed)?)\s+(?:(?:an?|the|new|formal|final|proposed|joint)\s+)*(?:enforcement actions?|consent orders?|cease[- ]and[- ]desist orders?)\s+(?:against|on|with)\s+\S|(?:对|向)[^。！？；]{1,50}(?:作出|采取|发出|下达|出具|撤销|解除)[^。！？；]{0,6}(?:行政处罚|纪律处分|监管措施|责令整改)/iu;
 const denial=/\b(?:denies|denied|denial|refutes|debunks)\b|否认|辟谣/iu;
 const rumor=/\b(?:rumou?r|reportedly)\b|\bsources? (?:say|says)\b|according to sources|(?:Bloomberg(?: News)?|Politico|WSJ|Wall Street Journal|the Information|Financial Times)\s+reports?|传闻|消息人士/iu;
 const tentative=/\b(?:talks|considers?|considering|set to|prepares|proposes?|may|could)\b|考虑|或将|拟议/iu;
@@ -29,6 +33,7 @@ export function acquisitionStage(text){
 }
 export function routeEvent(text){
  const matches=rules.filter(([, ,re])=>re.test(text)).map(([id,category,,question])=>({id,category,question}));
+ if(financialAuthority.test(text)&&targetedEnforcement.test(text))matches.push({id:'regulatory-enforcement',category:'监管执法 / 整改',question:'发行主体或子公司、拟议与生效或解除阶段、整改义务、成本及业务限制的相对影响'});
  const reversal=denial.test(text)&&/ban|deal|acquir|merger|shutdown|takeover|restrict|禁令|收购|停产|交易|限制/iu.test(text);
  if(reversal)matches.unshift({id:'denial',category:'反证 / 否认',question:'原消息、正式回应与受影响的既有研究'});
  let stage='标题线索，事实与量级待核验';

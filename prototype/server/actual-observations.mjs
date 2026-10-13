@@ -3,6 +3,8 @@ import {evaluateObservation,observationInstant} from './observation-rules.mjs';
 import {evidenceStamp} from '../shared/review-state.mjs';
 import {claimsOf} from '../shared/claims.mjs';
 import {instrument} from '../shared/securities.mjs';
+import {projectActualResearch} from './actual-research.mjs';
+import {actualCheckHash,actualCheckChanged,actualCheckMissing} from './actual-check-response.mjs';
 
 const ENGINE='actual-holding-review/1',digest=v=>hash(JSON.stringify(v));
 const stamp=e=>JSON.stringify([evidenceStamp(e),e.materialRevision??null]);
@@ -12,13 +14,13 @@ const withoutCheck=({check,...rule})=>rule;
 
 // Research observations only. No ledger, price, baseline or trading permission
 // is inferred from a holding snapshot; an absent input stays unknown.
-export function actualReviewCandidates(record,topic,baseline,rules,at,{quote,check,previous=new Map()}={}){
+export function actualReviewCandidates(record,topic,baseline,rules,at,{quote,check,previous=new Map(),researchView=null}={}){
  if(observationInstant(at)===null)throw Error('实际持仓巡检时间无效');
- const candidates=[],reference={recordId:record.id,recordVersion:record.version,topicId:record.topicId,boundVersion:record.topicVersion},base={ruleVersion:ENGINE,record:structuredClone(record),evaluatedAt:at,currentTopicVersion:topic?.version??null,baselineAvailable:!!baseline,baselineHash:baseline?digest(baseline):null};
+ const candidates=[],reference={recordId:record.id,recordVersion:record.version,topicId:record.topicId,boundVersion:record.topicVersion},base={ruleVersion:ENGINE,record:structuredClone(record),evaluatedAt:at,currentTopicVersion:topic?.version??null,baselineAvailable:!!baseline,baselineHash:baseline?digest(baseline):null,...(researchView?{researchContextHash:researchView.contextHash,monitoringLink:researchView.link}:{})};
  const add=(kind,state,reason,{identity=null,metrics={},evidence=[],rule=null,results=[],temporal=null}={})=>{
   const key=digest([ENGINE,record.id,kind]),fingerprint=digest([reference,identity]);
   candidates.push({key,fingerprint,state,reason,recordId:record.id,recordVersion:record.version,topicId:record.topicId,topicVersion:topic?.version??null,ruleId:rule?.id||null,ruleVersion:rule?.version??null,temporal,
-   hit:{kind:'actual-review',title:`实际持仓 · ${record.account} · ${record.symbol}`,topicId:record.topicId,topicVersion:topic?.version??null,reason,symbols:[record.symbol],affectedPositions:[{symbol:record.symbol,topicId:record.topicId,openedAt:null,lifecycleId:`actual:${record.id}`,recordId:record.id,recordVersion:record.version}],input:{...base,reviewKind:kind,metrics,evidence,definition:rule,results}}});
+   hit:{kind:'actual-review',title:`${record.accountKind==='manual-simulation'?'手动模拟':'实际持仓'} · ${record.account} · ${record.symbol}`,topicId:record.topicId,topicVersion:topic?.version??null,reason,symbols:[record.symbol],affectedPositions:[{symbol:record.symbol,topicId:record.topicId,openedAt:null,lifecycleId:`actual:${record.id}`,recordId:record.id,recordVersion:record.version}],input:{...base,reviewKind:kind,metrics,evidence,definition:rule,results}}});
  };
  const linked=!!topic&&topic.status==='active'&&topic.companies?.some(c=>c.symbol===record.symbol);
  add('research-status',!record.topicId||!topic?'unknown':linked?'clear':'hit',!record.topicId?'未绑定原研究，不能判断原假设':!topic?'关联研究不可用':linked?'关联研究有效且仍包含此证券':topic.status!=='active'?'关联研究已归档，需复核':'关联研究已移除此证券，需复核',{identity:[topic?.status||null,linked]});
@@ -40,15 +42,42 @@ export function actualReviewCandidates(record,topic,baseline,rules,at,{quote,che
    evaluateObservation({...rule,updatedAt:armedAt},topic,{at,quote,check,offline:false,previous:prior?.fingerprint===fingerprint?prior:null});
   add(kind,{true:'hit',false:'clear',unknown:'unknown'}[result.state],result.state==='unknown'?`${rule.definition.label}：${result.reason}`:`观察条件：${rule.definition.label}`,{identity:[rule.id,rule.version],rule,results:result.results,temporal:result.temporal||null,metrics:{result:result.state,armedAt}});
  }
+ if(researchView){
+  const v=researchView,current=v.link.status==='current',replace=(kind,state,reason,extra={})=>{const i=candidates.findIndex(c=>c.hit.input.reviewKind===kind);candidates.splice(i,1);add(kind,state,reason,extra);};
+  add('research-continuity',current?'clear':'unknown',v.link.reason,{identity:v.link,metrics:{origins:v.origins,currentBinding:v.currentBinding}});
+  // A verified successor replaces the old research checks, not the recorded
+  // holding or its manually configured price rules. No intermediate approval.
+  if(current){
+   replace('research-status','clear','当前监控研究已核对且包含此确切证券',{identity:v.currentBinding});
+   replace('research-version','clear','已自动跟踪当前研究版本；原始关联及历史仍保留',{identity:v.currentBinding,metrics:{origins:v.origins,currentBinding:v.currentBinding}});
+   replace('counterevidence',v.against.length?'hit':'clear',v.against.length?'当前监控研究出现原始关联之外的新增或修订反向线索':'当前监控研究未发现原始关联之外的反向线索',{identity:v.against.map(e=>e.stamp).sort(),evidence:v.against});
+   replace('review-due',v.due.length?'hit':v.deadlines.length?'clear':'unknown',v.due.length?'当前判断或持有复核窗口已到期':v.deadlines.length?'当前研判复核期限尚未到达':'当前研究未提供可核对的复核期限',{identity:{binding:v.currentBinding,deadlines:v.deadlines,due:v.due},metrics:{deadlines:v.deadlines,due:v.due}});
+   if(v.conditions.some(c=>c.definition?.status==='defined'&&c.definition.conditions.some(k=>k.type==='price')))replace('price-coverage','clear','已接入此证券当前系统研判的价格条件；行情有效性按下列检查记录',{identity:v.currentBinding});
+  }else if(v.origins.length>1||v.link.links.some(l=>l.status!=='legacy')){
+   // Do not declare an earlier trigger recovered by looking at an unrelated
+   // original member while its current event association is unresolved.
+   for(const kind of ['research-status','research-version','counterevidence','review-due'])replace(kind,'unknown',v.link.reason,{identity:v.link});
+  }
+  for(const c of v.conditions.filter(c=>c.key!=='entryCondition'))add('research-'+c.key,{true:'hit',false:'clear',unknown:'unknown'}[c.status],`${c.label}：${c.reason}`,{identity:{binding:v.currentBinding,key:c.key,definition:c.definition},metrics:{researchCondition:c}});
+  add('research-exit-advice',v.exitAdvice.state==='review'?'hit':v.exitAdvice.state==='monitor'?'clear':'unknown',v.exitAdvice.state==='review'?`${v.exitAdvice.label}；请结合走势和持仓决定`:v.exitAdvice.reason,{identity:{binding:v.currentBinding,action:v.action?.action||null},metrics:{exitAdvice:v.exitAdvice,action:v.action}});
+ }
  return candidates;
 }
 
-export function openActualObservations(store,{getHoldings=()=>null,getTopicVersion=()=>null,getRules=()=>[],priceEnabled=()=>true}={}){
+export function openActualObservations(store,{getHoldings=()=>null,getTopicVersion=()=>null,getRules=()=>[],priceEnabled=()=>true,getResearchContext}={}){
  const db=store.db;
  db.exec('CREATE TABLE IF NOT EXISTS actual_observation_states(id TEXT PRIMARY KEY,payload TEXT NOT NULL)');
  const rows=()=>db.prepare('SELECT id,payload FROM actual_observation_states').all().map(r=>({id:r.id,...JSON.parse(r.payload)}));
  const save=(id,state)=>db.prepare('INSERT INTO actual_observation_states VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(id,JSON.stringify(state));
  return {
+  detail(recordId,checkId,expectedHash){
+   const row=db.prepare('SELECT id,payload FROM actual_observation_states WHERE id=?').get(checkId);
+   const check=row?{id:row.id,...JSON.parse(row.payload)}:null;
+   if(!check||check.recordId!==recordId||check.status==='retired')throw Error(actualCheckMissing);
+   const hash=actualCheckHash(check);
+   if(hash!==expectedHash)throw Error(actualCheckChanged);
+   return {recordId,checkId,hash,check};
+  },
   // The inbox owns one transaction covering condition states and emitted history.
   evaluate(topics,at){
    const snapshot=getHoldings();if(!snapshot?.enabled)return [];
@@ -56,12 +85,15 @@ export function openActualObservations(store,{getHoldings=()=>null,getTopicVersi
    if(observationInstant(at)===null)throw Error('实际持仓巡检时间无效');
    const previous=new Map(rows().map(r=>[r.id,r]));if([...previous.values()].some(r=>Date.parse(r.checkedAt)>Date.parse(at)))throw Error('实际持仓巡检时钟倒退，本轮未保存');
    const topicsById=new Map(topics.map(t=>[t.id,t])),rules=getRules(),checks=store.checks(),cache=new Map(),baselines=new Map(),seen=new Set(),hits=[];
+   const activeRecords=snapshot.records.filter(r=>r.quantity!=='0');
+   const researchContext=activeRecords.length?getResearchContext?.(topics,snapshot.records,at):null;
    const quote=(s,i)=>{if(!priceEnabled(s,i))return null;const key=i+s;if(!cache.has(key))cache.set(key,i==='1d'?store.daily(s):store.quote(s));return cache.get(key);};
-   for(const record of snapshot.records.filter(r=>r.quantity!=='0')){
+   for(const record of activeRecords){
     const key=JSON.stringify([record.topicId,record.topicVersion]);if(!baselines.has(key)){let baseline=null;try{baseline=record.topicId?getTopicVersion(record.topicId,record.topicVersion):null;}catch{}if(baseline?.id!==record.topicId||baseline?.version!==record.topicVersion)baseline=null;baselines.set(key,baseline);}
-    const candidates=actualReviewCandidates(record,topicsById.get(record.topicId),baselines.get(key),rules,at,{quote,check:(s,i)=>checks[(i==='1d'?'daily:':'')+s],previous});
+    const researchView=researchContext?projectActualResearch(record,topics,{...researchContext,getTopicVersion},at):null;
+    const candidates=actualReviewCandidates(record,topicsById.get(record.topicId),baselines.get(key),rules,at,{quote,check:(s,i)=>checks[(i==='1d'?'daily:':'')+s],previous,researchView});
     for(const c of candidates){
-     seen.add(c.key);const old=previous.get(c.key),state={recordId:c.recordId,recordVersion:c.recordVersion,topicId:c.topicId,topicVersion:c.topicVersion,ruleId:c.ruleId,ruleVersion:c.ruleVersion,reviewKind:c.hit.input.reviewKind,status:c.state,reason:c.reason,checkedAt:at,episode:old?.episode||0,active:old?.active||false,fingerprint:c.fingerprint,activeFingerprint:old?.activeFingerprint||null,lastTodoId:old?.lastTodoId||null,lastHitAt:old?.lastHitAt||null,temporal:c.temporal,details:c.hit.input};
+     seen.add(c.key);const old=previous.get(c.key),state={recordId:c.recordId,recordVersion:c.recordVersion,topicId:c.topicId,topicVersion:c.topicVersion,ruleId:c.ruleId,ruleVersion:c.ruleVersion,reviewKind:c.hit.input.reviewKind,status:c.state,reason:c.reason,checkedAt:at,episode:old?.episode||0,active:old?.active||false,fingerprint:c.fingerprint,activeFingerprint:old?.activeFingerprint||null,lastTodoId:old?.lastTodoId||null,lastHitAt:old?.lastHitAt||null,temporal:c.temporal,details:c.hit.input,...(researchView?{researchContextHash:researchView.contextHash}:{})};
      if(c.state==='hit'&&(!old?.active||old.activeFingerprint!==c.fingerprint)){
       state.episode++;state.active=true;state.activeFingerprint=c.fingerprint;state.lastHitAt=at;state.lastTodoId=digest([c.key,state.episode,c.fingerprint]);hits.push({...c.hit,id:state.lastTodoId,input:{...c.hit.input,episode:state.episode}});
      }else if(c.state==='clear')state.active=false;

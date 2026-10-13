@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {fixture,comparison,extraction,output} from './automatic-research-fixture.mjs';
+import {fixture,comparison,extraction,output,dossier} from './automatic-research-fixture.mjs';
 import {recallOccurrence} from '../server/event-continuity.mjs';
 
 const options={semanticRunner:p=>comparison(p,'unrelated')};
@@ -54,8 +54,23 @@ test('quota reached between pages reports a wait rather than an empty queue',asy
 });
 
 test('an unfinished target resumes a prior asymmetric recall match after its own dossier completes',async()=>{
+ let delayed=false;const f=fixture({researchRunner:p=>{if(!delayed){delayed=true;throw Error('synthetic-first-dossier-delay');}return dossier(p);},extractionRunner:p=>{const base=extraction(p);if(p.input.material.url.endsWith('-2'))base.decomposition.events[0].object+=' alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu';return output(p,'decomposition',base.decomposition);}});try{
+  f.add(1);f.add(2);await f.until(()=>f.store.db.prepare("SELECT count(*) n FROM research_pipeline_event_jobs WHERE kind='extract' AND status='completed'").get().n===2);f.advance(60001);await f.until(()=>scans(f).length===1);assert.equal(f.store.db.prepare("SELECT count(*) n FROM research_pipeline_relations WHERE json_extract(payload,'$.awaitingTargetDossier')=1").get().n,1);await f.drive(60);const c=coverage(f);assert.equal(c.deferredMatches,1);assert.equal(c.counts.completed,1);assert.equal(f.calls.semantic,1);assert.equal(f.service.eventClusters.get(f.service.eventClusters.list().items[0].id).members.length,2);
+ }finally{await f.close();}
+});
+
+test('a later extracted occurrence recovers an asymmetric match to an already completed system dossier',async()=>{
  const f=fixture({extractionRunner:p=>{const base=extraction(p);if(p.input.material.url.endsWith('-2'))base.decomposition.events[0].object+=' alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu';return output(p,'decomposition',base.decomposition);}});try{
-  f.add(1);f.add(2);await f.until(()=>scans(f).length===1);assert.equal(f.store.db.prepare("SELECT count(*) n FROM research_pipeline_relations WHERE json_extract(payload,'$.awaitingTargetDossier')=1").get().n,1);await f.drive(60);const c=coverage(f);assert.equal(c.deferredMatches,1);assert.equal(c.counts.completed,1);assert.equal(f.calls.semantic,1);assert.equal(f.service.eventClusters.get(f.service.eventClusters.list().items[0].id).members.length,2);
+  f.add(1);await f.drive(20);const prior=scans(f)[0],paper=f.service.paper.snapshot();assert.equal(f.calls.dossier,1);
+  f.add(2);await f.drive(60);assert.equal(f.calls.semantic,1);assert.equal(coverage(f).reverseMatches,1);assert.equal(coverage(f).counts.completed,1);
+  assert.equal(f.service.eventClusters.get(f.service.eventClusters.list().items[0].id).members.length,2);assert.deepEqual(scans(f)[0],prior,'old recall scope stays immutable');assert.deepEqual(f.service.paper.snapshot(),paper);
+ }finally{await f.close();}
+});
+
+for(const change of ['edited','archived'])test(`reverse recall does not treat a ${change} old dossier as an unchanged automatic result`,async()=>{
+ const f=fixture({extractionRunner:p=>{const base=extraction(p);if(p.input.material.url.endsWith('-2'))base.decomposition.events[0].object+=' alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu';return output(p,'decomposition',base.decomposition);}});try{
+  f.add(1);await f.drive(20);const t=f.service.research.list().find(t=>t.eventExtraction&&t.dossier);f.service.research.update(t.id,{version:t.version,...(change==='archived'?{status:'archived'}:{nextEvidence:'本人修改，保留当前判断'})});
+  f.add(2);await f.drive(40);assert.equal(f.calls.semantic,0);assert.equal(coverage(f).reverseMatches,0);assert.equal(f.service.research.get(t.id).version,t.version+1);
  }finally{await f.close();}
 });
 

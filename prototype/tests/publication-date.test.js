@@ -20,7 +20,7 @@ test('publication parser retains day precision and original offset without local
 test('v5 expands only unambiguous dates and explicit timezone timestamps',()=>{
  for(const [raw,expected] of [['2026/10/6','2026-10-06'],['2026.10.06','2026-10-06'],['Oct. 6, 2026','2026-10-06'],['6 October 2026','2026-10-06'],['6 Oct, 2026','2026-10-06'],['Tue, 06 Oct 2026 00:00:00 +0800','2026-10-06T00:00:00+08:00'],['06 Oct 2026 15:30:00 GMT','2026-10-06T15:30:00Z']])assert.equal(parsePublicationDate(raw),expected,raw);
  for(const raw of ['6/10/2026','Oct 6','2026/02/30','2026/10.06','Octember 6, 2026','06 Oct 2026 15:30:00 EST','Mon, 06 Oct 2026 00:00:00 +0800','06 Oct 2026 24:00:00 GMT','06 Oct 2026 15:30:00','2026-10-06 15:30:00'])assert.equal(parsePublicationDate(raw),null,raw);
- const a=read('','<div class="published-date">6 Oct 2026</div>');assert.equal(a.publishedAt,'2026-10-06');assert.equal(a.publicationDateEvidence.schema,'publication-date-5');assert.deepEqual(validatePublicationEvidence(a.publicationDateEvidence,a.publishedAt,url),a.publicationDateEvidence);
+ const a=read('','<div class="published-date">6 Oct 2026</div>');assert.equal(a.publishedAt,'2026-10-06');assert.equal(a.publicationDateEvidence.schema,'publication-date-6');assert.deepEqual(validatePublicationEvidence(a.publicationDateEvidence,a.publishedAt,url),a.publicationDateEvidence);
  assert.equal(resolvePublicationDate([c('6 Oct 2026'),c('2026-10-07')]).status,'conflict');
 });
 test('v1-v4 evidence retains its original invalid results and v4 Microsoft calendar rules',()=>{
@@ -33,7 +33,7 @@ test('v1-v4 evidence retains its original invalid results and v4 Microsoft calen
  assert.throws(()=>validatePublicationEvidence(old,'2026-10-06',url));
 });
 test('explicit visible publication label repairs missing metadata without manufacturing midnight',()=>{
- const a=read('','<div class="article-date">\n February 7, 2022 \n</div>');assert.equal(a.publishedAt,'2022-02-07');assert.equal(a.publicationDateEvidence.status,'known');assert.deepEqual(a.publicationDateEvidence.candidates,[c('February 7, 2022','element:publication-label')]);assert.equal(a.method,'public-article-9');
+ const a=read('','<div class="article-date">\n February 7, 2022 \n</div>');assert.equal(a.publishedAt,'2022-02-07');assert.equal(a.publicationDateEvidence.status,'known');assert.deepEqual(a.publicationDateEvidence.candidates,[c('February 7, 2022','element:publication-label')]);assert.equal(a.method,'public-article-13');
 });
 test('article metadata, publication microdata, pubdate time and named visible labels are captured',()=>{
  for(const a of [read('<meta property="article:published_time" content="2026-10-02T23:30:00-07:00">'),read('<meta name="parsely-pub-date" content="2026-10-02T23:30:00-07:00">'),read('','<time itemprop="datePublished" datetime="2026-10-02T23:30:00-07:00">October 2, 2026</time>')])assert.equal(a.publishedAt,'2026-10-02T23:30:00-07:00');

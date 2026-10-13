@@ -28,14 +28,44 @@ export function loadExecutionConfig(path){return validateExecutionConfig(JSON.pa
 export function openExecutionInputs(store,{config=null,now=Date.now,enabled=true,readFrame=readPrivateExecutionFile}={}){
  const db=store.db,cfg=config?validateExecutionConfig(config):null,configurationHash=cfg?hash(cfg):null;
  db.exec(`CREATE TABLE IF NOT EXISTS execution_input_frames(hash TEXT NOT NULL,configuration_hash TEXT NOT NULL,configuration TEXT NOT NULL,source TEXT NOT NULL,received_at TEXT NOT NULL,raw TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(hash,configuration_hash));
- CREATE TABLE IF NOT EXISTS execution_input_state(slot INTEGER PRIMARY KEY CHECK(slot=1),payload TEXT NOT NULL);`);
+ CREATE TABLE IF NOT EXISTS execution_input_state(slot INTEGER PRIMARY KEY CHECK(slot=1),payload TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS execution_input_watermarks(configuration_hash TEXT NOT NULL,symbol TEXT NOT NULL,as_of TEXT NOT NULL,frame_hash TEXT,PRIMARY KEY(configuration_hash,symbol));`);
  const guard=()=>{if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw Error('恢复副本需先核对，不能更新执行输入');};
  const read=()=>JSON.parse(db.prepare('SELECT payload FROM execution_input_state WHERE slot=1').get()?.payload||'null');
  const update=state=>db.prepare('INSERT INTO execution_input_state VALUES(1,?) ON CONFLICT(slot) DO UPDATE SET payload=excluded.payload').run(JSON.stringify(state));
+ const watermark=(configurationHash,symbol)=>db.prepare('SELECT as_of FROM execution_input_watermarks WHERE configuration_hash=? AND symbol=?').get(configurationHash,symbol);
+ const remember=(configurationHash,symbol,q,frameHash)=>{
+  if(typeof configurationHash!=='string'||!configurationHash||q?.symbol!==symbol||!isMarketInstant(q.asOf))throw Error('执行行情历史时点无法核对');
+  const previous=watermark(configurationHash,symbol);
+  if(previous&&!isMarketInstant(previous.as_of))throw Error('执行行情历史时点无法核对');
+  if(!previous||compareMarketTime(q.asOf,previous.as_of)>0)db.prepare('INSERT INTO execution_input_watermarks VALUES(?,?,?,?) ON CONFLICT(configuration_hash,symbol) DO UPDATE SET as_of=excluded.as_of,frame_hash=excluded.frame_hash').run(configurationHash,symbol,q.asOf,frameHash||null);
+ };
+ // This is a derived index of accepted history, not a replacement for any raw
+ // packet. A rejected/empty packet must not erase the previous security clock.
+ db.exec('BEGIN IMMEDIATE');try{
+  if(!db.prepare("SELECT value FROM settings WHERE key='execution_input_ordering/1'").get()){
+   for(const row of db.prepare('SELECT hash,configuration_hash,result FROM execution_input_frames').iterate())for(const [symbol,q] of Object.entries(JSON.parse(row.result).quotes||{}))remember(row.configuration_hash,symbol,q,row.hash);
+   const state=read();for(const [symbol,q] of Object.entries(state?.quotes||{}))remember(state.configurationHash,symbol,q,state.frameHash);
+   db.prepare("INSERT INTO settings VALUES('execution_input_ordering/1','1')").run();
+  }
+  db.exec('COMMIT');
+ }catch(error){db.exec('ROLLBACK');throw error;}
+ const ordered=state=>{
+  if(!state)return state;const quotes={...state.quotes},regressions=[];
+  for(const [symbol,q] of Object.entries(quotes)){
+   const previous=watermark(state.configurationHash,symbol);
+   if(previous&&(!isMarketInstant(previous.as_of)||!isMarketInstant(q.asOf)||compareMarketTime(q.asOf,previous.as_of)<0)){
+    delete quotes[symbol];regressions.push({symbol,reason:'执行行情时点早于此证券已接收的最新时点；等待新报价'});
+   }
+  }
+  if(!regressions.length)return state;
+  const accepted=Object.keys(quotes).length;
+  return {...state,quotes,accepted,rejected:(state.rejected||0)+regressions.length,rejections:[...(state.rejections||[]),...regressions],error:accepted?null:'本次数据包没有可用于模拟的已核对执行输入'};
+ };
  const permission=at=>cfg&&instant(cfg.permission.validFrom,cfg.permission.validUntil,at);
  const api={
-  status(){const s=read();return {configured:!!cfg,enabled:enabled&&!!cfg,source:cfg?.source||null,permissionCurrent:!!permission(new Date(now()).toISOString()),lastReceivedAt:s?.receivedAt||null,accepted:s?.accepted||0,rejected:s?.rejected||0,error:s?.error||null,frameHash:s?.frameHash||null,configurationMatches:!!s&&s.configurationHash===configurationHash};},
-  inputs(){const at=new Date(now()).toISOString(),s=read();
+  status(){const s=ordered(read());return {configured:!!cfg,enabled:enabled&&!!cfg,source:cfg?.source||null,permissionCurrent:!!permission(new Date(now()).toISOString()),lastReceivedAt:s?.receivedAt||null,accepted:s?.accepted||0,rejected:s?.rejected||0,error:s?.error||null,frameHash:s?.frameHash||null,configurationMatches:!!s&&s.configurationHash===configurationHash};},
+  inputs(){const at=new Date(now()).toISOString(),s=ordered(read());
    if(!enabled||!cfg)return {quotes:{},reason:'尚未接入经核对权限的执行行情桥接；观察行情不用于成交'};
    if(!permission(at))return {quotes:{},reason:'执行行情来源授权未生效或已过期'};
    if(!s||s.error||s.configurationHash!==configurationHash)return {quotes:{},reason:s?.error||'执行行情尚未完成来源核对'};
@@ -49,7 +79,7 @@ export function openExecutionInputs(store,{config=null,now=Date.now,enabled=true
     if(!permission(at)){result={configurationHash,receivedAt:at,quotes:{},accepted:0,rejected:0,error:'执行行情来源授权未生效或已过期'};}
     else {
     raw=readFrame(cfg.framePath);if(typeof raw!=='string'||Buffer.byteLength(raw)>4*1024*1024)throw 0;frameHash=hash(raw);
-    const old=read();if(old?.frameHash===frameHash&&old.configurationHash===configurationHash&&!old.error)return {skipped:'unchanged-frame'};
+    const old=read();if(old?.frameHash===frameHash&&old.configurationHash===configurationHash&&!old.error&&ordered(old)===old)return {skipped:'unchanged-frame'};
     const packet=JSON.parse(raw);
     if(packet.schema!=='execution-frame/1'||packet.source!==cfg.source||!label(packet.packetId)||!Array.isArray(packet.quotes)||packet.quotes.length<1||packet.quotes.length>80)throw 0;
     const quotes={},rejections=[],seen=new Set();
@@ -68,6 +98,8 @@ export function openExecutionInputs(store,{config=null,now=Date.now,enabled=true
     }
    }catch{result={configurationHash,receivedAt:at,frameHash:frameHash||null,accepted:0,rejected:0,quotes:{},error:'执行行情桥接读取或数据格式失败；当前不使用旧包继续成交'};}
    context.assertActive?.();guard();db.exec('BEGIN IMMEDIATE');try{
+    result=ordered(result);
+    for(const [symbol,q] of Object.entries(result.quotes))remember(configurationHash,symbol,q,frameHash);
     if(frameHash)db.prepare('INSERT OR IGNORE INTO execution_input_frames VALUES(?,?,?,?,?,?,?)').run(frameHash,configurationHash,JSON.stringify(cfg),cfg.source,at,raw,JSON.stringify(result));
     update(result);context.assertActive?.();guard();db.exec('COMMIT');
    }catch(error){db.exec('ROLLBACK');throw error;}

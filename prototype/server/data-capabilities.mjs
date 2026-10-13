@@ -1,8 +1,8 @@
 import {diagnoseMarketData} from './market-diagnostics.mjs';
 import {dailyHealth} from '../shared/market-clock.mjs';
-export function dataCapabilities(store,at=new Date().toISOString(),{offline=false}={}){
+export function dataCapabilities(store,at=new Date().toISOString(),{offline=false,symbols=null}={}){
  const checks=store.checks();
- return store.watchlist().map(w=>{
+ return (symbols?[...new Set(symbols)].map(symbol=>({symbol})):store.watchlist()).map(w=>{
   const daily=store.daily(w.symbol),minute=store.quote(w.symbol),d=checks['daily:'+w.symbol],m=checks[w.symbol];
   const dh=offline?{status:'synthetic',label:'合成演示'}:dailyHealth(w.symbol,daily,at);
   return {symbol:w.symbol,daily:{diagnostics:diagnoseMarketData(w.symbol,daily,d,at,{interval:'1d',offline}),available:!!daily,source:daily?.provider||null,receivedAt:daily?.receivedAt||null,

@@ -17,7 +17,7 @@ async function ui(run){
   const data={serverTime:'2026-10-09T12:00:00Z',runtime:{instance:{id:'synthetic-a'}},research:{topics:[]}},button=text=>[...document.querySelectorAll('button')].find(b=>b.textContent===text);
   const render=(props={})=>act(()=>root.render(React.createElement(View,{data,onClose(){},...props}))),click=text=>act(()=>button(text).click());
   const fill=value=>act(()=>{const e=document.querySelector('textarea');Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(e,value);e.dispatchEvent(new window.Event('input',{bubbles:true}));});
-  const setup=async()=>{await render();await click('批量导入 CSV');await fill(actualTemplate+'Synthetic,AAPL.US,2,,,2026-10-09T10:00:00Z,Synthetic fixture,unknown,,,');};
+  const setup=async()=>{await render();await click('持仓快照');await click('批量导入 CSV');await fill(actualTemplate+'Synthetic,AAPL.US,2,,,2026-10-09T10:00:00Z,Synthetic fixture,unknown,,,');};
   const submit=()=>document.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
   await run({render,click,fill,setup,submit,button,calls,data,handler:f=>handler=f,text:()=>document.body.textContent});
  }finally{if(root)await act(()=>root.unmount());for(const [key,value] of before)if(value)Object.defineProperty(globalThis,key,value);else delete globalThis[key];dom.window.close();await vite.close();}

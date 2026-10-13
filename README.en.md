@@ -6,7 +6,7 @@ Signal Hunter is a local workbench for major-event research and paper-trading wo
 
 It helps researchers ask: **What changed? Why might it matter? Which companies are exposed? What is already priced in? When should we act—or abandon the hypothesis?**
 
-**v0.11.0 · Early preview · MIT · Local, single-user tool**
+**v1.0.0-rc.1 · Release candidate · MIT · Local, single-user tool**
 
 [简体中文](README.md) · English
 
@@ -15,6 +15,16 @@ It helps researchers ask: **What changed? Why might it matter? Which companies a
 ![Signal Hunter: event radar, research and multi-stock daily charts, proposal queue, and scenario positions](docs/assets/workbench.png)
 
 *Screenshot from a development research instance. Its research, observed market prices, and scenario positions are not the default installation data or evidence of actual returns. The public package excludes that instance's database and original news archive. A new installation opens a separate synthetic demo.*
+
+## First-release workflow
+
+Run scheduled research batches, review major events and holding risks on the existing dashboard, then make your own decision and confirm each trade record. Actual records and manually simulated trades use separate ledgers and revision histories. Missing reliable prices leave unrealized P&L and drawdown unknown. Automatic quote-driven matching is deferred; a paid execution feed is not required for the first-release record workflow. See the [product scope](docs/PRODUCT-BLUEPRINT.md) and [current delivery status](docs/BACKLOG.md).
+
+## RC coverage and limitations
+
+This is the v1.0.0-rc.1 source candidate; see [PR #63](https://github.com/pafa/Signal-Hunter/pull/63) for main-branch integration. Source integration does not constitute the final 1.0 release or automatically upgrade the personal production instance. Product validation covers macOS on the current host with Node 24.x. A-share and Hong Kong research quality, an independent holdout set, and long-term outcomes remain unverified and will be evaluated later. US coverage is also limited to the specified public development samples; no overall accuracy or profitability is established. Two known coverage gaps concern footnote company mentions and shared attachments.
+
+The current protocol has completed one archived-public-source automatic extraction, identity, research, system-save and four-group monitoring path. This does not establish live collection or market-wide throughput. Missing evidence leaves prices, targets and dates unknown; missing reliable quotes leaves unrealized P&L and drawdown unknown. The unconfigured model timeout is seven minutes; explicit settings still take precedence. See the [current acceptance record](docs/BACKLOG.md).
 
 ## Why Signal Hunter
 
@@ -100,7 +110,7 @@ The latest development candidate can continue an event cluster automatically aft
 
 Current system clusters now receive versioned aggregate research with frozen member inputs; changing sources or research withdraws the old result from the current view.
 
-A bounded follow-up queue also searches already received news when research has missing evidence or its primary article cannot be read. Eligible skipped automatic items can enter the existing reading and research pipeline; explicit occurrence comparisons preserve unrelated, ambiguous and failed results. The initial screening and prior research stay intact. This covers up to 2,000 received news records, a 90-day publication window and three leads per search; it does not perform web-wide, attachment or financial-exposure searches. Event synthesis now participates in pre-call capture and fixed-window reports, with single-topic and aggregate calls, failures and exclusions identified separately. Wider recall, complete external supplementation and independent forward validation remain incomplete. This bounded path is not complete automatic research or an RC release. See the [current backlog](docs/BACKLOG.md).
+A bounded follow-up queue also searches already received news when research has missing evidence or its primary article cannot be read. Eligible skipped automatic items can enter the existing reading and research pipeline; explicit occurrence comparisons preserve unrelated, ambiguous and failed results. The initial screening and prior research stay intact. This covers up to 2,000 received news records, a 90-day publication window and three leads per search; it does not perform web-wide, attachment or financial-exposure searches. Event synthesis now participates in pre-call capture and fixed-window reports, with single-topic and aggregate calls, failures and exclusions identified separately. Wider recall, complete external supplementation and independent forward validation remain incomplete. This bounded retrieval path does not establish exhaustive coverage or research effectiveness. See the [current backlog](docs/BACKLOG.md).
 
 ## Research workflow
 

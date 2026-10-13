@@ -1,4 +1,6 @@
 export const MATERIALITY_VERSION='company-materiality/1.0.0';
+export const MATERIALITY_ID_PATTERN='^[-a-zA-Z0-9]{1,80}$';
+export const MATERIALITY_TEXT_LIMITS={label:120,scope:200,period:160,unit:80,basis:1200};
 export const MATERIALITY_VALUES={baseline:'比较基准',affected:'涉及规模',expected:'原预期',observed:'新结果 / 情景值'};
 export const materialityErrors=['量级记录最多8项，编号不得重复','量级口径、期间、单位与依据必须填写','量级数值必须是有限数字，绝对值不超过一万亿','数值来源必须选择材料或假设，材料引用不得缺失或重复','量级比较需明确确认同一主体、期间、单位与口径','量级时间需为带时区的有效时刻','量级记录字段无效'];
 const fail=i=>{throw new Error(materialityErrors[i]);};
@@ -23,9 +25,9 @@ export function normalizeMateriality(input,topic,at){
  if(!Array.isArray(input)||input.length>8||new Set(input.map(r=>r?.id)).size!==input.length)fail(0);
  return {version:MATERIALITY_VERSION,savedAt:at,rows:input.map(row=>{
   keys(row,['id','label','scope','period','unit','basis','comparable','eventAt','expectationAt',...Object.keys(MATERIALITY_VALUES)]);
-  if(typeof row.id!=='string'||!/^[-a-zA-Z0-9]{1,80}$/.test(row.id))fail(0);
+  if(typeof row.id!=='string'||!new RegExp(MATERIALITY_ID_PATTERN).test(row.id))fail(0);
   if(row.comparable!==true)fail(4);
-  const clean={id:row.id,label:text(row.label,120),scope:text(row.scope,200),period:text(row.period,160),unit:text(row.unit,80),basis:text(row.basis,1200),comparable:true,eventAt:instant(row.eventAt),expectationAt:instant(row.expectationAt)};
+  const clean={id:row.id,...Object.fromEntries(Object.entries(MATERIALITY_TEXT_LIMITS).map(([key,max])=>[key,text(row[key],max)])),comparable:true,eventAt:instant(row.eventAt),expectationAt:instant(row.expectationAt)};
   for(const key of Object.keys(MATERIALITY_VALUES)){
    const value=row[key];if(value==null){clean[key]=null;continue;}
    keys(value,['value','kind','evidenceIds']);

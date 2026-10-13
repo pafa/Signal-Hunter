@@ -26,7 +26,7 @@ export function syncResearchWatches(store,topics){
  for(const t of topics.filter(t=>t.status==='active'))for(const c of t.companies){
   if(store.db.prepare('SELECT 1 FROM research_watch_links WHERE topic_id=? AND symbol=?').get(t.id,c.symbol))continue;
   if(!canAutoWatch(c)){deferred.push({topicId:t.id,symbol:c.symbol,reason:'上市主体待核对；公司关系与传闻仍保留研究'});continue;}
-  try{store.addWatch(c.symbol);store.db.prepare('INSERT INTO research_watch_links VALUES(?,?,?)').run(t.id,c.symbol,new Date().toISOString());added.push(c.symbol);}
+  try{store.addWatch(c.symbol,{automatic:true});store.db.prepare('INSERT INTO research_watch_links VALUES(?,?,?)').run(t.id,c.symbol,new Date().toISOString());added.push(c.symbol);}
   catch(error){deferred.push({topicId:t.id,symbol:c.symbol,reason:error.message});}
  }
  return {added:[...new Set(added)],deferred,limit:40,policy:'已关联公司首次自动关注；人工取消后不强制加回；只在明确主题关系内扩展'};

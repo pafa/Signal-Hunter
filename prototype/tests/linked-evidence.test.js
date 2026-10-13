@@ -7,7 +7,7 @@ import {fixture,at,quote,dossier,comparison,allClusters} from './automatic-resea
 import {digest} from '../server/codex-research.mjs';
 import {LINKED_EVIDENCE_POLICY} from '../server/pipeline-linked-evidence.mjs';
 const target='https://ir.acme.com/statement',child='https://ir.acme.com/detail';
-const sourceReader=async url=>({url,title:'合成公开声明',sourceName:'合成',body:quote.repeat(30),scope:'extracted-text',sourceLinks:{schema:'article-source-links/1',scope:'extracted-html-links',links:[{url:url===target?child:target,label:'原始声明',context:'公告链接尚未读取'}],inspected:1,omitted:0,truncated:false}});
+const sourceReader=async url=>({url,title:'合成公开声明',sourceName:'合成',body:quote.repeat(30),scope:'extracted-text',sourceLinks:{schema:'article-source-links/1',scope:'extracted-html-links',links:url===target?[]:[{url:target,label:'原始声明',context:'公告链接尚未读取'}],inspected:1,omitted:0,truncated:false}});
 function researchRunner(p){const d=dossier(p),e=p.input.evidence.find(e=>e.material?.sourceLinks?.links.length),sourceRequests=e?[{evidenceId:e.id,url:e.material.sourceLinks.links[0].url,reason:'核对原始声明的批准条件'}]:[],v={sections:d.sections,missingEvidence:d.missingEvidence,sourceRequests},rawOutput=JSON.stringify(v);return {...d,...v,rawOutput,trace:{...d.trace,outputHash:digest(rawOutput)}};}
 const rows=f=>f.queue.snapshot().evidence.items.filter(s=>s.policy===LINKED_EVIDENCE_POLICY);
 const lead=f=>f.store.db.prepare("SELECT id FROM news WHERE json_extract(payload,'$.url')=?").get(target);
@@ -15,10 +15,10 @@ const pipe=(f,id=lead(f)?.id)=>id&&f.store.db.prepare('SELECT * FROM research_pi
 const make=opts=>fixture({sourceReader,researchRunner,...opts});
 async function pending(f){f.add(1);await f.until(()=>rows(f).length);return rows(f)[0];}
 
-test('literal external link enters automatic reading, independent research, comparison and synthesis, at depth one only',async()=>{
+test('literal external link enters automatic reading, independent research, comparison and synthesis for one explicit link',async()=>{
  const reads=[],f=make({sourceReader:async u=>{reads.push(u);return sourceReader(u);}});try{const paper=f.service.paper.snapshot();await pending(f);await f.drive(50);const s=rows(f)[0],n=f.store.newsById(lead(f).id);
  assert.equal(s.status,'completed');assert.equal(s.candidates[0].status,'matched');assert.equal(n.provider,'linked-public-source');assert.equal(n.publishedAt,null);assert.equal(n.datePrecision,'unknown');assert.equal(n.linkedReference.evidenceId,s.candidates[0].evidenceId);assert.equal(pipe(f).status,'completed');assert.equal(f.calls.dossier,2);assert.equal(f.calls.semantic,1);assert.equal(f.synthesisCalls,1);assert.equal(allClusters(f).length,1);assert.deepEqual(reads,[f.news(1).url,target]);assert.ok(!f.store.news().some(n=>n.url===child));assert.deepEqual(f.service.paper.snapshot(),paper);
- const original=f.service.research.get(s.anchor.topicId);assert.equal(original.version,s.anchor.topicVersion);assert.equal(original.dossier.sourceRequests.length,1);assert.ok(f.queue.snapshot().evidence.items.some(s=>s.policy!=='linked-public-source/1'&&s.current));
+ const original=f.service.research.get(s.anchor.topicId);assert.equal(original.version,s.anchor.topicVersion);assert.equal(original.dossier.sourceRequests.length,1);assert.ok(f.queue.snapshot().evidence.items.some(s=>s.policy!==LINKED_EVIDENCE_POLICY&&s.current));
  }finally{await f.close();}
 });
 for(const kind of ['unrelated','analogy','uncertain'])test(`external ${kind} result stays separate and does not claim the original gap is filled`,async()=>{const f=make({semanticRunner:p=>comparison(p,kind)});try{await pending(f);await f.drive(50);assert.equal(rows(f)[0].candidates[0].status,kind==='unrelated'?'unrelated':kind==='analogy'?'related':'observing');assert.equal(allClusters(f).length,0);assert.equal(f.synthesisCalls,0);}finally{await f.close();}});

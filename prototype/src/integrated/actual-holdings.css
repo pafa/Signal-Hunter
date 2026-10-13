@@ -16,3 +16,9 @@
 .portfolio-kind {padding:12px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #2b3545}
 @media(max-width:800px){.actual-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.actual-fields{grid-template-columns:1fr}.actual-holdings{padding:10px}.actual-holdings .dashboard-page-head{align-items:flex-start;flex-direction:column}.portfolio-kind{flex-wrap:wrap}}
+.actual-ledger-confirm {flex-direction:row!important;align-items:flex-start;margin:16px 0;line-height:1.7}
+.actual-ledger-confirm input {width:auto;flex:none;margin-top:4px}
+.actual-ledger>details {border:1px solid #354154;border-radius:4px;padding:10px 12px;margin:10px 0}
+.actual-ledger [aria-label="逐笔账本历史"] article {border-top:1px solid #354154;padding-top:8px}
+
+.actual-performance{border-top:1px solid var(--line,#303b4c);margin-top:16px;padding-top:10px;overflow-wrap:anywhere}.actual-performance-chart{margin:16px 0;max-width:100%;color:var(--muted,#9aa8bb)}.actual-performance-chart svg{display:block;width:100%;height:150px}.actual-performance-chart path{fill:none;stroke:#72baa2;stroke-width:2;vector-effect:non-scaling-stroke}.actual-performance-chart circle{fill:#72baa2}.actual-performance-chart text{fill:currentColor;font-size:14px}.actual-performance td{vertical-align:top}

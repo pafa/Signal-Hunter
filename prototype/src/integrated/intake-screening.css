@@ -1,0 +1,6 @@
+.intake-review .i-table{width:100%;min-width:700px;table-layout:fixed}
+.intake-review .i-table th,.intake-review .i-table td{white-space:normal;overflow-wrap:anywhere;vertical-align:top;line-height:1.6}
+.intake-review .i-table th:first-child{width:28%}
+.intake-review .i-table th:nth-child(2){width:40%}
+.intake-review .i-table td small{white-space:normal;line-height:1.5}
+.intake-review .i-table p{margin:6px 0}

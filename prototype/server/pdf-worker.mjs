@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {MAX_PDF_BYTES,MAX_PDF_PAGES,MAX_PDF_TEXT,pdfPageMarker} from '../shared/pdf-source.mjs';
+import {MAX_PDF_PAGES,pdfReaderLimits,pdfPageMarker} from '../shared/pdf-source.mjs';
 const sha=s=>createHash('sha256').update(s).digest('hex');
 const warnings=[];
 // PDF.js diagnostics must not corrupt the JSON response or expose unbounded text.
@@ -8,7 +8,8 @@ console.log=console.warn=console.error=(...v)=>{if(warnings.length<10)warnings.p
 globalThis.fetch=async()=>{throw Error('PDF解析不允许网络请求');};
 let task;
 try{
- let size=0;const chunks=[];for await(const chunk of process.stdin){size+=chunk.length;if(size>MAX_PDF_BYTES)throw Error('PDF超过8 MB');chunks.push(chunk);}
+ const limits=pdfReaderLimits(process.argv[2]);if(!limits)throw Error('PDF读取版本无效');
+ let size=0;const chunks=[];for await(const chunk of process.stdin){size+=chunk.length;if(size>limits.bytes)throw Error(`PDF超过${limits.bytes/1_000_000} MB`);chunks.push(chunk);}
  const {getDocument,PermissionFlag}=await import('pdfjs-dist/legacy/build/pdf.mjs');
  const assets=new URL('./',import.meta.resolve('pdfjs-dist/package.json'));
  // Built-in fonts and CMaps stay in the pinned package. No document URLs,
@@ -21,10 +22,10 @@ try{
  const metadata=await pdf.getMetadata();if(metadata.info?.EncryptFilterName)throw Error('PDF已加密，未提取内容');const pages=[],emptyPages=[];let body='';
  for(let n=1;n<=pdf.numPages;n++){
   const page=await pdf.getPage(n),content=await page.getTextContent({includeMarkedContent:false,disableNormalization:false});
-  let text='';for(const item of content.items){if(typeof item.str!=='string')continue;text+=item.str+(item.hasEOL?'\n':' ');if(text.length+body.length>MAX_PDF_TEXT)throw Error('PDF文字超过8万字符，未截断保存');}
+  let text='';for(const item of content.items){if(typeof item.str!=='string')continue;text+=item.str+(item.hasEOL?'\n':' ');if(text.length+body.length>limits.text)throw Error(`PDF文字超过${limits.text/10000}万字符，未截断保存`);}
   text=text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
   const start=body.length;body+=pdfPageMarker(n)+(text?'\n'+text:'')+(n===pdf.numPages?'':'\n\n');
-  if(body.length>MAX_PDF_TEXT)throw Error('PDF文字超过8万字符，未截断保存');
+  if(body.length>limits.text)throw Error(`PDF文字超过${limits.text/10000}万字符，未截断保存`);
   pages.push({page:n,start,end:body.length,characters:text.length,sha256:sha(text)});if(!text)emptyPages.push(n);page.cleanup();
  }
  if(emptyPages.length===pages.length)throw Error('PDF没有可提取文字层，扫描页尚未读取');

@@ -11,7 +11,7 @@ import {sourceLinks} from './source-links.mjs';
 import {extractPdf} from './pdf-source.mjs';
 import {MAX_PDF_BYTES} from '../shared/pdf-source.mjs';
 
-export const READER_VERSION='public-article-9';
+export const READER_VERSION='public-article-13';
 export const MAX_SOURCE_BYTES=1_000_000;
 function assertArticleHost(url){
  if(['news.google.com','consent.google.com','accounts.google.com'].includes(url.hostname))throw new Error('这是聚合或登录入口，请在阅读来源后粘贴发布方的文章链接');
@@ -28,7 +28,7 @@ function transport(url,address,signal){
    if(headers['content-encoding']&&headers['content-encoding']!=='identity'){res.resume();reject(new Error('来源未返回可读取的未压缩页面'));return;}
    const charset=/charset\s*=\s*["']?([^\s;"']+)/i.exec(headers['content-type']||'')?.[1];
    if(!pdf&&charset&&!/^(utf-?8|us-ascii)$/i.test(charset)){res.resume();reject(new Error('来源不是 UTF-8 编码，保留读取缺口以避免乱码'));return;}
-   const maximum=pdf?MAX_PDF_BYTES:MAX_SOURCE_BYTES,message=pdf?'PDF超过8 MB，保留读取缺口':'来源页面超过 1 MB，保留读取缺口';
+   const maximum=pdf?MAX_PDF_BYTES:MAX_SOURCE_BYTES,message=pdf?`PDF超过${MAX_PDF_BYTES/1_000_000} MB，保留读取缺口`:'来源页面超过 1 MB，保留读取缺口';
    if(Number(headers['content-length'])>maximum){res.destroy();reject(new Error(message));return;}
    let bytes=0;const chunks=[];
    res.on('data',chunk=>{bytes+=chunk.length;if(bytes>maximum){res.destroy(new Error(message));return;}chunks.push(chunk);});
@@ -50,7 +50,7 @@ export function extractArticle(html,url){
   if(structuredBody.length>80000)throw new Error('正文超过 8 万字符，请手动补充必要段落');
   const publication=publicationDateResult(dates),extractionEvidence=finishArticleExtraction(dom.window.document,url,preparation,article.content);
   const linkRoot=dom.window.document.createElement('div');linkRoot.innerHTML=article.content;
-  return {title:(article.title||new URL(url).hostname).slice(0,200),sourceName:(article.siteName||new URL(url).hostname).slice(0,160),body:structuredBody,...publication,extractionEvidence,sourceLinks:sourceLinks(linkRoot,url),scope:'extracted-text',method:READER_VERSION};
+  return {title:(article.title||new URL(url).hostname).slice(0,200),sourceName:(article.siteName||new URL(url).hostname).slice(0,160),body:structuredBody,...publication,extractionEvidence,sourceLinks:sourceLinks(linkRoot,url,preparation.links),scope:'extracted-text',method:READER_VERSION};
  }finally{dom.window.close();}
 }
 export async function readPublicArticle(value,{resolver=lookup,request=transport,timeoutMs=20000}={}){

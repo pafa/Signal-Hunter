@@ -4,13 +4,25 @@ import {COMPANY_DIRECTORY} from '../shared/company-directory.mjs';
 import {securityIdentity} from '../shared/securities.mjs';
 import {digest} from './codex-research.mjs';
 import {directoryCodeRecall,DIRECTORY_RECALL} from './directory-code-recall.mjs';
+import {readSnapshotCache} from './read-snapshot-cache.mjs';
+import {serialize} from 'node:v8';
 export const DIRECTORY_SOURCES=[{id:'nasdaq',url:'https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt',header:'Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares'},{id:'other',url:'https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt',header:'ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol'}];
-export const DIRECTORY_PARSER='nasdaq-symbol-directory-1';
+import {DIRECTORY_NAME_POLICY,directoryNameAliases,directoryReviewedNamesAvailable} from './directory-name-policy.mjs';
+export const DIRECTORY_PARSER='nasdaq-symbol-directory-2';
 const venueNames={Q:'XNAS',A:'XASE',N:'XNYS',P:'ARCX',Z:'BATS',V:'IEXG'};
 const failure=message=>{throw new Error(message);};
 const attemptSummary=a=>({...a,...(a.sources?{sources:a.sources.map(({raw,...source})=>source)}:{})});
+// Only remove an explicit security-type suffix. Never infer parent/subsidiary ties.
+export function officialIssuerAlias(name){
+ if(/\b(?:depositary|depository|ADS|ADR)\b/i.test(name))return null;
+ const issuer=name.replace(/(?:\s+-\s+|\s+)(?:(?:Class|Series)\s+[A-Z0-9.-]+\s+)?(?:Common Stock|Common Shares|Ordinary Shares|Capital Stock)$/i,'').trim();
+ return issuer!==name&&issuer.length>=4?issuer:null;
+}
 const norm=s=>s.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
-const summary=s=>({id:s.id,market:s.market||'US',parser:s.parser,receivedAt:s.receivedAt,counts:s.counts,sources:s.sources.map(({raw,...v})=>v),scope:s.scope});
+const summary=s=>({id:s.id,market:s.market||'US',parser:s.parser,receivedAt:s.receivedAt,counts:{...s.counts},sources:s.sources.map(({raw,...v})=>v),scope:s.scope});
+// Private parsed JSON is immutable; public current() returns an isolated copy.
+// Avoid cloning every entry and raw source for each small status projection.
+const freezeJson=value=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){for(const child of Object.values(value))freezeJson(child);Object.freeze(value);}return value;};
 export function parseDirectoryFile(source,raw){
  if(typeof raw!=='string'||Buffer.byteLength(raw)>5000000||raw.includes('\0'))failure('证券目录格式或大小无效');
  const lines=raw.replace(/^\uFEFF/,'').trimEnd().split(/\r?\n/);if(lines.shift()!==source.header||lines.length<2||lines.length>30001)failure('证券目录表头、条数或结束标记无效');
@@ -24,29 +36,54 @@ export function parseDirectoryFile(source,raw){
   if(!code||!name||seen.has(code)||!['Y','N'].includes(r.ETF)||!['Y','N'].includes(r['Test Issue'])||!/^\d{1,6}$/.test(r['Round Lot Size'])||+r['Round Lot Size']<1)failure('证券目录代码、类型或重复行无效');seen.add(code);
   const exchange=source.id==='nasdaq'?'Q':r.Exchange,venue=venueNames[exchange]||null;
   let symbol=null;try{if(/^[A-Z][A-Z0-9.-]{0,11}$/.test(code))symbol=securityIdentity(code+'.US').symbol;}catch{}
-  const stock=/\b(?:common stock|common shares|ordinary shares|capital stock|american depositary shares|american depositary receipts)\b/i.test(name)&&!/\b(?:warrants?|rights|preferred|preference|notes|debentures|bonds)\b/i.test(name)&&!/(?: - |, )Units\b/i.test(name);
+  const depositary=/\bamerican depos(?:ita|ito)ry (?:shares|receipts)\b/i.test(name)||/\s(?:ADS|ADRs?)$/i.test(name);
+  const stock=(/\b(?:common stock|common shares|ordinary shares|capital stock|american depositary shares|american depositary receipts)\b/i.test(name)||depositary)&&!/\b(?:warrants?|rights|preferred|preference|notes|debentures|bonds)\b/i.test(name)&&!/(?: - |, )Units\b/i.test(name);
   const excluded=[...(r['Test Issue']==='Y'?['test-issue']:[]),...(r.ETF==='Y'?['etf']:[]),...(!symbol?['unsupported-symbol']:[]),...(!venue?['unknown-venue']:[]),...(!stock?['equity-type-unconfirmed']:[])];
-  return {sourceId:source.id,sourceSymbol:code,symbol,name,venue,exchange,securityType:r.ETF==='Y'?'etf':stock?'equity-candidate':'unconfirmed',testIssue:r['Test Issue']==='Y',financialStatus:r['Financial Status']||null,roundLot:Number(r['Round Lot Size']),rawFields:r,eligible:!excluded.length,excluded};
+  return {sourceId:source.id,sourceSymbol:code,symbol,name,venue,exchange,securityType:r.ETF==='Y'?'etf':stock?(depositary?'depositary-receipt-candidate':'equity-candidate'):'unconfirmed',testIssue:r['Test Issue']==='Y',financialStatus:r['Financial Status']||null,roundLot:Number(r['Round Lot Size']),rawFields:r,eligible:!excluded.length,excluded};
  });
  return {sourceDate,fileCreationTime:last[0].slice(20),timezone:'unverified',entries};
 }
 export function openSecurityDirectory(store,{enabled=true,fetcher=fetch,now=Date.now}={}){
- const db=store.db;let job=null,closed=false;const cache=new Map();
+ const db=store.db;let job=null,closed=false;
  db.exec(`CREATE TABLE IF NOT EXISTS security_directory_snapshots(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS security_directory_attempts(id TEXT PRIMARY KEY,status TEXT NOT NULL,payload TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS security_directory_lease(slot INTEGER PRIMARY KEY CHECK(slot=1),owner TEXT NOT NULL,expires_at INTEGER NOT NULL);`);
+ CREATE TABLE IF NOT EXISTS security_directory_lease(slot INTEGER PRIMARY KEY CHECK(slot=1),owner TEXT NOT NULL,expires_at INTEGER NOT NULL);
+ CREATE INDEX IF NOT EXISTS security_directory_market ON security_directory_snapshots(COALESCE(json_extract(payload,'$.market'),'US'));`);
+ const snapshotReads=readSnapshotCache(db,{limit:8,maxBytes:32*1024*1024,copy:freezeJson}),selections=readSnapshotCache(db,{limit:128,maxBytes:8*1024*1024});
+ // Reuse name preparation across different event texts, keyed by the private
+ // verified snapshot object. Writes invalidate that object through snapshotReads;
+ // transaction reads are never memoized. Listing dates still filter each query.
+ const nameIndexes=new WeakMap();
+ // Pure selection results may survive unrelated writes, but only after the
+ // current snapshot bytes/hash, market and time are checked again below.
+ const verifiedSelections=new Map();let verifiedSelectionBytes=0;
+ const nameIndex=(s,namePolicy,asOf,asOfDate)=>{
+  const key=namePolicy?(directoryReviewedNamesAvailable(asOf)?'reviewed':'official'):'legacy',cached=Object.isFrozen(s)?nameIndexes.get(s):null;
+  const prepared=cached?.get(key)||new Map();
+  const rows=s.entries.filter(e=>(namePolicy||e.eligible)&&(!e.listingDate||e.listingDate<=asOfDate)).map(e=>{
+   if(prepared.has(e))return prepared.get(e);
+   const known=COMPANY_DIRECTORY.find(c=>c.symbol===e.symbol),stem=e.name.split(' - ')[0].replace(/\b(?:common stock|common shares|ordinary shares|american depositary (?:shares|receipts)).*$/i,'').replace(/\b(?:incorporated|inc\.?|corporation|corp\.?|limited|ltd\.?|plc|class [a-z])\b[., ]*/gi,'').trim();
+   const derived=namePolicy?directoryNameAliases(e,officialIssuerAlias(e.name),s.sources.find(x=>x.id===e.sourceId).url,asOf):[];
+   const names=[stem,e.name,...derived.map(p=>p.alias),...(e.aliases||[]),...(known?[known.name,...known.aliases]:[])].map(norm).filter(n=>n.replaceAll(' ','').length>=(/\p{Script=Han}/u.test(n)?2:known||derived.some(p=>p.rule==='reviewed-issuer-name'&&norm(p.alias)===n)?3:4));
+   const row={entry:e,derived,names:names.map(value=>({value,pattern:/\p{Script=Han}/u.test(value)?null:new RegExp(`(?<![a-z0-9])${value}(?![a-z0-9])`,'u')})),knownAliases:(known?.aliases||[]).filter(a=>/^[A-Z]{2,5}$/.test(a)).map(a=>new RegExp(`(?<![A-Za-z0-9])${a}(?![A-Za-z0-9])`))};
+   prepared.set(e,row);return row;
+  });
+  if(Object.isFrozen(s)){const variants=cached||new Map();variants.set(key,prepared);nameIndexes.set(s,variants);}
+  return rows;
+ };
  const guard=()=>{if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')failure('恢复副本需先完成核对确认');};
- const read=id=>{const row=db.prepare('SELECT payload FROM security_directory_snapshots WHERE id=?').get(id);if(!row)failure('证券目录快照不存在');const s=JSON.parse(row.payload),{snapshotHash,...value}=s;if(digest(value)!==snapshotHash)failure('证券目录快照校验失败');return s;};
+ const read=id=>snapshotReads(id,()=>{const row=db.prepare('SELECT payload FROM security_directory_snapshots WHERE id=?').get(id);if(!row)failure('证券目录快照不存在');const s=JSON.parse(row.payload),{snapshotHash,...value}=s;if(digest(value)!==snapshotHash)failure('证券目录快照校验失败');return s;});
  const marketOf=value=>{if(!['US','CN','HK'].includes(value))failure('证券目录市场无效');return value;};
  const ids=market=>db.prepare("SELECT id FROM security_directory_snapshots WHERE COALESCE(json_extract(payload,'$.market'),'US')=? ORDER BY rowid DESC").all(marketOf(market));
- const current=(market='US')=>{const id=ids(market)[0]?.id;if(!id)return null;if(cache.get(market)?.id!==id)cache.set(market,read(id));return cache.get(market);};
+ const current=(market='US')=>{const id=ids(market)[0]?.id;return id?read(id):null;};
  const today=()=>new Date(now()).toISOString().slice(0,10);
  const future=s=>s.sources.some(x=>x.sourceDate&&x.sourceDate>today());
  const active=market=>{const latest=current(market);if(!latest||!future(latest))return latest;for(const {id} of ids(market).slice(1)){const s=read(id);if(!future(s))return s;}return null;};
  const projected=s=>s?{...summary(s),futureDated:future(s),asOfDateUTC:today()}:null;
- const identity=(entry,s)=>{
+ const identity=(entry,s,namePolicy=false,asOf=new Date(now()).toISOString())=>{
   const known=COMPANY_DIRECTORY.find(c=>c.symbol===entry.symbol),base=securityIdentity(entry.symbol);
-  return {...base,name:entry.name,aliases:[...new Set([...(entry.aliases||[]),...(known?.aliases||[])])],issuerKey:known?.issuerKey||entry.symbol,venue:entry.venue,identityStatus:'directory-snapshot',identitySource:s.sources.find(x=>x.id===entry.sourceId).url,identityBasis:`官方目录快照 ${s.sources.find(x=>x.id===entry.sourceId).sourceDate||'来源生成日期未知'}；非实时上市/交易核验，历史有效期未知`,directorySnapshotId:s.id,directoryVersion:s.parser,sourceSymbol:entry.sourceSymbol,isin:entry.isin||null,reportedListingDate:entry.listingDate||null,financialStatus:entry.financialStatus,listingValidity:'unverified',directoryReceivedAt:s.receivedAt};
+  const proofs=namePolicy?directoryNameAliases(entry,officialIssuerAlias(entry.name),s.sources.find(x=>x.id===entry.sourceId).url,asOf):[];
+  return {...base,...(namePolicy?{securityType:entry.securityType,...(proofs.length?{nameEvidence:{schema:DIRECTORY_NAME_POLICY,aliases:proofs}}:{})}:{}),name:entry.name,aliases:[...new Set([...(entry.aliases||[]),...proofs.map(p=>p.alias),...(officialIssuerAlias(entry.name)?[officialIssuerAlias(entry.name)]:[]),...(known?.aliases||[])])],issuerKey:known?.issuerKey||entry.symbol,venue:entry.venue,identityStatus:'directory-snapshot',identitySource:s.sources.find(x=>x.id===entry.sourceId).url,identityBasis:`官方目录快照 ${s.sources.find(x=>x.id===entry.sourceId).sourceDate||'来源生成日期未知'}；非实时上市/交易核验，历史有效期未知`,directorySnapshotId:s.id,directoryVersion:s.parser,sourceSymbol:entry.sourceSymbol,isin:entry.isin||null,reportedListingDate:entry.listingDate||null,financialStatus:entry.financialStatus,listingValidity:'unverified',directoryReceivedAt:s.receivedAt};
  };
  async function readSource(source,signal,observations){
   const requestedAt=new Date(now()).toISOString(),observation={id:source.id,url:source.url,requestedAt,state:'requesting'};observations.push(observation);
@@ -68,36 +105,63 @@ export function openSecurityDirectory(store,{enabled=true,fetcher=fetch,now=Date
  }
 
  const api={
-  current,
+  current:(market='US')=>structuredClone(current(market)),
   status({market='US'}={}){marketOf(market);const s=current(market);return {market,enabled:enabled&&!closed,running:!!job||!!db.prepare('SELECT 1 FROM security_directory_lease WHERE expires_at>=?').get(now()),current:projected(s),active:projected(active(market)),markets:Object.fromEntries(['US','CN','HK'].map(m=>[m,projected(current(m))])),ageDays:s?Math.max(0,(now()-Date.parse(s.receivedAt))/86400000):null,history:ids(market).slice(0,20).map(({id})=>projected(read(id))),attempts:db.prepare("SELECT payload FROM security_directory_attempts WHERE COALESCE(json_extract(payload,'$.market'),'US')=? ORDER BY rowid DESC LIMIT 20").all(market).map(r=>{const a=attemptSummary(JSON.parse(r.payload));return a.status==='running'&&(a.expiresAt??Date.parse(a.startedAt)+60000)<now()?{...a,status:'interrupted'}:a;}),coverage:{US:'Nasdaq及其他交易所目录；测试证券、ETF、无法确认股票类型或代码的行不作为公司候选',CN:'沪市主板/科创板与深市A股；未含北交所、退市全集及历史有效区间',HK:'港交所中英文名单；仅港币普通股/GEM/预托证券候选，非港币柜台和其他类型保留但不参与模型'},historicalValidity:'unknown; snapshots show observation, not listing effective intervals'};},
   search(params={}){
    if(!params||Object.keys(params).some(k=>!['q','offset','snapshotId','market'].includes(k)))failure('证券目录查询参数无效');
    let {q='',offset=0,snapshotId,market='US'}=params;marketOf(market);
    offset=Number(offset);if(typeof q!=='string'||q.length>120||!Number.isSafeInteger(offset)||offset<0)failure('证券目录查询参数无效');
    const s=snapshotId?read(snapshotId):current(market);if(s&&(s.market||'US')!==market)failure('证券目录快照与市场不符');if(!s)return {items:[],total:0,offset,snapshot:null};const query=norm(q),rows=s.entries.filter(e=>e.eligible&&(!query||norm(e.name).includes(query)||(e.aliases||[]).some(a=>norm(a).includes(query))||norm(e.symbol).includes(query)||norm(e.sourceSymbol)===query));
-   return {items:rows.slice(offset,offset+20).map(e=>identity(e,s)),total:rows.length,offset,snapshot:projected(s)};
+   return {items:rows.slice(offset,offset+20).map(e=>identity(e,s,true)),total:rows.length,offset,snapshot:projected(s)};
   },
-  selection(text){
-   const snapshots=['US','CN','HK'].map(m=>active(m)).filter(Boolean);if(!snapshots.length)return null;const codes=directoryCodeRecall(text),corpus=' '+norm(codes.names)+' ',matches=[];
+  freezeBasis(){return {schema:'security-directory-basis/2',asOf:new Date(now()).toISOString(),snapshotIds:['US','CN','HK'].map(m=>active(m)?.id).filter(Boolean)};},
+  selection(text,basis){
+   // Validate the live clock before cache lookup. A clock rollback cannot make
+   // a previously accepted future basis usable; same-day receipt times matter.
+   if(basis!==undefined){
+    if(!basis||Object.keys(basis).sort().join(',')!=='asOf,schema,snapshotIds'||!['security-directory-basis/1','security-directory-basis/2'].includes(basis.schema)||typeof basis.asOf!=='string'||!Number.isFinite(Date.parse(basis.asOf))||new Date(basis.asOf).toISOString()!==basis.asOf||Date.parse(basis.asOf)>now()||!Array.isArray(basis.snapshotIds)||basis.snapshotIds.length>3||new Set(basis.snapshotIds).size!==basis.snapshotIds.length)failure('冻结证券目录依据无效');
+   }
+   const input=String(text),day=today(),namePolicy=!basis||basis.schema==='security-directory-basis/2',asOf=basis?.asOf||new Date(now()).toISOString();
+   // Only immutable, committed reads are reused. The shared helper bypasses
+   // transactions and invalidates on local writes, peer commits and schema edits.
+   const queryKey=digest({text:input,basis:basis??null,day,...(namePolicy?{namePolicy:DIRECTORY_NAME_POLICY,reviewedNamesAvailable:directoryReviewedNamesAvailable(asOf)}:{})});
+   return selections(queryKey,()=>{
+   let snapshots,asOfDate=day;
+   if(basis!==undefined){
+    asOfDate=basis.asOf.slice(0,10);snapshots=basis.snapshotIds.map(read);
+    if(new Set(snapshots.map(s=>s.market||'US')).size!==snapshots.length||snapshots.some(s=>Date.parse(s.receivedAt)>Date.parse(basis.asOf)||s.sources.some(x=>x.sourceDate&&x.sourceDate>asOfDate)))failure('冻结证券目录时间或市场无效');
+   }else snapshots=['US','CN','HK'].map(m=>active(m)).filter(Boolean);
+   if(!snapshots.length)return null;
+   const canCache=db.isTransaction===false,verifiedKey=digest({queryKey,snapshots:snapshots.map(s=>s.snapshotHash)});
+   if(canCache&&verifiedSelections.has(verifiedKey))return structuredClone(verifiedSelections.get(verifiedKey).value);
+   const codes=directoryCodeRecall(input),corpus=' '+norm(codes.names)+' ',matches=[],excludedMatches=[];
    for(const s of snapshots){
-   for(const e of s.entries.filter(e=>e.eligible&&(!e.listingDate||e.listingDate<=today()))){
-    const known=COMPANY_DIRECTORY.find(c=>c.symbol===e.symbol),stem=e.name.split(' - ')[0].replace(/\b(?:common stock|common shares|ordinary shares|american depositary (?:shares|receipts)).*$/i,'').replace(/\b(?:incorporated|inc\.?|corporation|corp\.?|limited|ltd\.?|plc|class [a-z])\b[., ]*/gi,'').trim();
-    const names=[stem,e.name,...(e.aliases||[]),...(known?[known.name,...known.aliases]:[])].map(norm).filter(n=>n.replaceAll(' ','').length>=(/\p{Script=Han}/u.test(n)?2:known?3:4));
+   for(const {entry:e,derived,names,knownAliases} of nameIndex(s,namePolicy,asOf,asOfDate)){
     const explicit=codes.matches(e);
-    const knownExact=(known?.aliases||[]).some(a=>/^[A-Z]{2,5}$/.test(a)&&new RegExp(`(?<![A-Za-z0-9])${a}(?![A-Za-z0-9])`).test(codes.names));
-    if(explicit||knownExact||names.some(n=>/\p{Script=Han}/u.test(n)?corpus.includes(n):new RegExp(`(?<![a-z0-9])${n}(?![a-z0-9])`,'u').test(corpus)))matches.push(identity(e,s));
+    const knownExact=knownAliases.some(pattern=>pattern.test(codes.names));
+    // Literal presence is necessary for both matching policies. Avoid compiling
+    // thousands of absent-name regexes on the first archived-packet read.
+    if(explicit||knownExact||names.some(({value,pattern})=>corpus.includes(value)&&(!pattern||pattern.test(corpus)))){if(e.eligible)matches.push(identity(e,s,namePolicy,asOf));else excludedMatches.push({symbol:e.symbol,name:e.name,aliases:[...(e.aliases||[]),...derived.map(p=>p.alias)],market:s.market||'US',reasons:e.excluded});}
    }
    }
    // Input is bounded and the coverage note is part of the frozen model packet.
-   const selected=matches.slice(0,80),coveredMarkets=snapshots.map(s=>s.market||'US');return {entries:selected,coveredMarkets,basis:{snapshotId:digest(snapshots.map(s=>s.id)),snapshots:snapshots.map(s=>({id:s.id,market:s.market||'US',parser:s.parser})),parser:CROSS_PARSER,sourceDates:snapshots.flatMap(s=>s.sources.map(x=>({id:x.id,date:x.sourceDate}))),totalEligible:snapshots.reduce((n,s)=>n+s.counts.eligible,0),matched:matches.length,selected:selected.length,omitted:Math.max(0,matches.length-selected.length),method:DIRECTORY_RECALL,limitation:'有限名称召回；显式代码按完整标识及交易所匹配，名称仍可能歧义。未选入不代表不存在或未上市，未来日期的目录/上市日不参与当前召回。'}};
-
+   const selected=matches.slice(0,80),coveredMarkets=snapshots.map(s=>s.market||'US');const result={entries:selected,coveredMarkets,basis:{...(namePolicy?{namePolicy:DIRECTORY_NAME_POLICY,excludedMatched:excludedMatches.length,excludedMatches:excludedMatches.slice(0,20),excludedOmitted:Math.max(0,excludedMatches.length-20)}:{}),snapshotId:digest(snapshots.map(s=>s.id)),snapshots:snapshots.map(s=>({id:s.id,market:s.market||'US',parser:s.parser})),parser:CROSS_PARSER,sourceDates:snapshots.flatMap(s=>s.sources.map(x=>({id:x.id,date:x.sourceDate}))),totalEligible:snapshots.reduce((n,s)=>n+s.counts.eligible,0),matched:matches.length,selected:selected.length,omitted:Math.max(0,matches.length-selected.length),method:DIRECTORY_RECALL,limitation:'有限名称召回；显式代码按完整标识及交易所匹配，名称仍可能歧义。未选入不代表不存在或未上市，未来日期的目录/上市日不参与当前召回。'}};
+   if(canCache){
+    const bytes=serialize(result).byteLength;
+    if(bytes<=8*1024*1024){
+     while(verifiedSelections.size&&(verifiedSelections.size>=128||verifiedSelectionBytes+bytes>8*1024*1024)){const oldest=verifiedSelections.keys().next().value;verifiedSelectionBytes-=verifiedSelections.get(oldest).bytes;verifiedSelections.delete(oldest);}
+     verifiedSelections.set(verifiedKey,{value:structuredClone(result),bytes});verifiedSelectionBytes+=bytes;
+    }
+   }
+   return result;
+   });
   },
-  refresh(data){
-   guard();if(!enabled||closed)failure('当前模式不启用证券目录联网更新');if(!data||!['requestId','market,requestId'].includes(Object.keys(data).sort().join(','))||typeof data.requestId!=='string'||!/^[-a-zA-Z0-9]{16,80}$/.test(data.requestId))failure('证券目录更新请求无效');
+  refresh(data,{beforeCommit=()=>{}}={}){
+   guard();beforeCommit();if(!enabled||closed)failure('当前模式不启用证券目录联网更新');if(!data||!['requestId','market,requestId'].includes(Object.keys(data).sort().join(','))||typeof data.requestId!=='string'||!/^[-a-zA-Z0-9]{16,80}$/.test(data.requestId))failure('证券目录更新请求无效');
    const market=marketOf(data.market||'US');
    const old=db.prepare('SELECT payload FROM security_directory_attempts WHERE id=?').get(data.requestId);if(old){const prior=JSON.parse(old.payload);if((prior.market||'US')!==market)failure('证券目录请求标识已用于其他市场');return attemptSummary(prior);}if(job)failure('证券目录正在更新，请等待');
    const started={id:data.requestId,market,status:'running',startedAt:new Date(now()).toISOString(),expiresAt:now()+120000};
-   db.exec('BEGIN IMMEDIATE');try{guard();db.prepare('DELETE FROM security_directory_lease WHERE expires_at<?').run(now());if(db.prepare('SELECT 1 FROM security_directory_lease').get())failure('证券目录正在更新，请等待');db.prepare('INSERT INTO security_directory_lease VALUES(1,?,?)').run(started.id,now()+120000);db.prepare('INSERT INTO security_directory_attempts VALUES(?,?,?)').run(started.id,started.status,JSON.stringify(started));db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+   db.exec('BEGIN IMMEDIATE');try{guard();beforeCommit();db.prepare('DELETE FROM security_directory_lease WHERE expires_at<?').run(now());if(db.prepare('SELECT 1 FROM security_directory_lease').get())failure('证券目录正在更新，请等待');db.prepare('INSERT INTO security_directory_lease VALUES(1,?,?)').run(started.id,now()+120000);db.prepare('INSERT INTO security_directory_attempts VALUES(?,?,?)').run(started.id,started.status,JSON.stringify(started));db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
    const controller=new AbortController(),signal=AbortSignal.any([controller.signal,AbortSignal.timeout(90000)]);
    const observations=[],readObserved=(source,signal)=>readSource(source,signal,observations);
    const done=(async()=>{
@@ -109,7 +173,7 @@ export function openSecurityDirectory(store,{enabled=true,fetcher=fetch,now=Date
 
      if(new Set(keys).size!==keys.length)failure('证券目录来源之间存在代码冲突');
      const id=digest({parser,...(market==='US'?{}:{market}),sources:sources.map(s=>({id:s.id,rawHash:s.rawHash}))}),value={id,market,parser,receivedAt:new Date(now()).toISOString(),sources,entries,counts:{rows:entries.length,eligible:entries.filter(e=>e.eligible).length,excluded:entries.filter(e=>!e.eligible).length},scope:'current-directory-observation; not complete historical listing coverage'};
-     const saved={...value,snapshotHash:digest(value)};db.exec('BEGIN IMMEDIATE');try{guard();if(signal.aborted||!db.prepare('SELECT 1 FROM security_directory_lease WHERE owner=? AND expires_at>=?').get(started.id,now()))throw Error('Cancelled');const previous=active(market);if(previous&&sources.some(s=>s.sourceDate&&previous.sources.find(p=>p.id===s.id)?.sourceDate&&[s.sourceDate,s.fileCreationTime||''].join(' ')<[previous.sources.find(p=>p.id===s.id).sourceDate,previous.sources.find(p=>p.id===s.id).fileCreationTime||''].join(' ')))failure('证券目录日期倒退，保留已有快照');db.prepare('INSERT OR IGNORE INTO security_directory_snapshots VALUES(?,?)').run(id,JSON.stringify(saved));const result={...started,status:'complete',finishedAt:new Date(now()).toISOString(),snapshotId:id,counts:saved.counts};db.prepare('UPDATE security_directory_attempts SET status=?,payload=? WHERE id=?').run(result.status,JSON.stringify(result),started.id);db.exec('COMMIT');cache.clear();}catch(e){db.exec('ROLLBACK');throw e;}
+     const saved={...value,snapshotHash:digest(value)};db.exec('BEGIN IMMEDIATE');try{guard();beforeCommit();if(signal.aborted||!db.prepare('SELECT 1 FROM security_directory_lease WHERE owner=? AND expires_at>=?').get(started.id,now()))throw Error('Cancelled');const previous=active(market);if(previous&&sources.some(s=>s.sourceDate&&previous.sources.find(p=>p.id===s.id)?.sourceDate&&[s.sourceDate,s.fileCreationTime||''].join(' ')<[previous.sources.find(p=>p.id===s.id).sourceDate,previous.sources.find(p=>p.id===s.id).fileCreationTime||''].join(' ')))failure('证券目录日期倒退，保留已有快照');db.prepare('INSERT OR IGNORE INTO security_directory_snapshots VALUES(?,?)').run(id,JSON.stringify(saved));const result={...started,status:'complete',finishedAt:new Date(now()).toISOString(),snapshotId:id,counts:saved.counts};db.prepare('UPDATE security_directory_attempts SET status=?,payload=? WHERE id=?').run(result.status,JSON.stringify(result),started.id);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
     }catch(error){const result={...started,status:'failed',finishedAt:new Date(now()).toISOString(),message:'证券目录更新失败；原快照保留，请检查来源状态',reason:signal.aborted?'timeout-or-cancelled':'source-or-validation',sources:observations};db.prepare('UPDATE security_directory_attempts SET status=?,payload=? WHERE id=?').run(result.status,JSON.stringify(result),started.id);controller.abort();}
     finally{db.prepare('DELETE FROM security_directory_lease WHERE owner=?').run(started.id);job=null;}
    })();job={controller,done};return started;

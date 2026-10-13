@@ -21,6 +21,17 @@ test('reader exposes only extracted article links, without reading targets or ch
  const html=`<html><head><title>原始正文</title></head><body><nav>${link('/nav','导航')}</nav><article><h1>原始正文</h1><p>${'公告内容尚需核验。'.repeat(60)}${link('/statement')}</p></article></body></html>`;
  const result=extractArticle(html,base);assert.equal(result.publishedAt,null);assert.deepEqual(result.sourceLinks.links.map(x=>x.url),[req.url]);assert.deepEqual(materialInput({...result,url:base},'2026-10-09').sourceLinks,result.sourceLinks);assert.throws(()=>materialInput({...result,url:base,scope:'excerpt'},'2026-10-09'),/网页提取/);
 });
+test('one PDF with distinct annex anchors retains both explicit labels and only one request target',()=>{
+ const links=capture(`<p>${link('/report.pdf','Annex 1')}</p><p>${link('/report.pdf#page=3','Annex 2')}${link('/report.pdf#page=3','Annex 2')}</p>`);
+ assert.equal(links.links.length,1);assert.equal(links.links[0].label,'Annex 1\nAnnex 2');assert.equal(links.links[0].url,'https://ir.acme.com/report.pdf');assert.deepEqual(validateSourceLinks(links),links);
+ const p=packet();p.input.evidence[0].material.sourceLinks=links;
+ const request={...req,url:links.links[0].url,reason:'Read the explicitly linked Annex 2 in the shared PDF'};
+ assert.deepEqual(validateSourceRequests([request],p),[request]);assert.throws(()=>validateSourceRequests([request,request],p));
+});
+test('aliases remain bounded, merge after the target limit, and cannot borrow an unsafe URL label',()=>{
+ const html=Array.from({length:30},(_,i)=>link('/'+i+'.pdf','Annex '+i)).join('')+link('/0.pdf#page=3','Second annex')+link('/0.pdf#page=4','x'.repeat(201))+link('https://127.0.0.1/0.pdf','Unsafe alias');
+ const result=capture(html);assert.equal(result.links.length,30);assert.equal(result.links[0].label,'Annex 0\nSecond annex');assert.equal(result.truncated,true);assert.equal(result.omitted,1);assert(result.links.every(x=>x.label.length<=200));assert.deepEqual(validateSourceLinks(result),result);
+});
 test('source request requires exact evidence-link pair, unique URLs, missing evidence and at most three targets',()=>{
  const p=packet();assert.deepEqual(validateSourceRequests([req],p),[req]);assert.equal(validateSourceRequests(undefined,p),undefined);
  for(const value of [[{...req,url:req.url+'?guess=true'}],[{...req,evidenceId:'material:other'}],[req,req],[{...req,reason:''}],[{...req,tools:'browse'}],Array(4).fill(req)])assert.throws(()=>validateSourceRequests(value,p));

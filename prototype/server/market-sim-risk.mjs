@@ -1,3 +1,4 @@
+import {matchesHoldingOpening} from './holding-research.mjs';
 import {marketTime,isMarketInstant,compareMarketTime} from './market-time.mjs';
 import {instrument} from '../shared/securities.mjs';
 import {marketConfigFields,marketErrors} from '../shared/market-simulation.mjs';
@@ -42,6 +43,7 @@ export function quoteIssues(symbol,q,config,at,{execution=false,allowLimitUp=fal
  return [...new Set(issues)];
 }
 export const working=o=>['approved','partial'].includes(o.status);
+export const orderLots=(book,order)=>book.lots.filter(l=>l.symbol===order.symbol&&(!order.targetLotIds||order.targetLotIds.includes(l.id))&&(order.holdingResearchLinks?order.holdingResearchLinks.some(link=>matchesHoldingOpening(l,link)):l.topicId===order.topicId));
 // A quote may change price, but cannot silently replace the issuer frozen by a fill or approval.
 export function issuerIssues(symbol,issuerId,q){
  return typeof issuerId!=='string'||!issuerId.trim()||q?.issuerId!==issuerId?[`${symbol}：行情发行人与原持仓或批准依据不一致或缺失`]:[];
@@ -62,19 +64,19 @@ export function valuation(book,quotes,at){
  const reserved=sum(book.orders.filter(o=>working(o)&&o.side==='buy').map(o=>o.budgetCents-o.spentCents));
  return {positions,settledCashCents:book.cashCents,unsettledCashCents:pendingCash,reservedCents:reserved,availableCashCents:book.cashCents-reserved,navCents:nav,pnlCents:nav===null?null:nav-book.initialCents,realizedCents:book.realizedCents,feesCents:book.feesCents,missing:[...new Set(missing)]};
 }
-export function assessOrder(book,order,quotes,at){
+export function assessOrder(book,order,quotes,at,holdingLinks=[]){
  const reasons=[],q=quotes[order.symbol],v=valuation(book,quotes,at);
  reasons.push(...quoteIssues(order.symbol,q,book.config,at,{execution:true,allowLimitUp:order.side==='buy'&&book.profile?.entry==='cn-main-board-limit-up'}));
  reasons.push(...approvalIssuerIssues(order,q));
- if(order.side==='sell')for(const lot of book.lots.filter(l=>l.symbol===order.symbol&&l.topicId===order.topicId))reasons.push(...issuerIssues(lot.symbol,lot.issuerId,q));
+ if(order.side==='sell')for(const lot of orderLots(book,order))reasons.push(...issuerIssues(lot.symbol,lot.issuerId,q));
  if(Date.parse(order.expiresAt)<=Date.parse(at))reasons.push('订单已过期');
  if(order.side==='buy'&&Date.parse(order.holdUntil)<=Date.parse(at))reasons.push('持有期限已到');
  if(reasons.length)return {eligible:false,reasons:[...new Set(reasons)],valuation:v};
  const outstanding=book.orders.filter(o=>working(o)&&o.id!==order.id),qty=order.qty-order.filledQty;
  if(decimal(order.limitPrice)%decimal(q.tickSize)!==0n)reasons.push('限价不符合已核验报价单位');
  if(order.side==='sell'){
-  const lots=book.lots.filter(l=>l.symbol===order.symbol&&l.topicId===order.topicId&&compareMarketTime(l.sellableAt,at)<=0);
-  const reserved=outstanding.filter(o=>o.side==='sell'&&o.symbol===order.symbol&&o.topicId===order.topicId).reduce((n,o)=>n+o.qty-o.filledQty,0);
+  const lots=orderLots(book,order).filter(l=>compareMarketTime(l.sellableAt,at)<=0);
+  const ids=new Set(lots.map(l=>l.id)),reserved=outstanding.filter(o=>o.side==='sell'&&o.symbol===order.symbol&&orderLots(book,o).some(l=>ids.has(l.id))).reduce((n,o)=>n+o.qty-o.filledQty,0);
   const available=lots.reduce((n,l)=>n+l.qty,0)-reserved;
   if(qty>available)reasons.push('超过扣除已批卖单后的可卖数量');
   if(qty%q.sellLot!==0)reasons.push('卖出数量不符合已核验单位，碎股交易另行核验');
@@ -82,7 +84,7 @@ export function assessOrder(book,order,quotes,at){
   if(order.qty<q.minBuyQty||qty%q.buyLot!==0)reasons.push('买入数量不符合已核验申报单位');
   if(!book.config.allowOvernight&&compareMarketTime(order.holdUntil,q.sessionClose)>0)reasons.push('持有期限超过当前交易时段');
   if(Date.parse(order.holdUntil)-Date.parse(at)>book.config.maxHoldDays*86400000)reasons.push('超过最长持有期限');
-  const buys=[...outstanding.filter(o=>o.side==='buy'),order],projected=[...v.positions],costs=[];
+  const buys=[...outstanding.filter(o=>o.side==='buy'),order],projected=v.positions.map(p=>({...p,topicId:holdingLinks.find(l=>l.lotId===p.id&&l.status==='current')?.topicId||p.topicId})),costs=[];
   reasons.push(...v.missing);
   for(const o of buys){
    const bq=quotes[o.symbol],issues=[...quoteIssues(o.symbol,bq,book.config,at),...approvalIssuerIssues(o,bq)];if(issues.length){reasons.push(...issues);continue;}

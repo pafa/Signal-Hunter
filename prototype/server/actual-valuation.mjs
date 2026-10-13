@@ -7,7 +7,7 @@ import {isMarketInstant,compareMarketTime} from './market-time.mjs';
 // expire sooner. This is a reference calculation, never a broker balance.
 export const ACTUAL_VALUATION_VERSION='actual-reference-valuation/1';
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
-export function actualReferenceValuation(record,{at,inputs,operation,restorePending=false}={}){
+export function actualReferenceValuation(record,{at,inputs,operation,restorePending=false,costCents:recordCost}={}){
  const issues=[],q=inputs?.quotes?.[record.symbol];
  if(restorePending)issues.push('恢复副本尚未核对，当前参考估值暂停');
  if(operation?.paused)issues.push('执行行情任务已暂停，当前参考估值不可用');
@@ -21,7 +21,7 @@ export function actualReferenceValuation(record,{at,inputs,operation,restorePend
  }
  let valueCents=null,price=null;
  if(!issues.length){try{price=String(q.mark);valueCents=actualAmount(record.quantity,price);}catch{issues.push('行情精度或估值金额无法安全计算');price=null;}}
- const available=issues.length===0,costCents=actualAmount(record.quantity,record.unitCost),unrealizedCents=available&&costCents!==null?valueCents-costCents:null;
+ const available=issues.length===0,costCents=recordCost===undefined?actualAmount(record.quantity,record.unitCost):Number.isSafeInteger(recordCost)&&recordCost>=0?recordCost:null,unrealizedCents=available&&costCents!==null?valueCents-costCents:null;
  return {schema:ACTUAL_VALUATION_VERSION,state:available?'available':'unavailable',checkedAt:at,recordId:record.id,recordVersion:record.version,quantityAsOf:record.asOf,
   price:available?price:null,valueCents:available?valueCents:null,unrealizedCents,returnPct:unrealizedCents===null||!costCents?null:unrealizedCents/costCents*100,
   priceAt:available?q.asOf:null,source:available?q.source:null,issues:[...new Set(issues)],

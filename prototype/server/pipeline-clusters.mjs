@@ -1,10 +1,11 @@
 import {digest} from './codex-research.mjs';
 import {SYSTEM_RESEARCH_ACTOR} from './research-actor.mjs';
 import {openPipelineSuccession} from './pipeline-succession.mjs';
+import {openHoldingSuccession} from './pipeline-holding-succession.mjs';
 const same=new Set(['repeat','followup','reversal']);
 const ref=m=>({id:m.id,revision:m.revision,...(m.kind?{kind:m.kind}:{})});
 // Both modes use complete-pair batches. Only opted-in automatic plans save system clusters.
-export function openPipelineClusters(store,research,semantic,batches,clusters,{now,guard,transaction,audit,used,settings}={}){
+export function openPipelineClusters(store,research,semantic,batches,clusters,{now,guard,transaction,audit,used,settings,holdingReferences=()=>[]}={}){
  const db=store.db,at=()=>new Date(now()).toISOString();
  db.exec(`CREATE TABLE IF NOT EXISTS research_pipeline_cluster_jobs(id TEXT PRIMARY KEY,relation_id TEXT UNIQUE NOT NULL,status TEXT NOT NULL,batch_id TEXT,payload TEXT NOT NULL);`);
  const read=id=>db.prepare('SELECT * FROM research_pipeline_cluster_jobs WHERE id=?').get(id);
@@ -12,7 +13,9 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
  const candidate=id=>{const r=semantic.get(id);if(r.status!=='candidate'||r.stale||!same.has(r.candidate.comparison.relation)||r.decision&&(r.decision.runId!==r.id||r.decision.action!=='accept'))throw Error('比较依据已失效或不支持同一事件');return r;};
  const triggerHash=r=>digest({input:r.packet.inputHash,output:r.candidate.trace.outputHash,decision:r.decision});
  const succession=openPipelineSuccession({store,research,semantic,batches,clusters,now,guard,transaction,audit});
+ const holdings=openHoldingSuccession({store,research,semantic,batches,clusters,holdingReferences,now,guard,transaction,audit});
  function valid(p){
+  if(p.mode==='holding-revision')return holdings.valid(p);
   if(p.mode==='replace')return succession.valid(p);
   const t=research.get(p.sourceId),r=candidate(p.runId);
   if(t.status!=='active'||t.version!==p.sourceVersion||store.newsById(p.newsId)?.revision!==p.newsRevision||triggerHash(r)!==p.triggerHash)throw Error('来源或比较决定已变化');
@@ -27,6 +30,7 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
  }
  function scan(context){
   succession.scan(context);
+  holdings.scan(context);
   const rows=db.prepare(`SELECT r.* FROM research_pipeline_relations r JOIN semantic_runs s ON s.id=r.run_id WHERE s.status='candidate' AND json_extract(r.payload,'$.clusterExpansion')='reviewed-increment-1'
    AND (coalesce(json_extract(r.payload,'$.automatic'),0)!=1 OR r.status='completed')
    AND NOT EXISTS(SELECT 1 FROM research_pipeline_cluster_jobs j WHERE j.relation_id=r.id AND NOT(j.status='skipped' AND coalesce(json_extract(j.payload,'$.automatic'),0)=1 AND coalesce(json_extract(j.payload,'$.reason'),'')='扩展后超过10份输入，保留原簇全部成员，不截断'))
@@ -81,7 +85,7 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
   // Stop remaining batch work and record the terminal outcome in the same transaction.
   const save=()=>{context.assertActive();guard();if(read(row.id)?.status!=='active')throw Error('自动归组状态变化');
    db.prepare('UPDATE research_pipeline_cluster_jobs SET status=?,payload=? WHERE id=?').run(status,JSON.stringify({...p,reason}),row.id);
-   audit(row.id,'automatic-cluster-'+status,{batchId:row.batch_id,reason});
+   audit(row.id,(p.mode==='holding-revision'?'holding-succession-':'automatic-cluster-')+status,{batchId:row.batch_id,reason,title:p.sourceTitle});
   };
   if(batches.progress(row.batch_id).state==='cancelled')transaction(save);else batches.control(row.batch_id,{action:'pause'},save);
   return {ok:true,clusterJobId:row.id,status};
@@ -90,23 +94,24 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
   for(const item of batch.items){
    if(!item.runId||item.reusedRunId||item.status!=='candidate')continue;
    const run=semantic.get(item.runId);
-   if(run.stale)return finish(context,row,p,'invalidated','组内比较输入已有变化，保留旧簇和判断');
+   if(run.stale)return finish(context,row,p,'invalidated','比较输入已有变化，保留原研究与持仓依据');
    if(!run.decision&&run.candidate.comparison.relation!=='uncertain'){
-    semantic.decide(run.id,{version:0,action:'accept',note:'系统保存完整成员配对结果；只有全部同事件判断一致才归组，事实仍未核实。'},SYSTEM_RESEARCH_ACTOR,()=>{
-     active(context,row,p);audit(row.id,'automatic-cluster-pair',{batchId:row.batch_id,runId:run.id});
+    semantic.decide(run.id,{version:0,action:'accept',note:p.mode==='holding-revision'?'系统保存新旧事项比较；完整且唯一对应才接续持仓监控，事实仍未核实。':'系统保存完整成员配对结果；只有全部同事件判断一致才归组，事实仍未核实。'},SYSTEM_RESEARCH_ACTOR,()=>{
+     active(context,row,p);audit(row.id,p.mode==='holding-revision'?'holding-succession-pair':'automatic-cluster-pair',{batchId:row.batch_id,runId:run.id});
     });return {ok:true,clusterJobId:row.id};
    }
   }
   for(const item of batch.items){
-   if(['cancelled','invalidated'].includes(item.status))return finish(context,row,p,item.status,'组内比较已取消或失效，不自动重新启动');
+   if(['cancelled','invalidated'].includes(item.status))return finish(context,row,p,item.status,'本批比较已取消或失效，不自动重新启动');
    if(!['failed','interrupted'].includes(item.status))continue;
-   if(item.attempts.length>=3)return finish(context,row,p,'observing','组内比较尝试已用完，保留原簇与失败记录，其他研究继续');
+   if(item.attempts.length>=3)return finish(context,row,p,'observing','比较尝试已用完，保留原研究与失败记录，其他研究继续');
    const run=semantic.get(item.runId),retryAt=Date.parse(run.finishedAt||run.createdAt)+60000*2**Math.max(0,item.attempts.length-1);
    if(now()<retryAt)continue;
-   batches.control(row.batch_id,{action:'retry',ordinal:item.ordinal},()=>{active(context,row,p);audit(row.id,'automatic-cluster-retry',{batchId:row.batch_id,ordinal:item.ordinal,previousRun:item.runId,retryAt});});
+   batches.control(row.batch_id,{action:'retry',ordinal:item.ordinal},()=>{active(context,row,p);audit(row.id,p.mode==='holding-revision'?'holding-succession-retry':'automatic-cluster-retry',{batchId:row.batch_id,ordinal:item.ordinal,previousRun:item.runId,retryAt});});
    return {ok:true,clusterJobId:row.id};
   }
   if(batch.state!=='completed'||batch.items.some(i=>['failed','interrupted'].includes(i.status)))return null;
+  if(p.mode==='holding-revision')return holdings.complete(row,p,batch,()=>active(context,row,p))?{ok:true,clusterJobId:row.id,status:'completed'}:finish(context,row,p,'observing','新旧事项未形成完整且唯一对应；原持仓保留观察，其他研究继续');
   if(p.mode==='replace'){
    if(p.phase==='correspondence'){
     const next=succession.advanceMapping(context,row,p,batch,()=>active(context,row,p));
@@ -129,11 +134,13 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
   });return {ok:true,clusterJobId:row.id,status:'completed'};
  }
  return {
+  holdingSuccessions:holdings.links,
   snapshot(){return {items:db.prepare('SELECT * FROM research_pipeline_cluster_jobs ORDER BY rowid DESC LIMIT 30').all().map(row=>{
    const p=JSON.parse(row.payload),batch=row.batch_id?batches.progress(row.batch_id):null;let stale=false,confirmedVersion=null;
    if(batch){
     if(p.clusterId){const cluster=clusters.get(p.clusterId),confirmed=cluster.history.find(v=>{const {snapshotHash,...record}=v;return v.batchId===row.batch_id&&v.version>(p.clusterVersion||0)&&(p.mode==='replace'?v.replacement?.previousSnapshotHash===p.clusterHash:v.members.some(m=>m.kind==='event'&&m.id===p.sourceId))&&snapshotHash===digest(record);});confirmedVersion=confirmed?.version||null;if(p.automatic&&confirmedVersion)stale=!cluster.health.current;}
-    if(!confirmedVersion)try{valid(p);}catch{stale=true;}
+    if(p.mode==='holding-revision'&&row.status==='completed'){stale=p.previousIds.some(id=>holdings.links(p.previousIds)[id]?.status!=='current');}
+    else if(!confirmedVersion)try{valid(p);}catch{stale=true;}
    }
    const status=p.automatic?row.status==='active'?(batch.state==='completed'?'processing':batch.state):row.status:confirmedVersion?'confirmed':row.status==='active'?batch.state:row.status;
    return {id:row.id,...p,batchId:row.batch_id,status,confirmedVersion,stale,inputCount:batch?.inputCount??null,pairCount:batch?.pairCount??null,counts:batch?.counts||null,reusedPairs:batch?.reusedPairs||0};})};},
@@ -145,7 +152,7 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
     if(p.automatic&&batch.state==='cancelled')return finish(context,row,p,'cancelled','本批次已取消，不自动重新启动');
     if(batch.state==='paused'||batch.state==='cancelled'||!p.automatic&&batch.state!=='active')continue;
     try{valid(p);}catch{
-     if(p.automatic)return finish(context,row,p,'invalidated','事件簇、来源或本人决定已变化，保留旧研究与事件簇');
+     if(p.automatic)return finish(context,row,p,'invalidated','事件、来源、持仓关联或本人决定已变化，保留原研究与记录');
      batches.control(row.batch_id,{action:'pause'});transaction(()=>{context.assertActive();db.prepare("UPDATE research_pipeline_cluster_jobs SET status='invalidated' WHERE id=?").run(row.id);audit(row.id,'cluster-expansion-invalidated');});return {ok:true,invalidated:true};
     }
     if(p.automatic){const settled=settle(context,row,p,batch);if(settled)return settled;}
@@ -153,7 +160,7 @@ export function openPipelineClusters(store,research,semantic,batches,clusters,{n
     if(used()>=settings().dailyCalls){deferred={skipped:'call-limit'};continue;}
     const result=batches.step(context,{batchId:row.batch_id,actor:p.automatic?SYSTEM_RESEARCH_ACTOR:undefined,beforeCommit:run=>{
      active(context,row,p);if(used()>=settings().dailyCalls)throw Error('自动研究调用额度已变化');
-     db.prepare('INSERT INTO research_pipeline_attempts(item_id,run_id,at) VALUES(?,?,?)').run(row.id,run.id,at());audit(row.id,'cluster-comparison-started',{batchId:row.batch_id,runId:run.id});
+     db.prepare('INSERT INTO research_pipeline_attempts(item_id,run_id,at) VALUES(?,?,?)').run(row.id,run.id,at());audit(row.id,p.mode==='holding-revision'?'holding-succession-started':'cluster-comparison-started',{batchId:row.batch_id,runId:run.id});
     }});
     if(result.ok||!['model-busy','no-queued-items'].includes(result.skipped))return result;deferred=result;
    }

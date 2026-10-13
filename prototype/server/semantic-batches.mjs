@@ -1,4 +1,4 @@
-import {revisionComparisonPacket} from './revision-comparison.mjs';
+import {revisionComparisonPacket,revisionMembers} from './revision-comparison.mjs';
 import {researchActor,SYSTEM_RESEARCH_ACTOR} from './research-actor.mjs';
 import {eventComparisonSnapshot} from './semantic-event-scopes.mjs';
 import {randomUUID} from 'node:crypto';
@@ -32,8 +32,10 @@ export function openSemanticBatches(store,semantic,{enabled=false,config={},now=
   const keys=input.inputs.map(r=>`${r?.kind||'news'}:${r?.id}`);if(new Set(keys).size!==keys.length)fail(0);
   const inputs=[],pairs=[];
   if(revision){
-   const row=db.prepare('SELECT payload FROM event_clusters WHERE id=?').get(revision.clusterId),old=row&&JSON.parse(row.payload);if(!old)fail(0);
-   const before=new Set(old.members.map(m=>m.id));
+   const before=new Set(revisionMembers(store,revision).map(m=>m.id));
+   // A source anchor always compares every original occurrence. The existing
+   // cluster path may compare only the members from documents being revised.
+   if(revision.sourceRunId&&[...before].some(id=>!input.inputs.some(r=>r.id===id)))fail(0);
    for(const [i,r] of input.inputs.entries())inputs[i]=eventComparisonSnapshot(db,r,{historical:before.has(r.id)});
    for(let left=0;left<inputs.length;left++)for(let right=0;right<inputs.length;right++){
     if(!before.has(inputs[left].id)||before.has(inputs[right].id)||inputs[left].documentId!==inputs[right].documentId)continue;

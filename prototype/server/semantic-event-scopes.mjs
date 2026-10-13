@@ -1,6 +1,6 @@
 import {digest} from './codex-research.mjs';
 import {materialComparisonSnapshot,comparisonSummary} from './semantic-materials.mjs';
-import {validateMaterialEvents} from './material-events.mjs';
+import {MATERIAL_EVENTS_VERSION,validateMaterialEvents} from './material-events.mjs';
 import {semanticErrors} from '../shared/semantic-labels.mjs';
 import {readSnapshotCache} from './read-snapshot-cache.mjs';
 const fail=()=>{throw new Error(semanticErrors[11]);};
@@ -21,15 +21,12 @@ function readEventSnapshot(db,ref,historical){
   if(run.status!=='candidate'||run.id!==origin.runId||packet.inputHash!==digest(packet.input))fail();
   if(origin.inputHash!==packet.inputHash||origin.sourceTopicId!==packet.input.topicId||origin.sourceTopicVersion!==packet.input.topicVersion)fail();
   if(digest(candidate.trace)!==digest(origin.modelTrace)||candidate.trace.inputHash!==packet.inputHash)fail();
-  if(digest(candidate.rawOutput)!==candidate.trace.outputHash||digest(JSON.parse(candidate.rawOutput))!==digest(candidate.decomposition))fail();
+  if(!['material-events-1','material-events-2',MATERIAL_EVENTS_VERSION].includes(packet.schema))fail();
+  if(digest(candidate.rawOutput)!==candidate.trace.outputHash||digest(validateMaterialEvents(JSON.parse(candidate.rawOutput),packet,{allowLegacy:true}))!==digest(candidate.decomposition))fail();
   if(digest(origin.event)!==digest(candidate.decomposition.events[origin.eventIndex]))fail();
   if(digest(decision.actor||null)!==digest(origin.actor||null))fail();
   if(decision.action!=='create'||decision.topicId!==topic.id||decision.inputHash!==packet.inputHash||decision.note!==origin.reviewNote)fail();
-  // Legacy v1 time purposes remain unspecified. Validate without rewriting old records.
-  const checked=structuredClone(candidate.decomposition);
-  if(packet.schema==='material-events-1')for(const e of checked.events)e.timeRole=e.timeEvidence?.basis==='unknown'?'unknown':'unclear';
-  else if(packet.schema!=='material-events-2')fail();
-  validateMaterialEvents(checked,packet);
+  // Versioned validation above preserves legacy records and recomputes new projections.
   const m=materialComparisonSnapshot(db,packet.input.material,{historical});
   if(digest(m)!==digest(packet.input.material)||!topic.evidence.some(e=>e.materialId===m.id&&e.materialRevision===m.revision))fail();
   const initial=JSON.parse(db.prepare('SELECT payload FROM research_versions WHERE topic_id=? AND version=1').get(topic.id)?.payload);

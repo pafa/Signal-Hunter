@@ -8,12 +8,16 @@ const span=(cell,name,remaining)=>{
  if(n<1||n>(name==='rowspan'?remaining:256))fail();return n;
 };
 // Coordinates describe the retained HTML table model, not inferred financial headers or CSS layout.
-export function articleTableText(document,html){
+export function articleTableText(document,html,{maximumTables=50,maximumCells=10000}={}){
+ if(!Number.isSafeInteger(maximumTables)||maximumTables<1||maximumTables>500||!Number.isSafeInteger(maximumCells)||maximumCells<1||maximumCells>20000)fail();
  const root=document.createElement('div');root.innerHTML=html;
  // Readability can select a tbody and leave orphan tr/td tags; HTML reparsing drops them.
  // Its serialized text escapes source prose. Refuse lost cell/row markup rather than flatten it.
  for(const tag of ['tr','td','th'])if((html.match(new RegExp(`<${tag}(?:\\s|>)`,'gi'))||[]).length!==root.querySelectorAll(tag).length)fail();
- const tables=[...root.querySelectorAll('table')];if(tables.length>50)fail();
+ const tables=[...root.querySelectorAll('table')];if(tables.length>maximumTables)fail();
+ // Keep text-node creation local; avoid repeated named-property scans of the
+ // attached source document while converting detached tables.
+ let createTextNode;
  let cellsSeen=0,slotsSeen=0;
  for(let index=tables.length-1;index>=0;index--){
   const table=tables[index],rows=[...table.rows],occupied=new Set(),entries=[];
@@ -22,7 +26,7 @@ export function articleTableText(document,html){
    const row=rows[r];let column=0,remaining=1;
    while(r+remaining<rows.length&&rows[r+remaining].parentElement===row.parentElement)remaining++;
    for(const cell of row.cells){
-    if(++cellsSeen>10000)fail();while(occupied.has(`${r}:${column}`))column++;
+    if(++cellsSeen>maximumCells)fail();while(occupied.has(`${r}:${column}`))column++;
     const down=span(cell,'rowspan',remaining),across=span(cell,'colspan',remaining);
     if(column+across>256||slotsSeen+down*across>100000)fail();
     for(let y=r;y<r+down;y++)for(let x=column;x<column+across;x++){
@@ -35,7 +39,8 @@ export function articleTableText(document,html){
   }
   const caption=table.caption?`caption ${JSON.stringify(clean(table.caption.textContent))}\n`:'';
   const block=`\n[HTML table ${index+1}; ${TABLE_TEXT_VERSION}; rows=${rows.length}; columns=${width}; coordinates added by extractor; empty cells keep their positions but text is omitted]\n${caption}${entries.join('\n')}\n[/HTML table ${index+1}]\n`;
-  table.replaceWith(document.createTextNode(block));
+  createTextNode??=document.createTextNode.bind(document);
+  table.replaceWith(createTextNode(block));
  }
  return clean(root.textContent);
 }

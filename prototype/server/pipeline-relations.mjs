@@ -90,7 +90,8 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
   plan(item,topic,followup=null){
    if(followup&&(!Array.isArray(followup.targets)||!followup.targets.length||followup.targets.length>3))throw Error('补充比较目标无效');
    const automatic=!!item.automatic&&!!topic.eventExtraction&&!followup;
-   const recalled=followup?{items:[...new Set(followup.targets)].map(id=>({id:digest({method:'evidence-followup',source:topic.id,target:id}),right:research.get(id),reasons:[followup.reason]})),coverage:{method:'补充研究与明确原事项逐项比较'},rulesHash:'evidence-followup/1'}:topic.eventExtraction?recallOccurrence(topic,research.list(),{limit:automatic?null:500}):recall(item.news_id);
+   const topics=topic.eventExtraction&&!followup?research.list():[];
+   const recalled=followup?{items:[...new Set(followup.targets)].map(id=>({id:digest({method:'evidence-followup',source:topic.id,target:id}),right:research.get(id),reasons:[followup.reason]})),coverage:{method:'补充研究与明确原事项逐项比较'},rulesHash:'evidence-followup/1'}:topic.eventExtraction?recallOccurrence(topic,topics,{limit:automatic?null:500}):recall(item.news_id);
    recalled.items=recalled.items.filter(c=>c.right.id!==topic.id&&c.right.status!=='archived');
    if(automatic){
     // A previous source may have found this occurrence before its dossier was
@@ -102,7 +103,21 @@ export function openPipelineRelations(store,research,semantic,{config={},now=Dat
      if(target.status!=='active'||!target.eventExtraction)continue;
      recalled.items.push({id:digest({kind:'ready-occurrence-recall-1',source:topic.id,target:target.id,version:target.version}),right:{id:target.id,version:target.version,title:target.title,status:target.status},reasons:['先前事项已召回本项；本项系统研判完成后接续比较']});seen.add(target.id);deferredMatches++;
     }
-    recalled.coverage={...recalled.coverage,deferredMatches};
+    // A prior dossier may finish before this occurrence even exists. Consider
+    // its reverse lexical match without changing its frozen recall scope.
+    const ready=new Set(db.prepare(`SELECT j.topic_id FROM research_pipeline_event_jobs j JOIN research_topics t ON t.id=j.topic_id
+     JOIN news n ON n.id=json_extract(j.payload,'$.newsId') AND n.revision=json_extract(j.payload,'$.newsRevision')
+     WHERE j.kind='dossier' AND j.status='completed' AND json_extract(j.payload,'$.automatic')=1
+     AND json_extract(t.payload,'$.version')=json_extract(j.payload,'$.adoptedVersion')
+     AND json_extract(t.payload,'$.dossier.sourceModelRun.id')=j.run_id
+     AND json_extract(j.payload,'$.configHash')=?`).all(configHash()).map(r=>r.topic_id));
+    let reverseMatches=0;
+    for(const target of topics){
+     if(seen.has(target.id)||target.id===topic.id||target.status!=='active'||!target.eventExtraction||!ready.has(target.id))continue;
+     if(!recallOccurrence(target,[topic],{limit:null}).items.length)continue;
+     recalled.items.push({id:digest({kind:'reverse-occurrence-recall-1',source:topic.id,target:target.id,version:target.version}),right:{id:target.id,version:target.version,title:target.title,status:target.status},reasons:['较早完成的事项与本项存在反向词项线索；继续模型核对，不代表同一事件']});seen.add(target.id);reverseMatches++;
+    }
+    recalled.coverage={...recalled.coverage,deferredMatches,reverseMatches};
    }
    const plans=makePlans(item,topic,recalled.items.slice(0,RECALL_PAGE_SIZE),recalled.rulesHash),scan=automatic?continuation.plan(item,topic,recalled):null;
    return {plans,...(scan?{scan}:{}),coverage:{...recalled.coverage,maximumComparisons:automatic?null:3,recalledTopics:recalled.items.length,selectedTopics:plans.length,...(scan?{automatic:true,scanId:scan.id,scopeAt:scan.payload.createdAt,remainingTopics:recalled.items.length-plans.length,pageSize:RECALL_PAGE_SIZE}: {})}};

@@ -12,6 +12,24 @@ const state=(id='aggressive')=>({accountId:id,book:{version:1,configVersion:3,or
 const project=extra=>buildWorkbenchOverview({at,topics:[topic],...extra});
 function freeze(v){if(v&&typeof v==='object'){Object.freeze(v);for(const value of Object.values(v))freeze(value);}return v;}
 
+test('research home defaults to an occupied account without promoting scenario holdings or mixing accounts',()=>{
+ const actual={id:'actual:fixture',kind:'actual',positions:[{id:'actual:one',account:'actual:fixture',symbol:'AAPL.US',topicId:topic.id,risks:['Synthetic missing price']}]};
+ const empty={accountId:'aggressive',book:null},paper={version:1,positions:[{symbol:'AAPL.US',qty:1}]};
+ const input=freeze({marketAccounts:[empty,{accountId:'steady',book:null}],actualAccounts:[actual],paper});
+ const output=project(input);assert.equal(output.defaultAccount,actual.id);assert.equal(output.accounts.find(a=>a.id==='aggressive').positions.length,0);assert.deepEqual(output.accounts.find(a=>a.id===actual.id),actual);assert.equal(output.risks.filter(r=>r.account===actual.id).length,1);
+ assert.equal(project({...input,marketAccounts:[empty,state('steady')]}).defaultAccount,'steady');
+ assert.equal(project({...input,marketAccounts:[state(),state('steady')]}).defaultAccount,'aggressive');
+ assert.equal(project({...input,actualAccounts:[]}).defaultAccount,'aggressive','scenario positions do not silently become real research holdings');
+ assert.equal(project({...input,offline:true}).defaultAccount,'scenario');
+});
+
+test('next activity includes a due automatic retry but excludes paused, running and manually blocked tasks',()=>{
+ const operations={minutes:{blocked:true,automaticRecovery:true,nextRunAt:'2026-10-08T08:02:00Z'},daily:{nextRunAt:'2026-10-08T08:03:00Z'},news:{paused:true,automaticRecovery:true,nextRunAt:'2026-10-08T08:01:00Z'},observations:{running:true,nextRunAt:at},execution:{blocked:true,nextRunAt:at}};
+ assert.equal(project({operations}).activity.nextRunAt,operations.minutes.nextRunAt);
+ operations.minutes.paused=true;assert.equal(project({operations}).activity.nextRunAt,operations.daily.nextRunAt);
+ operations.daily.paused=true;assert.equal(project({operations}).activity.nextRunAt,null);
+});
+
 test('read-only projection preserves source objects, account identity and integer units',()=>{
  const a=state(),s=state('steady');s.valuation.positions=[{...lot,unrealizedCents:-2000,valueCents:98000}];
  const input=freeze({marketAccounts:[a,s],paper:{version:2,nav:100,realized:2.01,fees:.04,positions:[{symbol:'AAPL.US',topicId:'one',researchVersion:1,lifecycleId:'paper-1',costUSD:12.34,valueUSD:13.57,unrealized:1.23,returnPct:9.96,scenarioPrice:1.357}]}});
@@ -35,6 +53,11 @@ test('uninitialized, partially valued and malformed inputs never masquerade as z
  delete a.valuation.positions[1].unrealizedCents;delete a.valuation.positions[1].valueCents;
  const malformed=project({marketAccounts:[a]}).accounts[0];assert.equal(malformed.valuedPositions,1);assert.equal(malformed.positions[1].price,null);assert.equal(malformed.positions[1].returnPct,null);
  assert.throws(()=>project({at:'bad timestamp'}),/时间无效/);
+});
+test('qualified decimal-string execution marks display as prices, while unavailable, empty and nonpositive marks remain unknown',()=>{
+ const a=state();a.quotes['AAPL.US'].mark='85.000000';assert.equal(project({marketAccounts:[a]}).accounts[0].positions[0].price,85);
+ for(const mark of [null,undefined,'',0,'0','invalid','-1']){a.quotes['AAPL.US'].mark=mark;assert.equal(project({marketAccounts:[a]}).accounts[0].positions[0].price,null);}
+ a.quotes['AAPL.US'].mark='85';a.valuation.positions[0]={...a.valuation.positions[0],valueCents:null};assert.equal(project({marketAccounts:[a]}).accounts[0].positions[0].price,null);
 });
 
 test('only unexpired current-version pending requests appear; reading never cancels historical requests',()=>{

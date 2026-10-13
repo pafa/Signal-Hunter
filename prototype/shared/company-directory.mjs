@@ -47,7 +47,7 @@ export function headlineCompanies(text){
   return [{...identity,matchedAlias:matched,kind:'mentioned',relationStatus:'pending',direction:'unclear',role:'标题提及，影响待研判',note:`名称匹配：${matched}；未确认业务角色或影响方向`,method:'headline-alias',identityReviewed:false}];
  });
 }
-export const COMPANY_RELATIONS={mentioned:'仅被提及',direct:'事件当事方',supplier:'供应商',customer:'客户',competitor:'竞争者',industry:'行业 / 跨市场传导',listing:'同一发行人证券'};
+export const COMPANY_RELATIONS={mentioned:'仅被提及',direct:'事件当事方',parent:'控股母公司 · 间接影响待研判',supplier:'供应商',customer:'客户',competitor:'竞争者',industry:'行业 / 跨市场传导',listing:'同一发行人证券'};
 export const RELATION_STATUS={pending:'关系待核验',reviewed:'人工核对关系',disputed:'关系有争议'};
 export const DIRECTIONS={unclear:'方向待评估',positive:'条件利好',negative:'条件利空',mixed:'影响分化'};
 export const COMPANY_ANALYSIS_FIELDS={businessExposure:'业务敞口',impactMechanism:'传导机制',magnitudeBasis:'影响量级与依据',pricedIn:'市场已反映多少',duration:'持续时间与兑现节点',countercase:'反向情景与替代解释',nextCheck:'下一步核查'};

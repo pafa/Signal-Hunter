@@ -1,23 +1,22 @@
+import {holdingResearchLinks,holdingOrderIssues} from './holding-research.mjs';
+import {marketResearchCandidates,marketResearchTopic,researchOrderIssues,sameResearch,validateAutoPolicy} from './market-research-candidates.mjs';
 import {executionFees} from './market-fees.mjs';
+import {marketExitCandidates,EXIT_CANDIDATE_VERSION} from './market-exit-candidates.mjs';
+import {slippagePrice} from './market-money.mjs';
 import {compareMarketTime} from './market-time.mjs';
 import {executionLiquidity} from './market-liquidity.mjs';
 import {withMarketObservationPeaks} from './market-observations.mjs';
 import {strategyRisk,entryIssues} from './strategy-risk.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {instrument} from '../shared/securities.mjs';
-import {amount,cents,decimal,fee,sum,validateConfig,lotQuoteIssues,valuation,assessOrder,working,marketFail as fail,isInstant} from './market-sim-risk.mjs';
+import {amount,cents,decimal,fee,sum,validateConfig,lotQuoteIssues,valuation,assessOrder,working,orderLots,marketFail as fail,isInstant} from './market-sim-risk.mjs';
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const text=(v,n=1200)=>typeof v==='string'&&!!v.trim()&&v.length<=n;
 const active=o=>o.status==='pending'||working(o);
 const orderIn=(b,id)=>{const o=b.orders.find(o=>o.id===id);if(!o)fail(7);return o;};
 const usd=n=>n/100;
-function priceWithSlippage(price,bps,tick,side){
- const raw=decimal(price)*(10000000000n+(side==='buy'?1n:-1n)*decimal(bps)),denominator=10000000000n,unit=decimal(tick);
- const units=side==='buy'?(raw+denominator*unit-1n)/(denominator*unit):raw/(denominator*unit),micro=units*unit;
- return `${micro/1000000n}.${String(micro%1000000n).padStart(6,'0')}`;
-}
 // Input adapter is a server dependency, never a request body. Research close caches are ineligible.
-export function openMarketSimulation(store,research,{accountId='main',profile=null,enabled=true,clock=()=>new Date().toISOString(),getInputs=()=>({quotes:{},reason:'尚未接入经核验的执行报价、数量、FX和结算适配器'})}={}){
+export function openMarketSimulation(store,research,{accountId='main',profile=null,enabled=true,clock=()=>new Date().toISOString(),getResearchContext=()=>({subjects:[],researchChecks:[]}),getInputs=()=>({quotes:{},reason:'尚未接入经核验的执行报价、数量、FX和结算适配器'})}={}){
  const db=store.db;if(!['main','aggressive','steady'].includes(accountId))fail(3);
  const sql=s=>accountId==='main'?s:s.replaceAll('market_sim_book',`market_sim_book_${accountId}`).replaceAll('market_sim_events',`market_sim_events_${accountId}`).replaceAll('market_sim_commands',`market_sim_commands_${accountId}`);
  const query=s=>db.prepare(sql(s));
@@ -28,19 +27,26 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
  CREATE TABLE IF NOT EXISTS market_observation_peaks(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`));
  const read=()=>{const row=query('SELECT payload FROM market_sim_book WHERE id=1').get();return row?JSON.parse(row.payload):null;};
  const inputs=()=>{try{const x=getInputs();if(!x||typeof x!=='object'||!x.quotes||typeof x.quotes!=='object'||Array.isArray(x.quotes))throw 0;return structuredClone(x);}catch{return {quotes:{},reason:'执行适配器不可用；不能使用场景价替代'};}};
- const preview=(book,order,market,at)=>{
-  const riskBook=withMarketObservationPeaks(db,book,accountId),review=assessOrder(book,order,market.quotes,at),topic=research.get(order.topicId),risk=strategyRisk(riskBook,market.quotes,at);
-  review.reasons.push(...entryIssues(book,order,market.quotes[order.symbol]));
+ const context=(b,at)=>{
+  if(!b?.autoPolicy?.enabled&&!b?.lots?.length&&!b?.orders?.some(o=>active(o)&&o.researchBinding))return {subjects:[],researchChecks:[]};
+  try{return getResearchContext(at,b);}catch{return {subjects:[],researchChecks:[],reason:'研究依据暂不可用'};}
+ };
+ const resolveTopic=(id,ctx,binding)=>{if(binding)return marketResearchTopic(ctx.subjects?.find(s=>s.kind===binding.kind&&s.id===binding.id));try{return research.get(id);}catch{return null;}};
+ const preview=(book,order,market,at,ctx=context(book,at))=>{
+  const riskBook=withMarketObservationPeaks(db,book,accountId),review=assessOrder(book,order,market.quotes,at,holdingResearchLinks(book,ctx)),topic=resolveTopic(order.topicId,ctx,order.researchBinding),risk=strategyRisk(riskBook,market.quotes,at);
+  review.reasons.push(...entryIssues(book,order,market.quotes[order.symbol]),...researchOrderIssues(book,order,ctx,at),...holdingOrderIssues(book,order,ctx));
   if(order.side==='buy'){
    if(book.riskPaused||risk.alerts.some(a=>a.kind==='pool-stop'))review.reasons.push('策略池达到回撤暂停线；暂停新买入，需本人复核恢复');
    if(risk.alerts.some(a=>a.blocksBuy&&a.symbol===order.symbol))review.reasons.push('该证券已触发退出或到期复核，暂停增加仓位');
   }
   review.eligible=review.reasons.length===0;review.strategyRisk=risk;
-  if(topic.status==='archived'||topic.version!==order.topicVersion){review.eligible=false;review.reasons.push('研究版本已变化或归档');}
+  if(!topic||topic.status!=='active'||topic.version!==order.topicVersion){review.eligible=false;review.reasons.push('研究版本已变化或归档');}
   const relevant=[...new Set([order.symbol,...book.lots.map(l=>l.symbol),...book.orders.filter(working).map(o=>o.symbol)])].sort();
-  const evidence={bookVersion:book.version,orderId:order.id,topicVersion:topic.version,config:book.config,profile:book.profile,riskBasis:{highWaterCents:riskBook.highWaterCents,lots:riskBook.lots.map(l=>({id:l.id,peakPrice:l.peakPrice}))},quotes:Object.fromEntries(relevant.map(s=>[s,market.quotes[s]||null]))};
+  const evidence={bookVersion:book.version,orderId:order.id,topicVersion:topic?.version??null,researchBinding:order.researchBinding||null,autoPolicyVersion:book.autoPolicyVersion||0,holdingResearchLinks:order.holdingResearchLinks||null,config:book.config,profile:book.profile,riskBasis:{highWaterCents:riskBook.highWaterCents,lots:riskBook.lots.map(l=>({id:l.id,peakPrice:l.peakPrice}))},quotes:Object.fromEntries(relevant.map(s=>[s,market.quotes[s]||null]))};
   return {...review,fingerprint:hash(evidence),evidence,checkedAt:at,sourceNote:market.reason||null};
  };
+ const exits=(b,market,at,risk,ctx)=>marketExitCandidates({book:b,accountId,risk,quotes:market.quotes,at,holdingLinks:holdingResearchLinks(b,ctx),getTopic:(id,binding)=>resolveTopic(id,ctx,binding),preview:o=>preview(b,o,market,at,ctx)});
+ const candidates=(b,market,at,ctx,riskExits)=>marketResearchCandidates({book:b,accountId,context:ctx,quotes:market.quotes,at,riskExits,preview:o=>preview(b,o,market,at,ctx)});
  function persist(book,kind,detail,at,request=null){
   const previous=query('SELECT hash FROM market_sim_events ORDER BY version DESC LIMIT 1').get()?.hash||null;
   book.version++;book.updatedAt=at;
@@ -64,11 +70,13 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
   return {...api.snapshot(),appliedVersion:version};
  }
  const api={
-  snapshot(){const b=read(),market=inputs(),at=clock();if(!b)return {accountId,profile,enabled,configured:false,version:0,sourceNote:market.reason||null};const value=valuation(b,market.quotes,at);return {accountId,profile,enabled,configured:true,...b,strategyRisk:strategyRisk(withMarketObservationPeaks(db,b,accountId),market.quotes,at),liquidity:undefined,...value,baseCurrency:'USD',sourceNote:market.reason||null,performanceVerified:false};},
+  snapshot(){const b=read(),market=inputs(),at=clock();if(!b)return {accountId,profile,enabled,configured:false,version:0,sourceNote:market.reason||null};const value=valuation(b,market.quotes,at),risk=strategyRisk(withMarketObservationPeaks(db,b,accountId),market.quotes,at),ctx=context(b,at),exitCandidates=exits(b,market,at,risk,ctx);return {accountId,profile,enabled,configured:true,...b,strategyRisk:risk,exitCandidates,researchCandidates:candidates(b,market,at,ctx,exitCandidates),liquidity:undefined,...value,baseCurrency:'USD',sourceNote:market.reason||null,performanceVerified:false};},
+  holdingSymbols(){return enabled?[...new Set((read()?.lots||[]).filter(l=>l.qty>0).map(l=>l.symbol))]:[];},
+  holdingReferences(){return enabled?(read()?.lots||[]).filter(l=>l.qty>0).map(l=>({symbol:l.symbol,topicId:l.topicId})):[];},
   executionState(){const b=read();return {accountId,configured:!!b,version:b?.version||0,oldestApproval:b?.orders.filter(working).map(o=>o.approvedAt).sort()[0]||null};},
   observationSnapshot(at=clock()){
    const book=read();if(!book)return {accountId,book:null};
-   const market=inputs();return {accountId,book,at,quotes:market.quotes,sourceNote:market.reason||null,valuation:valuation(book,market.quotes,at),risk:strategyRisk(withMarketObservationPeaks(db,book,accountId),market.quotes,at)};
+   const market=inputs(),risk=strategyRisk(withMarketObservationPeaks(db,book,accountId),market.quotes,at),ctx=context(book,at),exitCandidates=exits(book,market,at,risk,ctx);return {accountId,book,at,quotes:market.quotes,sourceNote:market.reason||null,valuation:valuation(book,market.quotes,at),risk,exitCandidates,researchCandidates:candidates(book,market,at,ctx,exitCandidates),researchTopics:(ctx.subjects||[]).map(marketResearchTopic),holdingResearchLinks:holdingResearchLinks(book,ctx)};
   },
   history(){return query('SELECT version,at,kind,hash FROM market_sim_events ORDER BY version DESC LIMIT 100').all();},
   event(version){const row=query('SELECT payload,hash FROM market_sim_events WHERE version=?').get(version);if(!row)fail(7);return {...JSON.parse(row.payload),hash:row.hash};},
@@ -76,12 +84,33 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
    if(book)fail(1);if(data.confirmSimulation!==true)fail(11);
    if(!Number.isFinite(data.initialUSD)||data.initialUSD<0.01||data.initialUSD>1000000000||decimal(data.initialUSD)%10000n!==0n||profile&&data.initialUSD!==profile.allocationUSD)fail(3);
    const config=validateConfig(data.config),initial=cents(data.initialUSD);
-   return {book:{version:0,accountId,profile,highWaterCents:initial,riskPaused:false,riskObservations:[],createdAt:at,initialCents:initial,cashCents:initial,config,configVersion:1,lots:[],orders:[],fills:[],unsettled:[],liquidity:{},realizedCents:0,feesCents:0},detail:{initialCents:initial,config}};
+   return {book:{version:0,accountId,profile,highWaterCents:initial,riskPaused:false,riskObservations:[],createdAt:at,initialCents:initial,cashCents:initial,config,configVersion:1,autoPolicy:{enabled:false,targetIssuerPct:null,reducePct:null},autoPolicyVersion:0,lots:[],orders:[],fills:[],unsettled:[],liquidity:{},realizedCents:0,feesCents:0},detail:{initialCents:initial,config}};
   });},
-  configure(data){return command('configure',data,(b)=>{
+  configure(data){return command('configure',data,(b,at)=>{
    if(!b)fail(0);if(!text(data.note))fail(3);const config=validateConfig(data.config);
-   b.config=config;b.configVersion++;const invalidated=[];for(const o of b.orders.filter(active)){o.status='invalidated';o.reason='风险或费用配置已修改，需重新申请与批准';invalidated.push(o.id);}
+   b.config=config;b.configVersion++;const invalidated=[];for(const o of b.orders.filter(active)){o.status='invalidated';o.endedAt=at;o.reason='风险或费用配置已修改，需重新申请与批准';invalidated.push(o.id);}
    return {book:b,detail:{note:data.note,config,invalidated}};
+  });},
+  autoPolicy(data){return command('auto-policy',data,(b,at)=>{
+   if(!b)fail(0);if(!text(data.note))fail(3);const policy=validateAutoPolicy(data.policy);if(policy.enabled&&data.confirmSimulation!==true)fail(11);
+   b.autoPolicy=policy;b.autoPolicyVersion=(b.autoPolicyVersion||0)+1;const invalidated=[];
+   for(const o of b.orders.filter(o=>active(o)&&o.researchCandidate)){o.status='invalidated';o.endedAt=at;o.reason='自动方案配置变化，剩余数量等待新版方案';invalidated.push(o.id);}
+   return {book:b,detail:{policy,policyVersion:b.autoPolicyVersion,note:data.note,invalidated}};
+  });},
+  decideResearch(id,data){return command('research-decision:'+id,data,(b,at)=>{
+   if(!b)fail(0);if(!['approve','reject'].includes(data.action)||!text(data.note))fail(8);
+   const market=inputs(),ctx=context(b,at),risk=strategyRisk(withMarketObservationPeaks(db,b,accountId),market.quotes,at),candidate=candidates(b,market,at,ctx,exits(b,market,at,risk,ctx)).find(c=>c.id===id);
+   if(!candidate||candidate.previousDecision||candidate.fingerprint!==data.fingerprint)fail(9);
+   let orderId=null;
+   if(data.action==='approve'){
+    if(data.confirmSimulation!==true)fail(11);if(!candidate.eligible)fail(10);
+    const o={...candidate.order,id:randomUUID(),createdAt:at,researchSnapshot:resolveTopic(candidate.topicId,ctx,candidate.researchBinding)};
+    const review=preview(b,o,market,at,ctx);if(!review.eligible)fail(10);
+    o.researchCandidate={...o.researchCandidate,fingerprint:candidate.fingerprint,basis:candidate.basis};
+    o.status='approved';o.approvedAt=at;o.decisionNote=data.note.trim();o.approval={note:data.note.trim(),at,fingerprint:review.fingerprint,evidence:review.evidence};b.orders.push(o);orderId=o.id;
+   }
+   const decision={candidateId:id,action:data.action,at,note:data.note.trim(),orderId,fingerprint:candidate.fingerprint,basis:candidate.basis};
+   (b.researchDecisions??=[]).push(decision);return {book:b,detail:decision};
   });},
   propose(data){return command('propose',data,(b,at)=>{
    if(!b)fail(0);const d=data.order;
@@ -94,6 +123,20 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
    b.orders.push(order);return {book:b,detail:{orderId:order.id}};
   });},
   review(id){const b=read();if(!b)fail(0);return preview(b,orderIn(b,id),inputs(),clock());},
+  decideExit(id,data){return command('exit-decision:'+id,data,(b,at)=>{
+   if(!b)fail(0);if(!['approve','reject'].includes(data.action)||!text(data.note))fail(8);
+   const market=inputs(),ctx=context(b,at),risk=strategyRisk(withMarketObservationPeaks(db,b,accountId),market.quotes,at),candidate=exits(b,market,at,risk,ctx).find(c=>c.id===id);
+   if(!candidate||candidate.fingerprint!==data.fingerprint)fail(9);
+   let orderId=null;
+   if(data.action==='approve'){
+    if(data.confirmSimulation!==true)fail(11);if(!candidate.eligible)fail(10);
+    const o={...candidate.order,id:randomUUID(),createdAt:at,researchSnapshot:resolveTopic(candidate.topicId,ctx,candidate.order.researchBinding),exitCandidate:{engine:EXIT_CANDIDATE_VERSION,id,fingerprint:candidate.fingerprint,basis:candidate.basis}};
+    const review=preview(b,o,market,at);if(!review.eligible)fail(10);
+    o.status='approved';o.approvedAt=at;o.decisionNote=data.note.trim();o.approval={note:data.note.trim(),at,fingerprint:review.fingerprint,evidence:review.evidence};b.orders.push(o);orderId=o.id;
+   }
+   const decision={candidateId:id,action:data.action,at,note:data.note.trim(),orderId,fingerprint:candidate.fingerprint,basis:candidate.basis};
+   (b.exitDecisions??=[]).push(decision);return {book:b,detail:decision};
+  });},
   decide(id,data){return command('decision:'+id,data,(b,at)=>{
    if(!b)fail(0);const o=orderIn(b,id);if(!text(data.note)||!['approve','reject','cancel'].includes(data.action))fail(8);
    if(data.action==='approve'){
@@ -116,11 +159,12 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
     for(const lot of b.lots){const q=market.quotes[lot.symbol];if(!lotQuoteIssues(lot,q,b.config,at).length&&decimal(q.mark)>decimal(lot.peakPrice||lot.entryPrice||q.mark)){lot.peakPrice=String(q.mark);changed=true;}}
     if(hash(risk.alerts)!==hash(b.riskObservations)){b.riskObservations=risk.alerts;updates.push({kind:'risk-observation',...risk});changed=true;}
     if(risk.alerts.some(a=>a.kind==='pool-stop')&&!b.riskPaused){b.riskPaused=true;changed=true;}
+    const ctx=context(b,at);
     for(const o of b.orders.filter(active)){
-     const topic=research.get(o.topicId);
-     if(Date.parse(o.expiresAt)<=Date.parse(at)||topic.status==='archived'||topic.version!==o.topicVersion||o.configVersion!==b.configVersion){o.status=Date.parse(o.expiresAt)<=Date.parse(at)?'expired':'invalidated';o.reason=o.status==='expired'?'订单到期，剩余数量未成交':'研究或配置版本变化，剩余数量需重新申请';updates.push({orderId:o.id,status:o.status});changed=true;continue;}
+     const topic=resolveTopic(o.topicId,ctx,o.researchBinding);
+     if(holdingOrderIssues(b,o,ctx).length||o.researchCandidate&&o.side==='buy'&&o.researchBinding?.kind==='research'&&ctx.coveredResearchIds?.includes(o.researchBinding.id)||Date.parse(o.expiresAt)<=Date.parse(at)||!topic||topic.status!=='active'||topic.version!==o.topicVersion||o.configVersion!==b.configVersion||o.researchBinding&&!sameResearch(o.researchBinding,topic.researchSubject)||o.researchCandidate&&o.autoPolicyVersion!==b.autoPolicyVersion){o.status=Date.parse(o.expiresAt)<=Date.parse(at)?'expired':'invalidated';o.endedAt=at;o.reason=o.status==='expired'?'订单到期，剩余数量未成交':'研究或配置版本变化，剩余数量需重新申请';updates.push({orderId:o.id,status:o.status});changed=true;continue;}
      if(!working(o))continue;
-     const check=preview(b,o,market,at),q=market.quotes[o.symbol],remaining=o.qty-o.filledQty;
+     const check=preview(b,o,market,at,ctx),q=market.quotes[o.symbol],remaining=o.qty-o.filledQty;
      const wait=reason=>{if(o.waitReason!==reason){o.waitReason=reason;updates.push({orderId:o.id,waiting:reason});changed=true;}};
      if(!check.eligible){wait(check.reasons.join('；'));continue;}
      if(compareMarketTime(q.asOf,o.approvedAt)<=0){wait('等待批准之后的新报价，不能回用审批前价格成交');continue;}
@@ -129,17 +173,17 @@ export function openMarketSimulation(store,research,{accountId='main',profile=nu
      const side=o.side==='buy'?'availableBuy':'availableSell',lot=o.side==='buy'?q.buyLot:q.sellLot;
      const available=q[side]-(used?.[o.side]||0);let qty=Math.floor(Math.min(remaining,available)/lot)*lot;
      if(qty<=0){wait('当前可用数量不足，保留未成交余量');continue;}
-     const execution=o.side==='buy'&&b.profile?.entry==='cn-main-board-limit-up'?String(q.limitUpPrice):priceWithSlippage(o.side==='buy'?q.ask:q.bid,b.config.slippageBps,q.tickSize,o.side),px=decimal(execution),limit=decimal(o.limitPrice);
+     const execution=o.side==='buy'&&b.profile?.entry==='cn-main-board-limit-up'?String(q.limitUpPrice):slippagePrice(o.side==='buy'?q.ask:q.bid,b.config.slippageBps,q.tickSize,o.side),px=decimal(execution),limit=decimal(o.limitPrice);
      if(px<=0n||(o.side==='buy'?px>limit:px<limit)){wait('不利滑点后的价格未满足限价');continue;}
      const gross=amount(qty,execution,q.fx.usdPerUnit);let charges;try{charges=executionFees(q,{qty,price:execution,side:o.side,at,feeBps:b.config.feeBps,accrual:o.feeAccrual});}catch{wait('费用方案不可核验，保留未成交余量');continue;}const charge=charges.totalCents,net=o.side==='buy'?gross+charge:gross-charge;
      if(net<0){wait('费用超过卖出金额');continue;}
      if(o.side==='buy'&&(net>o.budgetCents-o.spentCents||net>b.cashCents)){wait('成交费用或汇率变化超出预算');continue;}
-     const fill={id:randomUUID(),liquidityVersion:2,orderId:o.id,topicId:o.topicId,topicVersion:o.topicVersion,symbol:o.symbol,side:o.side,qty,price:execution,fx:q.fx,grossCents:gross,feeCents:charge,feeBreakdown:charges,netCents:net,at,marketSnapshot:q,approvalFingerprint:o.approval.fingerprint};
+     const fill={id:randomUUID(),liquidityVersion:2,orderId:o.id,topicId:o.topicId,topicVersion:o.topicVersion,...(o.researchBinding?{researchBinding:o.researchBinding}:{}),symbol:o.symbol,side:o.side,qty,price:execution,fx:q.fx,grossCents:gross,feeCents:charge,feeBreakdown:charges,netCents:net,at,marketSnapshot:q,approvalFingerprint:o.approval.fingerprint};
      if(o.side==='buy'){
-      b.cashCents-=net;o.spentCents+=net;b.lots.push({id:fill.id,symbol:o.symbol,topicId:o.topicId,topicVersion:o.topicVersion,issuerId:q.issuerId,qty,costCents:net,openedAt:at,entryPrice:execution,peakPrice:execution,sellableAt:q.sellableAt,holdUntil:o.holdUntil});
+      b.cashCents-=net;o.spentCents+=net;b.lots.push({id:fill.id,symbol:o.symbol,topicId:o.topicId,topicVersion:o.topicVersion,...(o.researchBinding?{researchBinding:o.researchBinding}:{}),issuerId:q.issuerId,qty,costCents:net,openedAt:at,entryPrice:execution,peakPrice:execution,sellableAt:q.sellableAt,holdUntil:o.holdUntil});
      }else{
       let needed=qty,basis=0;const allocations=[];
-      for(const l of b.lots.filter(l=>l.symbol===o.symbol&&l.topicId===o.topicId&&compareMarketTime(l.sellableAt,at)<=0)){
+      for(const l of orderLots(b,o).filter(l=>compareMarketTime(l.sellableAt,at)<=0)){
        const n=Math.min(needed,l.qty);if(!n)continue;const cost=n===l.qty?l.costCents:Number((BigInt(l.costCents)*BigInt(n)+BigInt(l.qty)/2n)/BigInt(l.qty));l.qty-=n;l.costCents-=cost;needed-=n;basis+=cost;allocations.push({lotId:l.id,qty:n,costCents:cost});
       }
       if(needed)throw new Error('市场模拟内部可卖量不一致');b.lots=b.lots.filter(l=>l.qty>0);fill.costCents=basis;fill.realizedCents=net-basis;fill.allocations=allocations;b.realizedCents+=net-basis;

@@ -1,11 +1,13 @@
-import React from 'react';
+import React,{useState} from 'react';
 import ActualValuationDetails from './ActualValuationDetails';
+import ActualResearchDetails from './ActualResearchDetails';
 import {ActualMonitoring} from './ActualObservationDetails';
 import {Button} from '../major/Primitives';
 import {time} from '../major/api';
 import {marketClock} from '../../shared/market-clock.mjs';
 import {laneNames} from '../../shared/activity-view.mjs';
 import {dataHealth} from './decision-model';
+import {positionRiskEntries,riskCategoryLabels,riskCategory,riskRank,compareRisks,riskCounts} from '../../shared/workbench-risk-view.mjs';
 
 export const money=(value,currency='USD')=>typeof value==='number'&&Number.isFinite(value)?`${currency==='USD'?'$':currency+' '}${(value/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`:'未知';
 const percentage=value=>typeof value==='number'&&Number.isFinite(value)?`${value.toFixed(2)}%`:'未知';
@@ -15,25 +17,27 @@ const activityNames={offline:'离线演示',paused:'任务已暂停',running:'�
 
 export function DashboardStatus({data,onRuntime,onAutomation,busy}){
  const overview=data?.overview,activity=overview?.activity,h=dataHealth(data,data?.serverTime?Date.parse(data.serverTime):Date.now());
+ const counts=riskCounts(overview?.risks);
  const pipeline=data?.researchPipeline,automaticRunning=!!pipeline?.settings.automatic&&!data?.operations?.discovery?.paused;
  return <div className="dashboard-status" aria-label="整体状态">
   {pipeline&&<button className="dashboard-automation" disabled={busy||!onAutomation||!pipeline.enabled} onClick={()=>onAutomation(automaticRunning?'pause':'start')} title={pipeline.enabled?'沿用当前范围与每日调用上限；仅启动新闻与研究，不执行交易':'当前模式未启用本机模型研究'}>{automaticRunning?'暂停自动研究':'启动自动研究'}</button>}
   <span><b>{activityNames[activity?.state]||'读取状态中'}</b> · {data?.runtime?.instance?.label||'当前工作台'}</span>
   <button onClick={onRuntime}>新闻 {data?.runtime?.offline?'合成资料':h.rssState} · 最近输入 {time(activity?.newsAt)}{pipeline?.settings.automatic?` · 研判完成 ${pipeline.counts.completed||0} / 观察 ${pipeline.counts.observing||0}`:''}</button>
-  <span className={overview?.risks.length?'amber':''}>全局风险 {overview?.risks.length??'—'} · 待决定 {overview?.decisions.length??'—'}</span>
+  <span title="全部账户；按持仓 / 账户去重计数，同一对象可出现在多类" className={counts.risk.targets?'amber':''}>风险 {overview?counts.risk.targets:'—'} · 复核 {overview?counts.review.targets:'—'} · 缺口 {overview?counts.gap.targets:'—'} · 待决定 {overview?.decisions.length??'—'}</span>
   <span className="dashboard-market-time">{[['600825.SH','A股'],['00293.HK','港股'],['AAPL.US','美股']].map(([symbol,label])=>`${label} ${data?.runtime?.offline?'演示':marketClock(symbol,data?.serverTime).label}`).join(' · ')}</span>
  </div>;
 }
 
-export function DecisionSidebar({overview,onDecision,onRisk,onPosition,onAllRisks,onMonitoring,onRuntime}){
- const risks=overview?.risks||[],decisions=overview?.decisions||[],monitoring=overview?.monitoring||[],activity=overview?.activity;
+export function DecisionSidebar({overview,researchChecks=[],onResearchMonitoring,onDecision,onRisk,onPosition,onAllRisks,onMonitoring,onRuntime}){
+ const risks=[...(overview?.risks||[])].sort(compareRisks),counts=riskCounts(risks),decisions=overview?.decisions||[],monitoring=overview?.monitoring||[],activity=overview?.activity;
  return <aside className="dashboard-decisions i-panel" aria-label="全局风险与后续监控">
   <div className="i-section-head"><h2>风险与后续监控</h2><small>全部账户</small></div>
   <div className="dashboard-side-scroll">
-   <section><h3>持仓风险 <em>{risks.length}</em></h3>
-    {risks.slice(0,1).map(r=><button className="dashboard-list-item" key={r.id} onClick={()=>onRisk(r)}><strong>{r.symbol||accountName(overview,r.account)}</strong><span className="amber">{r.message}</span><small>{accountName(overview,r.account)} · 查看依据</small></button>)}
+   <section><h3>持仓提醒 <em>{counts.targets} 项持仓 / 账户</em></h3>
+    <p className="i-note" title="同一对象可出现在多类，不能相加作为持仓总数">风险 {counts.risk.targets} · 复核 {counts.review.targets} · 缺口 {counts.gap.targets}</p>
+    {risks.slice(0,1).map(r=><button className="dashboard-list-item" key={r.id} onClick={()=>onRisk(r)}><strong>{r.symbol||accountName(overview,r.account)}</strong><span className={riskCategory(r.category)==='risk'?'amber':''}>{r.message}</span><small>{riskCategoryLabels[riskCategory(r.category)]} · {accountName(overview,r.account)} · 查看依据</small></button>)}
     {!risks.length&&<p className="i-note">{overview?'暂无已识别风险；数据缺口仍须看账户估值状态。':'正在读取风险…'}</p>}
-    {risks.length>1&&<Button onClick={()=>onAllRisks('risks')}>全部 {risks.length} 项风险 →</Button>}
+    {risks.length>1&&<Button onClick={()=>onAllRisks('risks')}>全部提醒 · {risks.length} 条 →</Button>}
    </section>
    <section><h3>买卖待决定 <em>{decisions.length}</em></h3>
     {decisions.slice(0,1).map(d=><button className="dashboard-list-item" key={d.id} onClick={()=>onDecision(d)}><strong>{d.symbol} · {d.side==='sell'?'卖出':'买入'} {d.qty} 股</strong><span>{accountName(overview,d.account)} · {d.label}</span><small>研究 v{d.topicVersion} · 到期 {time(d.expiresAt)}</small></button>)}
@@ -41,7 +45,8 @@ export function DecisionSidebar({overview,onDecision,onRisk,onPosition,onAllRisk
     {decisions.length>1&&<Button onClick={()=>onAllRisks('decisions')}>全部 {decisions.length} 份方案 →</Button>}
    </section>
    <section><h3>后续监控</h3>{monitoring.slice(0,1).map(m=><button className="dashboard-list-item" key={m.id} onClick={()=>onPosition(m.id)}><strong>{m.symbol}</strong><span>复核 {time(m.reviewAt)}</span><small>{m.holdingHorizon||'持有窗口待评估'}</small></button>)}
-    {!monitoring.length&&<p className="i-note">尚无持仓监控对象；研究观察记录可在详情查看。</p>}
+    {researchChecks.length>0&&<button className="dashboard-list-item" onClick={onResearchMonitoring}><strong>研究条件 · {researchChecks.filter(c=>c.status==='true').length} 项满足</strong><span>{researchChecks.filter(c=>c.status==='unknown').length} 项无法判断 · 共 {researchChecks.length} 项</span><small>查看后台检查与依据</small></button>}
+    {!monitoring.length&&!researchChecks.length&&<p className="i-note">尚无持仓监控对象；研究观察记录可在详情查看。</p>}
     <Button onClick={onMonitoring}>全部监控 →</Button>
    </section>
   </div>
@@ -56,8 +61,9 @@ export function DecisionSidebar({overview,onDecision,onRisk,onPosition,onAllRisk
 
 export function HoldingsSummary({overview,accountId,onAccount,selectedTopic,selectedSymbol,onSelect,onDetail,onPortfolio,expanded,onExpand}){
  const account=overview?.accounts.find(a=>a.id===accountId)||overview?.accounts.find(a=>a.id===overview.defaultAccount);
- const actual=account?.kind==='actual',currency=actual?account.currency:'USD',format=v=>money(v,currency);
- const positions=[...(account?.positions||[])].sort((a,b)=>Number(!!b.risks.length)-Number(!!a.risks.length)||(a.reviewAt||'~').localeCompare(b.reviewAt||'~'));
+ const actual=['actual','manual-simulation'].includes(account?.kind),currency=actual?account.currency:'USD',format=v=>money(v,currency);
+ const entries=new Map((account?.positions||[]).map(p=>[p.id,positionRiskEntries(p)]));
+ const positions=[...(account?.positions||[])].sort((a,b)=>(entries.get(a.id).length?riskRank(entries.get(a.id)[0].category):3)-(entries.get(b.id).length?riskRank(entries.get(b.id)[0].category):3)||(a.reviewAt||'~').localeCompare(b.reviewAt||'~'));
  return <section className="dashboard-holdings i-panel" aria-label="持仓与退出跟踪">
   <div className="i-section-head"><h2>持仓与退出跟踪 <em>{positions.length}</em></h2>
    <select aria-label="持仓账户" value={account?.id||''} onChange={e=>onAccount(e.target.value)}>{overview?.accounts.map(a=><option key={a.id} value={a.id}>{a.label}{!a.configured?' · 未初始化':''}</option>)}</select>
@@ -65,40 +71,45 @@ export function HoldingsSummary({overview,accountId,onAccount,selectedTopic,sele
   </div>
   <div className="dashboard-metrics">
    <span>净值 <b>{format(account?.navCents)}</b></span>
-   <span title={account?.unavailable.dailyPnl}>当日变化 <b>{format(account?.dailyPnlCents)}</b></span>
+   <span title={account?.unavailable.dailyPnl}>{actual?'今日采样变化':'当日变化'} <b>{format(account?.dailyPnlCents)}</b></span>
    <span>{actual?'参考浮盈':'持仓浮盈'} <b className="up">{format(account?.floatingProfitCents)}</b></span>
    <span>{actual?'参考浮亏':'持仓浮亏'} <b className="down">{format(account?.floatingLossCents)}</b></span>
    <span>已实现 <b>{format(account?.realizedCents)}</b></span>
-   <span title={`${account?.drawdownBasis||''}；${account?.unavailable.maxDrawdown||''}`}>当前 / 最大回撤 <b>{percentage(account?.currentDrawdownPct)} / {percentage(account?.maxDrawdownPct)}</b></span>
+   <span title={`${account?.drawdownBasis||''}；${account?.unavailable.maxDrawdown||''}`}>{actual?'采样当前 / 最大回撤':'当前 / 最大回撤'} <b>{percentage(account?.currentDrawdownPct)} / {percentage(account?.maxDrawdownPct)}</b></span>
   </div>
   <div className="dashboard-holdings-scroll"><table className="i-table"><thead><tr><th>公司 / 数量</th><th>成本 {currency} / {actual?'参考现价':'现价'}</th><th>{actual?'参考':''}浮盈亏 {currency} / 比例</th><th>当前判断</th><th>退出窗口 / 下次复核</th><th>关键风险</th><th>展开</th></tr></thead><tbody>
    {positions.map(p=><React.Fragment key={p.id}><tr className={p.symbol===selectedSymbol?'selected':p.topicId===selectedTopic?'related':''}>
     <td><button className="dashboard-company" onClick={()=>onSelect(p)}>{p.name}<small>{p.symbol} · {p.qty} 股</small></button></td>
     <td>{format(p.costCents)}<small title={`${p.priceSource||'来源未知'} · ${time(p.priceAt)}`}>{price(p.price)} {p.currency||''} · {p.priceBasis}</small></td>
     <td className={p.unrealizedCents==null?'':p.unrealizedCents<0?'down':'up'}>{format(p.unrealizedCents)}<small>{percentage(p.returnPct)}</small></td>
-    <td>{p.judgement}<small>研究 v{p.currentVersion??'未知'}</small></td>
-    <td title={p.holdingHorizon||'尚无确定退出窗口'}>{p.holdingHorizon||'退出窗口待评估'}<small>复核 {time(p.reviewAt)}</small></td>
-    <td className={p.risks.length?'amber':''} title={p.risks.join('；')||p.invalidation||'失效条件待补'}>{p.risks[0]||p.invalidation||'失效条件待补'}{p.monitoring&&<small>{p.monitoring.label} · {time(p.monitoring.checkedAt)}</small>}</td>
+    <td>{p.judgement}<small>{p.currentBinding?.kind==='event-cluster'?'综合':'研究'} v{p.currentVersion??'未知'}</small></td>
+    <td title={p.holdingHorizon||'尚无确定退出窗口'}>{p.actualResearch?.horizonAt?time(p.actualResearch.horizonAt):p.holdingHorizon||'退出窗口待评估'}<small>复核 {time(p.reviewAt)}</small></td>
+    <td className={entries.get(p.id)[0]?.category==='risk'?'amber':''} title={entries.get(p.id).map(r=>riskCategoryLabels[r.category]+'：'+r.message).join('；')||p.invalidation||'失效条件待补'}>{entries.get(p.id)[0]?`${riskCategoryLabels[entries.get(p.id)[0].category]}：${entries.get(p.id)[0].message}`:p.invalidation||'失效条件待补'}{p.monitoring&&<small>{p.monitoring.label} · {time(p.monitoring.checkedAt)}</small>}</td>
     <td><Button aria-label={`${expanded===p.id?'收起':'展开'}持仓 ${p.symbol}`} aria-expanded={expanded===p.id} onClick={()=>onExpand(expanded===p.id?null:p.id)}>{expanded===p.id?'▴':'▾'}</Button></td>
-   </tr>{expanded===p.id&&<tr className="dashboard-position-expanded"><td colSpan="7"><b>{actual?'绑定研究':'建仓研究'} v{p.openingVersion??'未知'} → 当前 v{p.currentVersion??'未知'}</b><span> · {p.trigger||'触发条件待补'}；失效：{p.invalidation||'待补'}</span><span> · 估值时间 {time(p.priceAt)} · {p.priceSource||'来源未知'}</span><Button onClick={()=>onDetail(p.id)}>深入查看持仓 →</Button></td></tr>}</React.Fragment>)}
+   </tr>{expanded===p.id&&<tr className="dashboard-position-expanded"><td colSpan="7"><b>{actual&&p.actualResearch?.origins.length>1?'原记录 '+p.actualResearch.origins.length+' 项研究关联':(actual?'绑定研究':'建仓研究')+' v'+(p.openingVersion??'未知')} → 当前{p.currentBinding?.kind==='event-cluster'?'综合':'研究'} v{p.currentVersion??'未知'}</b><span> · {p.trigger||'触发条件待补'}；失效：{p.invalidation||'待补'}</span><span> · 估值时间 {time(p.priceAt)} · {p.priceSource||'来源未知'}</span><Button onClick={()=>onDetail(p.id)}>深入查看持仓 →</Button></td></tr>}</React.Fragment>)}
    {!positions.length&&<tr><td colSpan="7" className="dashboard-empty">{!account?'正在读取持仓…':!account.configured?'账户尚未初始化，净值与盈亏未知。配置和行情就绪后才能开展市场模拟。':'此账户暂无持仓。已有买入不会通过示例数据自动补入。'}</td></tr>}
   </tbody></table></div>
   <div className="dashboard-holdings-foot"><span>{[account?.sourceNote,account?.unavailable.aggregate].filter(Boolean).join('；')||'按有效输入估值；未知不表示零风险'} · 已估值 {account?.valuedPositions??0}/{positions.length}</span><span>选择事件只高亮，不隐藏全局持仓</span></div>
  </section>;
 }
 
-export function PositionDetails({position:p,account,onResearch,onAccount,onObservation}){
+export function PositionDetails({position:p,account,onResearch,onAccount,onObservation,initialExpanded={}}){
+ const [expanded,setExpanded]=useState(initialExpanded);
+ function disclosure(key){return {open:!!expanded[key],onToggle:e=>{const value=e.currentTarget.open;setExpanded(old=>old[key]===value?old:{...old,[key]:value});}};}
+ const showResearch=(position,original=false)=>onResearch(position,original,{expanded});
  if(!p)return <p className="m-warning">持仓已变化或不在当前快照中；请返回组合核对，旧记录仍在原账本。</p>;
- const actual=account.kind==='actual',currency=actual?account.currency:'USD';
+ const actual=['actual','manual-simulation'].includes(account.kind),currency=actual?account.currency:'USD';
+ const riskEntries=positionRiskEntries(p);
  return <section className="dashboard-position-detail" aria-label="持仓长期档案">
   <p><b>{p.name} · {p.symbol}</b> · {account.label} · {p.qty} 股</p>
   <p>{account.sourceNote||'有效执行输入估值'}；估值 {time(p.priceAt)}，来源 {p.priceSource||'未知'}。</p>
   <div className="dashboard-metrics"><span>成本 {currency} <b>{money(p.costCents,currency)}</b></span><span>{actual?'参考现价':'现价'} <b>{price(p.price)} {p.currency}</b></span><span>{actual?'当前参考':''}浮盈亏 {currency} <b>{money(p.unrealizedCents,currency)} / {percentage(p.returnPct)}</b></span></div>
-  {actual&&<ActualValuationDetails position={p}/>}
-  <h3>原研究与当前判断</h3><p>{actual?'持仓记录 v'+p.recordVersion:'建仓 '+time(p.openedAt)} · 原研究 v{p.openingVersion??'未知'} → 当前 v{p.currentVersion??'未知'}。</p><p>{p.topicTitle} · {p.judgement}</p>
-  <h3>退出计划与风险</h3><p>预计窗口：{p.holdingHorizon||'未形成有依据的退出窗口'}。复核：{time(p.reviewAt)}。</p><p>触发：{p.trigger||'未定义'}；失效：{p.invalidation||'未定义'}。</p>
-  {(actual?p.risks.slice(0,2):p.risks).map((r,i)=><p className="m-warning" key={i}>{r}</p>)}{actual&&p.risks.length>2&&<details><summary>更多风险与输入缺口 · {p.risks.length-2}</summary>{p.risks.slice(2).map((r,i)=><p className="m-warning" key={i}>{r}</p>)}</details>}<p className="m-note">复核时间不等于保证卖出日期；阅读本页、标记已读均不批准或执行买卖。</p>
-  {actual&&<ActualMonitoring monitoring={p.monitoring} onObservation={onObservation}/>}
-  <div className="detail-section-tools"><Button disabled={!p.topicId||p.currentVersion==null} onClick={()=>onResearch(p)}>查看对应研究</Button><Button onClick={()=>onAccount(p.account)}>{actual?'实际记录与修正历史':'账户、订单与成交'}</Button></div>
+  {actual&&<ActualValuationDetails position={p} disclosure={disclosure}/>}
+  {actual&&p.actualResearch?<ActualResearchDetails position={p} onResearch={showResearch} disclosure={disclosure}/>:<><h3>原研究与当前判断</h3><p>{actual?'持仓记录 v'+p.recordVersion:'建仓 '+time(p.openedAt)} · 原研究 v{p.openingVersion??'未知'} → 当前{p.currentBinding?.kind==='event-cluster'?'综合':'研究'} v{p.currentVersion??'未知'}。</p><p>{p.topicTitle} · {p.judgement}</p>
+  {p.monitoringLink&&p.monitoringLink.status!=='legacy'&&<p>建仓依据：{p.openingTitle||p.topicId}，v{p.openingVersion}。当前监控：{p.currentBinding?.kind==='event-cluster'?'事件综合':'单篇研究'}，v{p.currentVersion??'待更新'}。{p.monitoringLink.reason}；原成本、建仓记录与复核期限保留。</p>}
+  <h3>退出计划与风险</h3><p>预计窗口：{p.holdingHorizon||'未形成有依据的退出窗口'}。复核：{time(p.reviewAt)}。</p><p>触发：{p.trigger||'未定义'}；失效：{p.invalidation||'未定义'}。</p></>}
+  {(actual?riskEntries.slice(0,2):riskEntries).map(r=><p className={r.category==='risk'?'m-warning':'m-note'} key={r.index}>{riskCategoryLabels[r.category]}：{r.message}</p>)}{actual&&riskEntries.length>2&&<details {...disclosure('actual-more-risks')}><summary>更多风险与输入缺口 · {riskEntries.length-2}</summary>{riskEntries.slice(2).map(r=><p className={r.category==='risk'?'m-warning':'m-note'} key={r.index}>{riskCategoryLabels[r.category]}：{r.message}</p>)}</details>}<p className="m-note">复核时间不等于保证卖出日期；阅读本页、标记已读均不批准或执行买卖。</p>
+  {actual&&<ActualMonitoring monitoring={p.monitoring} disclosure={disclosure} onObservation={onObservation?id=>onObservation(id,{expanded}):undefined}/>}
+  <div className="detail-section-tools"><Button disabled={!(p.currentBinding||p.topicId)||p.currentVersion==null} onClick={()=>showResearch(p)}>查看对应研究</Button>{p.monitoringLink?.relation.kind!=='same-research'&&p.monitoringLink&&<Button onClick={()=>showResearch(p,true)}>查看建仓版本</Button>}<Button onClick={()=>onAccount(p.account)}>{actual?'成交记录与修正历史':'账户、订单与成交'}</Button></div>
  </section>;
 }

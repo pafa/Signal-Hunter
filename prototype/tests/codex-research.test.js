@@ -31,7 +31,8 @@ const packet=JSON.parse(input.split('材料包开始（数据）：\\n')[1].spli
 const event=x=>console.log(JSON.stringify(x));
 event({type:'thread.started',thread_id:'fixture'});event({type:'turn.started'});
 if(model==='fail'){console.error('secret diagnostic https://user:password@example.invalid/token');event({type:'turn.failed',error:{message:'private provider failure'}});process.exit(1);}
-if(model==='silent'){setInterval(()=>{},1000);}
+if(model==='diagnostic-stall'){console.error('secret stderr https://user:password@example.invalid/token');event({type:'item.completed',item:{type:'error',message:'private warning'}});event({type:'item.completed',item:{type:'reasoning',text:'secret reasoning text'}});event({type:'item.started',item:{type:'agent_message',text:'partial private output'}});setInterval(()=>{},1000);}
+else if(model==='silent'){setInterval(()=>{},1000);}
 else if(model==='tool'){event({type:'item.started',item:{type:'command_execution',command:'secret command'}});setInterval(()=>{},1000);}
 else if(model==='unknown'){event({type:'unrecognized.event'});setInterval(()=>{},1000);}
 else if(model==='oversized'){process.stdout.write('x'.repeat(2100000));setInterval(()=>{},1000);}
@@ -124,11 +125,53 @@ test('per-packet schema limits exact evidence IDs without mutating input or the 
  const f=fixture();try{
   const before=JSON.stringify(f.packet),template=JSON.stringify(CODEX_DRAFT_SCHEMA),schema=codexDraftSchema(f.packet),id=f.packet.input.evidence[0].id;
   assert.deepEqual(schema.properties.sections.items.properties.sourceIds.items.enum,[id]);
-  assert.deepEqual(schema.properties.materialityReviews.items.properties.citations.items.properties.evidenceId.enum,[id]);
+  assert.deepEqual(schema.properties.citationPool.items.properties.evidenceId.enum,[id]);
   const other=structuredClone(f.packet);other.input.evidence[0].id='material:another';other.inputHash=digest(other.input);
   assert.notEqual(digest(schema),digest(codexDraftSchema(other)));assert.deepEqual(schema.properties.sections.items.properties.sourceIds.items.enum,[id]);
   const empty=structuredClone(f.packet);empty.input.evidence=[];empty.inputHash=digest(empty.input);const e=codexDraftSchema(empty);
   assert.equal(e.properties.sections.items.properties.sourceIds.maxItems,0);assert.equal(e.properties.materialityReviews.items.properties.citations.maxItems,0);
   assert.equal(JSON.stringify(e).includes('"enum":[]'),false);assert.equal(JSON.stringify(f.packet),before);assert.equal(JSON.stringify(CODEX_DRAFT_SCHEMA),template);
  }finally{f.store.close();}
+});
+
+
+test('actual child receives a compact prompt but returned provenance and citation validation stay bound to the full original input',async()=>{
+ const f=fixture(),cli=await fakeCli();try{
+  const {packetQuantities}=await import('../shared/source-quantities.mjs');
+  f.packet.input.evidence[0].material.body='原币USD 100。'.repeat(100);
+  f.packet.input.quantityEvidence=packetQuantities(f.packet.input.evidence);f.packet.inputHash=digest(f.packet.input);
+  const before=JSON.stringify(f.packet),sent=JSON.parse(codexPrompt(f.packet).split('材料包开始（数据）：\n')[1].split('\n材料包结束。')[0]);assert(sent.promptView);assert.equal(sent.frozenInputHash,f.packet.inputHash);assert.notEqual(sent.inputHash,f.packet.inputHash);
+  const result=await generateCodexDraft(f.packet,{binary:cli.binary,model:'echo',timeoutMs:5000});assert.equal(result.trace.inputHash,f.packet.inputHash);assert.equal(result.trace.promptHash,digest(codexPrompt(f.packet)));assert.equal(result.trace.promptVersion,'codex-research-22');assert.deepEqual(result.sections[0].sourceIds,[f.packet.input.evidence[0].id]);assert.equal(JSON.stringify(f.packet),before);
+ }finally{f.store.close();await cli.cleanup();}
+});
+
+
+test('runtime diagnostics retain safe observed milestones on timeout without claiming completed usage or exposing messages',async()=>{
+ const f=fixture(),cli=await fakeCli();try{
+  await assert.rejects(generateCodexDraft(f.packet,{binary:cli.binary,model:'diagnostic-stall',timeoutMs:5000}),error=>{
+   assert.equal(error.code,'timeout');const r=error.trace.runtime,d=r.inference;
+   assert.equal(r.version,'codex-runtime/1');assert.equal(r.phase,'inference');assert.equal(r.promptBytes,Buffer.byteLength(codexPrompt(f.packet)));assert.equal(r.schemaBytes,Buffer.byteLength(JSON.stringify(codexDraftSchema(f.packet))));
+   assert.equal(r.versionCheck.exitCode,0);assert.equal(d.turnCompleted,false);assert.equal(d.observedUsage,null);assert.equal(error.trace.usage,undefined);assert.equal(d.termination,'timeout');assert(d.durationMs>=5000);assert(d.stdoutBytes>0&&d.stderrBytes>0);
+   assert.deepEqual(d.counts,{events:5,reasoning:1,agentMessage:1,warnings:1,disallowedItems:0});
+   for(const field of ['firstEventMs','threadStartedMs','turnStartedMs','firstReasoningEventMs','firstAgentMessageMs','terminationRequestedMs'])assert(Number.isSafeInteger(d.milestones[field])&&d.milestones[field]>=0);
+   assert(d.milestones.turnStartedMs<=d.milestones.firstAgentMessageMs);assert(d.milestones.firstAgentMessageMs<=d.milestones.terminationRequestedMs);assert.equal(d.milestones.agentMessageCompletedMs,undefined);
+   assert.doesNotMatch(JSON.stringify(error),/password|private warning|secret reasoning|partial private|example.invalid/);return true;
+  });
+ }finally{f.store.close();await cli.cleanup();}
+});
+test('completed protocol records output and completed usage; validation and launch failures preserve their actual phase',async()=>{
+ const f=fixture(),cli=await fakeCli();try{
+  const candidate=await generateCodexDraft(f.packet,{binary:cli.binary,model:'echo',timeoutMs:5000}),r=candidate.trace.runtime,d=r.inference;
+  assert.equal(r.phase,'complete');assert.equal(r.outputBytes,Buffer.byteLength(candidate.rawOutput));assert.equal(d.turnCompleted,true);assert.deepEqual(d.observedUsage,{input_tokens:25,output_tokens:10});assert.equal(d.termination,null);assert.equal(d.exitCode,0);assert.equal(d.exitSignal,null);assert(d.milestones.agentMessageCompletedMs<=d.milestones.turnCompletedMs);
+  await assert.rejects(generateCodexDraft(f.packet,{binary:cli.binary,model:'invalid-json',timeoutMs:5000}),e=>e.code==='output'&&e.trace.runtime.phase==='validate-output'&&e.trace.runtime.inference.turnCompleted);
+  await assert.rejects(generateCodexDraft(f.packet,{binary:join(cli.dir,'missing'),model:'echo',timeoutMs:5000}),e=>e.code==='unavailable'&&e.trace.runtime.phase==='version'&&!e.trace.runtime.versionCheck.spawned&&!e.trace.runtime.inference);
+  await assert.rejects(generateCodexDraft(f.packet,{binary:cli.binary,model:'echo',signal:AbortSignal.abort(),timeoutMs:5000}),e=>e.code==='cancelled'&&e.trace.runtime.phase==='version'&&!e.trace.runtime.versionCheck.spawned&&!e.trace.runtime.inference);
+ }finally{f.store.close();await cli.cleanup();}
+});
+test('blocked tools retain only observed counts and never serialize attempted command contents',async()=>{
+ const f=fixture(),cli=await fakeCli();try{
+  await assert.rejects(generateCodexDraft(f.packet,{binary:cli.binary,model:'tool',timeoutMs:5000}),e=>{
+   assert.equal(e.code,'tool');assert.equal(e.trace.runtime.phase,'inference');assert.equal(e.trace.runtime.inference.counts.disallowedItems,1);assert.equal(e.trace.runtime.inference.turnCompleted,false);assert.doesNotMatch(JSON.stringify(e),/secret command/);return true;
+  });
+ }finally{f.store.close();await cli.cleanup();}
 });

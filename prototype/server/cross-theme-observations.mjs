@@ -4,7 +4,7 @@ const ENGINE='cross-theme-review/2',accountId='cross-theme';
 const digest=x=>hash(JSON.stringify(x));
 // Evidence overlap is a review condition, not a correlation estimate or a new trading limit.
 export function crossThemeCandidates(snapshots,topics,clustersForTopic=()=>[]){
- const byTopic=new Map(topics.map(t=>[t.id,t])),groups=new Map(),missing=[],entries=[];
+ const byTopic=new Map([...snapshots.flatMap(s=>s.researchTopics||[]),...topics].map(t=>[t.id,t])),groups=new Map(),missing=[],entries=[];
  const add=(kind,id,entry,basis,current)=>{
   const key=kind+':'+id,g=groups.get(key)||{kind,id,entries:new Map(),bases:new Map(),current:true};
   g.entries.set(entry.key,entry);g.bases.set(entry.topicId,basis);g.current&&=current;groups.set(key,g);
@@ -13,7 +13,7 @@ export function crossThemeCandidates(snapshots,topics,clustersForTopic=()=>[]){
   if(!s.book)continue;const {book:b,quotes,at}=s;
   for(const x of [...b.lots.map(l=>({kind:'lot',record:l})),...b.orders.filter(o=>working(o)&&o.side==='buy'&&o.qty>o.filledQty).map(o=>({kind:'buy-order',record:o}))]){
    const r=x.record,q=quotes[r.symbol],issuer=x.kind==='lot'?r.issuerId:r.approval?.evidence?.quotes?.[r.symbol]?.issuerId,issues=[...quoteIssues(r.symbol,q,b.config,at),...issuerIssues(r.symbol,issuer,q)],qty=x.kind==='lot'?r.qty:r.qty-r.filledQty;
-   const topic=byTopic.get(r.topicId),entry={key:`${s.accountId}:${x.kind}:${r.id}`,accountId:s.accountId,kind:x.kind,id:r.id,topicId:r.topicId,topicVersion:topic?.version??null,topicTitle:topic?.title||'研究缺失',symbol:r.symbol,qty,record:structuredClone(r),quote:q?structuredClone(q):null,bookVersion:b.version,valueCents:null};
+   const link=x.kind==='lot'?s.holdingResearchLinks?.find(l=>l.lotId===r.id):null,topic=byTopic.get(r.topicId),entry={key:`${s.accountId}:${x.kind}:${r.id}`,accountId:s.accountId,kind:x.kind,id:r.id,topicId:r.topicId,topicVersion:topic?.version??null,topicTitle:topic?.title||'研究缺失',symbol:r.symbol,qty,record:structuredClone(r),quote:q?structuredClone(q):null,bookVersion:b.version,monitoringLink:link||null,valueCents:null};
    if(!issues.length)try{entry.valueCents=amount(qty,q.mark,q.fx.usdPerUnit);}catch{issues.push('估值金额无效');}
    entry.valuationIssues=issues;entries.push(entry);
    // Both fills and approvals retain their original issuer; changed quotes cannot regroup exposure.
@@ -25,8 +25,8 @@ export function crossThemeCandidates(snapshots,topics,clustersForTopic=()=>[]){
  }
  const clusters=new Map();
  for(const entry of entries){
-  const topic=byTopic.get(entry.topicId);if(!topic)continue;
-  if(!clusters.has(topic.id))clusters.set(topic.id,clustersForTopic(topic));
+  const topic=byTopic.get(entry.monitoringLink?.status==='current'?entry.monitoringLink.topicId:entry.topicId);if(!topic)continue;
+  if(!clusters.has(topic.id))clusters.set(topic.id,topic.researchSubject?.kind==='event-cluster'?[{id:topic.researchSubject.id,status:topic.status,health:{current:topic.status==='active'},bindingCurrent:topic.status==='active'}]:clustersForTopic(topic));
   for(const c of clusters.get(topic.id)){
    const current=c.status==='active'&&c.health?.current===true&&c.bindingCurrent===true;
    add('event-cluster',c.id,entry,structuredClone(c),current);

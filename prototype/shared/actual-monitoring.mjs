@@ -1,10 +1,10 @@
 // Read-only freshness projection. Old observations remain inspectable, but are
 // never presented as checks of a newer holding, research or rule definition.
-export const actualCheckNames={'research-status':'研究关联','research-version':'研究变化',counterevidence:'反向线索','review-due':'复核期限','price-coverage':'价格条件覆盖'};
-export function projectActualMonitoring(record,topic,{checks=[],rules=[],operations={},watching=[],at}={}){
+export const actualCheckNames={'research-status':'研究关联','research-version':'研究变化',counterevidence:'反向线索','review-due':'复核期限','price-coverage':'价格条件覆盖','research-continuity':'当前研究接续','research-exitCondition':'系统退出条件','research-invalidation':'系统失效条件','research-nextCheck':'系统复核条件','research-exit-advice':'当前减仓 / 退出建议'};
+export function projectActualMonitoring(record,topic,{checks=[],rules=[],operations={},watching=[],at,researchContextHash=null}={}){
  const task=operations.observations,rows=checks.filter(c=>c.recordId===record.id),applicable=rules.filter(r=>r.topicId===record.topicId),watch=watching.find(w=>w.recordId===record.id);
  const checkedAt=rows.map(r=>r.checkedAt).sort()[0]||null;
- const changed=rows.some(c=>c.recordVersion!==record.version||c.topicVersion!==(topic?.version??null)||c.ruleId&&applicable.find(r=>r.id===c.ruleId)?.version!==c.ruleVersion)||applicable.some(r=>!rows.some(c=>c.ruleId===r.id)&&(!r.definition.conditions.some(c=>c.symbol)||r.definition.conditions.some(c=>c.symbol===record.symbol)));
+ const changed=rows.some(c=>c.recordVersion!==record.version||c.topicVersion!==(topic?.version??null)||researchContextHash&&c.researchContextHash!==researchContextHash||c.ruleId&&applicable.find(r=>r.id===c.ruleId)?.version!==c.ruleVersion)||applicable.some(r=>!rows.some(c=>c.ruleId===r.id)&&(!r.definition.conditions.some(c=>c.symbol)||r.definition.conditions.some(c=>c.symbol===record.symbol)));
  const late=checkedAt&&(!Number.isFinite(Date.parse(checkedAt))||Date.parse(checkedAt)>Date.parse(at)||Date.parse(at)-Date.parse(checkedAt)>120000);
  const state=task?.paused?'paused':task?.blocked||task?.outcome==='error'?'failed':!rows.length?'pending':changed?'changed':late?'stale':!task?'unavailable':'checked';
  const labels={paused:'巡检已暂停',failed:'巡检失败，保留上次结果',pending:'等待首次巡检',changed:'输入已变化，等待复核',stale:'巡检已延迟，保留上次结果',unavailable:'巡检任务状态未知',checked:'后台已检查'};

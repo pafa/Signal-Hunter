@@ -46,3 +46,22 @@ test('historical membership never overrides a current owner and stale or ambiguo
  const noAnchor=groupEventResearch(topics,{eventClusters:[c,cluster({id:'conflicting-current'})]});assert.equal(noAnchor.length,3);assert(noAnchor.every(r=>!r.cluster&&r.topics.length));assert(noAnchor.find(r=>r.topics[0].id==='old').groupStale);
  const archived=groupEventResearch([topic('a'),topic('b'),topic('old',{status:'archived'})],{eventClusters:[c]});assert.equal(archived.length,1);assert.equal(archived[0].historicalTopics[0].status,'archived');
 });
+
+const sourceGroup=(extra={})=>({id:'source-history:old',title:'Current source occurrence',currentTopicId:'a',materialRevision:3,history:[{kind:'source-succession',topicId:'old',currentTopicId:'a',materialRevision:1},{kind:'source-succession',topicId:'middle',currentTopicId:'a',materialRevision:2}],...extra});
+test('source history preserves all original records and holding risks without counting retired companies or updates as current',()=>{
+ const topics=[topic('old',{companies:[{symbol:'OLD.US'}],updatedAt:'2030-01-01T00:00:00Z'}),topic('middle'),topic('a'),topic('other')],before=structuredClone(topics);
+ const rows=groupEventResearch(topics,{sourceHistory:{groups:[sourceGroup()],warnings:[]},events:[{id:'old',risk:true}],accounts:[{positions:[{topicId:'old',symbol:'OLD.US'}]}]});
+ assert.equal(rows.length,2);const r=rows[0];assert.equal(r.id,'source-history:old');assert.equal(r.cluster,null);assert.equal(r.topics[0].id,'a');assert.equal(r.historicalTopics.length,2);assert.equal(r.history.length,2);assert.equal(r.positions,1);assert(r.historicalRisk);assert.equal(r.companyCount,1);assert.equal(r.updatedAt,topic('a').updatedAt);assert.deepEqual(topics,before);
+});
+test('source history never overrides a different current owner or competing correspondence',()=>{
+ const topics=[topic('old'),topic('middle'),topic('a'),topic('b')],h=sourceGroup();
+ for(const eventClusters of [[cluster({topicIds:['old','b']})],[cluster({topicIds:['old','a']})]]){
+  const rows=groupEventResearch(topics,{sourceHistory:{groups:[h],warnings:[]},eventClusters});assert.equal(rows.flatMap(r=>r.allTopics).length,4);assert.equal(rows.flatMap(r=>r.historicalTopics).length,0);assert(rows.some(r=>r.sourceStale));
+ }
+ const conflict=groupEventResearch(topics,{sourceHistory:{groups:[h,sourceGroup({id:'conflict',currentTopicId:'b'})],warnings:[]}});assert.equal(conflict.length,4);assert(conflict.every(r=>r.sourceStale));
+});
+test('source history coexists with cluster history and invalid proof remains visible separately',()=>{
+ const topics=[topic('old'),topic('middle'),topic('a'),topic('b'),topic('cluster-old')],c=cluster({history:[{topicId:'cluster-old',currentTopicId:'b',materialRevision:1,clusterVersion:2}]});
+ const rows=groupEventResearch(topics,{eventClusters:[c],sourceHistory:{groups:[sourceGroup()],warnings:[]}});assert.equal(rows.length,1);assert.equal(rows[0].topics.length,2);assert.equal(rows[0].historicalTopics.length,3);assert.equal(rows[0].history.length,3);
+ const invalid=groupEventResearch(topics,{sourceHistory:{groups:[],warnings:['old','a']}});assert.equal(invalid.length,5);assert(invalid.find(r=>r.topics[0].id==='old').sourceStale);
+});

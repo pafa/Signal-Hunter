@@ -7,6 +7,18 @@ import {createService} from '../server/service.mjs';
 import {createHandler} from '../server/index.mjs';
 import {strategyProfiles} from '../shared/strategy-profiles.mjs';
 import {executionFeedFixture} from './fixtures/execution-feed.mjs';
+test('a delayed quote cannot fill the remaining approved order after a newer partial fill',async()=>{
+ const f=executionFeedFixture(),store=openStore(':memory:');let now=Date.parse('2026-10-06T14:00:00Z');const service=createService(store,{mode:'research',executionConfig:f.config,now:()=>now,fetcher:()=>assert.fail('no external network')});
+ const sim=service.marketSimulations.steady,cmd=extra=>({requestId:randomUUID(),version:sim.snapshot().version,...extra}),at=()=>new Date(now).toISOString();
+ try{
+  f.write([f.quote(at())]);service.executionInputs.refresh();sim.initialize(cmd({initialUSD:500000,config:{...strategyProfiles.steady.suggestedConfig,slippageBps:0},confirmSimulation:true}));
+  let topic=service.research.create({title:'Synthetic out-of-order execution',summary:'Fixture only'});topic=service.research.addCompany(topic.id,{version:topic.version,symbol:'AAPL.US',note:'Fixture'});
+  sim.propose(cmd({order:{topicId:topic.id,topicVersion:topic.version,symbol:'AAPL.US',side:'buy',qty:100,limitPrice:'101',budgetUSD:10200,expiresAt:'2026-10-06T14:30:00Z',holdUntil:'2026-10-07T14:00:00Z',thesis:'Fixture',trigger:'Fixture',invalidation:'Fixture'}}));const o=sim.snapshot().orders[0],review=sim.review(o.id);sim.decide(o.id,cmd({action:'approve',fingerprint:review.fingerprint,note:'Synthetic human approval',confirmSimulation:true}));
+  now+=2000;f.write([f.quote(at(),{availableBuy:40})]);service.executionInputs.refresh();sim.process();const first=sim.snapshot();assert.equal(first.fills.length,1);assert.equal(first.orders[0].filledQty,40);
+  now+=1000;f.write([f.quote('2026-10-06T14:00:01Z',{availableBuy:60})]);service.executionInputs.refresh();sim.process();const delayed=sim.snapshot();assert.equal(delayed.fills.length,1);assert.equal(delayed.orders[0].filledQty,40);assert.equal(delayed.cashCents,first.cashCents);assert.deepEqual(delayed.fills,first.fills);
+  now+=1000;f.write([f.quote(at(),{availableBuy:60})]);service.executionInputs.refresh();sim.process();const resumed=sim.snapshot();assert.equal(resumed.fills.length,2);assert.equal(resumed.orders[0].filledQty,100);assert.deepEqual(resumed.fills[0],first.fills[0]);assert.deepEqual(resumed.orders[0].approval,first.orders[0].approval);
+ }finally{await service.close();store.close();f.close();}
+});
 test('private server frame → human approval → fresh partial fills → sale and settlement survives restart',async()=>{
  const f=executionFeedFixture(),path=join(f.dir,'isolated.sqlite');let now=Date.parse('2026-10-06T14:00:00Z'),store=openStore(path),service;
  const start=()=>{service=createService(store,{mode:'research',executionConfig:f.config,now:()=>now,fetcher:async()=>{throw Error('Synthetic integration must not request live data');}});for(const name of Object.keys(service.operations().tasks))service.controlOperation(name,'pause');};

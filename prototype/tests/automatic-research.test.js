@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {openStore} from '../server/store.mjs';
 import {createService} from '../server/service.mjs';
 import {assertDatabaseMode} from '../server/runtime.mjs';
-import {digest} from '../server/codex-research.mjs';
+import {digest,CodexResearchError} from '../server/codex-research.mjs';
 import {automaticIdentity} from '../server/pipeline-event-automation.mjs';
 import {createHandler} from '../server/index.mjs';
 import {createPersistentScheduler} from '../server/persistent-scheduler.mjs';
@@ -31,7 +31,7 @@ function fixture({path=':memory:',extractRunner=extraction,entityRunner=identity
  let clock=Date.parse(at),reads=0;const calls={extract:0,identity:0,dossier:0},packets=[],store=openStore(path);assertDatabaseMode(store,'research');
  const service=createService(store,{mode:'research',modelConfig:config,now:()=>clock,sourceReader:async url=>{reads++;return reader?reader(url):{url,title:'合成重大事项原文',sourceName:'合成',body,scope:'extracted-text'};},materialEventRunner:async p=>{calls.extract++;return extractRunner(p);},companyEntityRunner:async p=>{calls.identity++;return entityRunner(p);},modelRunner:async p=>{calls.dossier++;packets.push(p);return modelRunner(p);}});
  const queue=service.researchPipeline;
- if(queue.snapshot().settings.version===1)queue.configure({version:1,dailyCalls:10,includeClues:false,extractEvents:true,automatic:true});
+ if(queue.snapshot().settings.version===1)queue.configure({version:1,dailyCalls:10,includeClues:false,extractEvents:true,automatic:true,researchPrices:false,directoryMarkets:[]});
  const news={id:digest('automatic-source'),title:'Company files for bankruptcy',url:'https://example.com/synthetic',publisher:'合成',publishedAt:at};
  const add=(item=news)=>{store.ingest([item],new Date(clock).toISOString());service.research.process();};
  const finish=async()=>{for(const row of store.db.prepare('SELECT * FROM research_pipeline_event_jobs WHERE run_id IS NOT NULL').all())await (row.kind==='extract'?service.materialEvents:row.kind==='identity'?service.companyEntities:service.modelResearch).wait(row.run_id);};
@@ -67,6 +67,29 @@ test('automatic model retries respect backoff, share quota and retain failed att
   f.advance(60001);const s=await f.drive();assert.equal(f.calls.extract,2);assert.equal(s.counts['no-signal'],1);assert.equal(s.callsInLast24Hours,2);assert.equal(f.store.db.prepare("SELECT count(*) n FROM material_event_runs WHERE status='failed'").get().n,1);
  }finally{await f.close();}
 });
+
+test('automatic event progress describes the current run instead of retaining a previous preparation or retry reason',async()=>{
+ let rejectRun,entered;const started=new Promise(r=>entered=r);
+ const f=fixture({extractRunner:p=>{if(f.calls.extract===1){entered();return new Promise((resolve,reject)=>rejectRun=reject);}return extraction(p,[]);}});
+ try{
+  f.add();await f.step();
+  const row=f.store.db.prepare("SELECT * FROM research_pipeline_event_jobs WHERE kind='extract'").get();
+  f.store.db.prepare('UPDATE research_pipeline_event_jobs SET payload=? WHERE id=?').run(JSON.stringify({...JSON.parse(row.payload),reason:'先前准备已结束'}),row.id);
+  const pending=f.step();await started;
+  assert.equal(f.queue.snapshot().events.items[0].reason,'正在识别事项');
+  rejectRun(new CodexResearchError('timeout'));await pending;
+  assert.equal(f.queue.snapshot().events.items[0].status,'failed');
+  assert.equal(f.queue.snapshot().events.items[0].reason,'本次调用超时，后台将按原限次规则处理；失败记录保留');
+  await f.step();assert.equal(f.queue.snapshot().events.items[0].reason,'调用未完成，后台等待限次重试');assert(f.queue.snapshot().events.items[0].retryAt);
+  f.advance(60001);await f.step();
+  assert.equal(f.queue.snapshot().events.items[0].status,'candidate');
+  assert.equal(f.queue.snapshot().events.items[0].reason,'模型结果已返回，后台正在核对并保存');
+  assert.equal(f.queue.snapshot().events.items[0].retryAt,null);
+  await f.drive(3);assert.equal(f.queue.snapshot().counts['no-signal'],1);
+  const kept=JSON.parse(f.store.db.prepare("SELECT payload FROM material_event_runs WHERE status='failed'").get().payload);
+  assert.equal(kept.failure.code,'timeout');assert.equal(f.calls.extract,2);
+ }finally{rejectRun?.(new CodexResearchError('cancelled'));await f.close();}
+});
 test('failed identity stops after three calls and continues a dossier with unknown companies',async()=>{
  const f=fixture({extractRunner:p=>extraction(p,[quotes[0]]),entityRunner:()=>{throw Error('synthetic');}});try{
   f.add();await f.drive(8);assert.equal(f.calls.identity,1);f.advance(60001);await f.drive(5);assert.equal(f.calls.identity,2);f.advance(120001);const s=await f.drive();
@@ -81,6 +104,21 @@ test('source preparation retries autonomously after backoff and reuses its origi
   f.add();await f.drive(3);assert.equal(f.reads,1);assert.equal(f.calls.extract,0);fail=false;f.advance(60001);const s=await f.drive();assert.equal(f.reads,2);assert.equal(s.counts['no-signal'],1);assert.equal(f.service.research.list().length,1);assert.equal(f.store.db.prepare('SELECT count(*) n FROM research_source_attempts').get().n,2);
  }finally{await f.close();}
 });
+test('exhausted source preparation settles on the next tick without waiting for an unusable fourth retry',async()=>{
+ const f=fixture({reader:()=>{throw Error('synthetic persistent failure');}});try{
+  f.add();await f.drive(3);assert.equal(f.reads,1);f.advance(60001);await f.drive(3);assert.equal(f.reads,2);f.advance(120001);await f.step();assert.equal(f.reads,3);
+  const row=f.store.db.prepare('SELECT * FROM research_pipeline_items').get(),failed=JSON.parse(row.payload),attempts=f.store.db.prepare('SELECT * FROM research_source_attempts ORDER BY id').all();assert.equal(row.status,'failed');assert(failed.nextRetryAt>Date.parse(at)+180002);
+  await f.step();const settled=f.store.db.prepare('SELECT * FROM research_pipeline_items WHERE id=?').get(row.id),payload=JSON.parse(settled.payload);assert.equal(settled.status,'observing');assert.equal(payload.nextRetryAt,null);assert.match(payload.reason,/3 次/);assert.equal(payload.prepareAttempts,3);
+  await f.drive(8);assert.equal(f.reads,3);assert.equal(f.queue.snapshot().counts.observing,1);assert.deepEqual(f.store.db.prepare('SELECT * FROM research_source_attempts ORDER BY id').all(),attempts);assert.deepEqual(f.calls,{extract:0,identity:0,dossier:0});
+ }finally{await f.close();}
+});
+test('settling an exhausted preparation still preserves a user edit and invalidates the old source basis',async()=>{
+ const f=fixture({reader:()=>{throw Error('synthetic persistent failure');}});try{
+  f.add();await f.drive(3);f.advance(60001);await f.drive(3);f.advance(120001);await f.step();assert.equal(f.reads,3);const source=f.queue.snapshot().items[0],topic=f.service.research.get(source.topicId),edited=f.service.research.update(topic.id,{version:topic.version,nextEvidence:'User keeps this changed research'});
+  await f.step();assert.equal(f.queue.snapshot().counts.invalidated,1);assert.deepEqual(f.service.research.get(topic.id),edited);await f.drive(4);assert.equal(f.reads,3);
+ }finally{await f.close();}
+});
+
 test('user editing an automatically created event preserves the edit and moves the source to observation',async()=>{
  const f=fixture();try{
   f.add();await f.drive(3);const topic=f.service.research.list().find(t=>t.eventExtraction);assert(topic);f.service.research.update(topic.id,{version:topic.version,nextEvidence:'本人保留的研究判断'});
