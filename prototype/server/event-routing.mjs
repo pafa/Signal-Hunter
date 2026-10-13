@@ -1,19 +1,20 @@
 // Headline routing only: patterns identify questions to investigate, never verified facts.
+// Each lookahead group needs one attempt per line, not one per character.
 const rules = [
- ['project-risk','项目 / 履约风险',/\bforce majeure\b|不可抗力|(?=.*(?:data cent(?:er|re)|power|financing|funding|数据中心|电力|融资))(?=.*(?:project|construction|项目|建设))(?=.*(?:delay|halt|suspend|cancel|延期|暂停|取消))/iu,'履约通知还是推测、融资与电力瓶颈、合同责任、相对项目敞口及替代方案'],
- ['investment','资本开支 / 投资计划',/(?=.*(?:invest(?:ment|s|ing)?|capex|capital spending|投资|资本开支))(?=.*(?:billion|million|亿美元|亿元))(?=.*(?:plans?|announc|commits?|raises?|cuts?|计划|宣布|承诺|上调|下调))/iu,'新计划还是既定承诺、总额与年度额、融资成本、回报周期及相对现金流'],
- ['policy','政策 / 市场准入',/(?=.*(?:export ban|export control|tariff|carbon emission|social media|chatbots?|free trade|permits?|出口|关税|准入|排放|许可证))(?=.*(?:ban|repeal|propos|plan|halt|restrict|limit|deal|禁令|撤销|计划|限制|协议))/iu,'提案、报道、否认与生效分开；行业敞口及适用范围'],
- ['industrial-deal','产业合作 / 投资',/(?=.*(?:deal|agreement|concessions?|合作|协议|让步))(?=.*(?:manufactur|make.*chips|production|investment|制造|投资|产能))/iu,'谈判或已签、投资义务、商业化可行性与受益主体'],
- ['labor','劳资 / 供给风险',/(?=.*(?:union|workers?|employees?|工会|员工))(?=.*(?:strike|walkout|罢工|停工))/iu,'罢工准备或实际发生、产能比例、库存缓冲与持续期'],
- ['energy-forecast','能源供需预期',/(?=.*(?:oil|natural gas|copper|石油|天然气|铜))(?=.*(?:output|export|supply|demand|产量|出口|供需))(?=.*(?:cuts?|raises?|slash|revis|下调|上调|修订))(?=.*(?:forecast|outlook|预期|预测))/iu,'供需预测修订幅度、期限及上市公司业务敞口'],
+ ['project-risk','项目 / 履约风险',/\bforce majeure\b|不可抗力|^(?=.*(?:data cent(?:er|re)|power|financing|funding|数据中心|电力|融资))(?=.*(?:project|construction|项目|建设))(?=.*(?:delay|halt|suspend|cancel|延期|暂停|取消))/imu,'履约通知还是推测、融资与电力瓶颈、合同责任、相对项目敞口及替代方案'],
+ ['investment','资本开支 / 投资计划',/^(?=.*(?:invest(?:ment|s|ing)?|capex|capital spending|投资|资本开支))(?=.*(?:billion|million|亿美元|亿元))(?=.*(?:plans?|announc|commits?|raises?|cuts?|计划|宣布|承诺|上调|下调))/imu,'新计划还是既定承诺、总额与年度额、融资成本、回报周期及相对现金流'],
+ ['policy','政策 / 市场准入',/^(?=.*(?:export ban|export control|tariff|carbon emission|social media|chatbots?|free trade|permits?|出口|关税|准入|排放|许可证))(?=.*(?:ban|repeal|propos|plan|halt|restrict|limit|deal|禁令|撤销|计划|限制|协议))/imu,'提案、报道、否认与生效分开；行业敞口及适用范围'],
+ ['industrial-deal','产业合作 / 投资',/^(?=.*(?:deal|agreement|concessions?|合作|协议|让步))(?=.*(?:manufactur|make.*chips|production|investment|制造|投资|产能))/imu,'谈判或已签、投资义务、商业化可行性与受益主体'],
+ ['labor','劳资 / 供给风险',/^(?=.*(?:union|workers?|employees?|工会|员工))(?=.*(?:strike|walkout|罢工|停工))/imu,'罢工准备或实际发生、产能比例、库存缓冲与持续期'],
+ ['energy-forecast','能源供需预期',/^(?=.*(?:oil|natural gas|copper|石油|天然气|铜))(?=.*(?:output|export|supply|demand|产量|出口|供需))(?=.*(?:cuts?|raises?|slash|revis|下调|上调|修订))(?=.*(?:forecast|outlook|预期|预测))/imu,'供需预测修订幅度、期限及上市公司业务敞口'],
  ['deal','并购 / 控制权',/\b(?:acquir\w*|acquisition|takeover|merger|buyout)\b|收购|并购|重组/iu,'交易阶段、相对规模、融资与稀释'],
- ['approval','审批 / 商业化',/(?=.*(?:\bdrug\b|therapy|treatment|vaccine|disease|cancer|FDA|EMA|药|疗法|适应症))(?=.*(?:approv|authoriz|获批|批准))/iu,'正式审批范围、市场准入和原有预期'],
- ['clinical','临床 / 管线风险',/(?=.*(?:trial|clinical|study|临床|试验))(?=.*(?:fail|halt|stop|abandon|discontinu|terminat|失败|终止|未达))/iu,'试验阶段、终点、项目价值与其他管线'],
- ['recall','产品召回',/(?=.*(?:recalls?|召回))(?=.*(?:cars?|vehicles?|products?|devices?|food|batteries|units|汽车|车辆|产品|电池))/iu,'涉及范围、严重程度、补救成本与业务占比'],
- ['order','订单 / 交付',/(?=.*(?:orders?|contracts?|deal|订单|合同))(?=.*(?:billion|million|\d+\s*(?:aircraft|planes|jets)|亿美元|亿元|架飞机))(?=.*(?:wins?|signs?|lands?|secures?|finali[sz]|orders?|签署|获得|落实))/iu,'旧承诺还是新增订单、交付条件与利润'],
- ['supply','供给 / 产能冲击',/(?=.*(?:mine|plant|factory|production|output|refinery|supply|矿|工厂|产能|产量))(?=.*(?:\bhalts?\b|\bshutdown\b|\bshuts?\b|disrupt|suspend|停产|暂停|中断))/iu,'受损供给比例、库存、替代与恢复期限'],
+ ['approval','审批 / 商业化',/^(?=.*(?:\bdrug\b|therapy|treatment|vaccine|disease|cancer|FDA|EMA|药|疗法|适应症))(?=.*(?:approv|authoriz|获批|批准))/imu,'正式审批范围、市场准入和原有预期'],
+ ['clinical','临床 / 管线风险',/^(?=.*(?:trial|clinical|study|临床|试验))(?=.*(?:fail|halt|stop|abandon|discontinu|terminat|失败|终止|未达))/imu,'试验阶段、终点、项目价值与其他管线'],
+ ['recall','产品召回',/^(?=.*(?:recalls?|召回))(?=.*(?:cars?|vehicles?|products?|devices?|food|batteries|units|汽车|车辆|产品|电池))/imu,'涉及范围、严重程度、补救成本与业务占比'],
+ ['order','订单 / 交付',/^(?=.*(?:orders?|contracts?|deal|订单|合同))(?=.*(?:billion|million|\d+\s*(?:aircraft|planes|jets)|亿美元|亿元|架飞机))(?=.*(?:wins?|signs?|lands?|secures?|finali[sz]|orders?|签署|获得|落实))/imu,'旧承诺还是新增订单、交付条件与利润'],
+ ['supply','供给 / 产能冲击',/^(?=.*(?:mine|plant|factory|production|output|refinery|supply|矿|工厂|产能|产量))(?=.*(?:\bhalts?\b|\bshutdown\b|\bshuts?\b|disrupt|suspend|停产|暂停|中断))/imu,'受损供给比例、库存、替代与恢复期限'],
  ['capital','资本回报',/buybacks?|share repurchases?|回购/iu,'授权与实际执行、资金来源及稀释抵消'],
- ['regulatory','监管调查',/(?=.*(?:probes?|investigat|antitrust|调查|反垄断))(?=.*(?:regulator|regulatory|authorit|government|EU\b|US\b|China|监管|政府))/iu,'调查与处罚分开、业务敞口与适用范围'],
+ ['regulatory','监管调查',/^(?=.*(?:probes?|investigat|antitrust|调查|反垄断))(?=.*(?:regulator|regulatory|authorit|government|EU\b|US\b|China|监管|政府))/imu,'调查与处罚分开、业务敞口与适用范围'],
 ];
 // Select concrete financial enforcement notices, not speeches or procedural guidance.
 // Selection only requests research; proposals, denials and removal of orders remain unverified.
