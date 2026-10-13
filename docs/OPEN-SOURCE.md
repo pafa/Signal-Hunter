@@ -15,7 +15,7 @@ npm run release:prepare -- /absolute/new-directory
 
 最后一条命令的路径是占位示例，需换成尚不存在的新绝对路径。导出器只复制允许清单中的文件，并生成 `RELEASE-MANIFEST.json`，包含每个文件的 SHA-256 和大小。不使用 Git 暂存区、不提交、不联网，也不复制运行库、依赖目录和个人研究档案。遇到符号链接、可疑凭据、本机路径和断开的文档链接会失败。
 
-只使用导出的目录作为发布输入，不打包整个开发目录。两张产品介绍图是明确列入的公共资产，其余历史截图、附件和采集快照不进入候选。详见 [数据政策](DATA-POLICY.md)。
+只使用导出的目录作为发布输入，不打包整个开发目录。正式Release附该目录的源码压缩包及压缩包SHA-256，包内保留逐文件`RELEASE-MANIFEST.json`；标签绑定已合入主线的准确候选。两张产品介绍图是明确列入的公共资产，其余历史截图、附件和采集快照不进入候选。详见 [数据政策](DATA-POLICY.md)。
 
 ## 检查和验证
 
@@ -32,7 +32,7 @@ npm run release:prepare -- /absolute/new-directory
 - 协作：启用 Issues，使用仓库内的缺陷/功能表单与 PR 模板；文档在仓库维护，不依赖 Wiki。
 - 检查：启用 Actions，运行锁文件安装、测试、构建和发布检查；不配置模型或数据源密钥。
 - 安全：启用 Private vulnerability reporting，并实际核验私密入口；不要把 SECURITY.md 当作开关已经启用的证据。
-- 首版：标记 early preview / prerelease，附能力边界、运行说明与候选校验记录，不把本地测试写成远端 CI 通过。
+- 版本：v0.11.0首次预览保留 early preview / prerelease 历史；获批的v1.0.0使用正式Release与准确提交标签。附能力边界、运行说明和校验记录，不把本地测试写成远端CI通过。
 
 GitHub 的表单与私密报告配置分别依据 [Issue forms 文档](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms) 和 [Private vulnerability reporting 文档](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)。这些是待应用的设置说明，实际状态以远端核验结果为准。
 

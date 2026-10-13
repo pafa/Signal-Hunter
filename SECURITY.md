@@ -20,12 +20,12 @@
 
 ## 支持状态
 
-v0.11.0 为 early preview，目前没有承诺的安全维护周期。公网部署、多租户和完整渗透测试未验收。操作系统测试范围见任务清单。
+v1.0.0 为本地单用户正式版，目前没有承诺的安全维护周期。公网部署、多租户和完整渗透测试未验收。操作系统测试范围见任务清单；正式版本号不扩大这些支持边界。
 
 ## English
 
 Signal Hunter is a local, single-user research tool. It does not provide authentication, encrypted storage, multi-tenant isolation, or broker execution. Do not expose its ports directly. Approval is a workflow decision, not proof of identity.
 
-Once private vulnerability reporting is enabled, use the repository's **Security → Advisories → Report a vulnerability** flow. Include affected versions, a minimal synthetic reproduction, impact, and any mitigation. If the button is unavailable, ask for a private channel in a non-sensitive issue without disclosing exploit details. Never attach credentials or private databases. This early preview has no promised security support lifetime.
+Once private vulnerability reporting is enabled, use the repository's **Security → Advisories → Report a vulnerability** flow. Include affected versions, a minimal synthetic reproduction, impact, and any mitigation. If the button is unavailable, ask for a private channel in a non-sensitive issue without disclosing exploit details. Never attach credentials or private databases. The v1.0.0 local, single-user release has no promised security support lifetime; its release status does not establish public-hosting or multi-tenant security.
 
 CI runs `npm audit --audit-level=high` against the locked dependency tree. High and critical advisories or an unavailable audit service block this check; a successful result is not a complete security assessment. Review lower-severity findings as well.
