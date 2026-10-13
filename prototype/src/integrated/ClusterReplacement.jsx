@@ -1,3 +1,4 @@
+import {semanticKinds} from '../../shared/semantic-labels.mjs';
 import React,{useState} from 'react';
 import {Button} from '../major/Primitives';
 import {request} from '../major/api';
@@ -5,7 +6,7 @@ import {EventTime} from '../major/MaterialEvents';
 const key=m=>m.kind==='event'?`event:${m.id}`:m.kind==='material'?`material:${m.documentId}`:`news:${m.id}`;
 export function ReplacementEvidence({replacement}){
  if(!replacement)return null;
- return <section aria-label="事项延续依据"><p>本人核对同一材料更新前后的事项对应；此决定不代表模型已验证两个版本是同一事件。</p>{replacement.mappings.map(({before,after})=><article className="source-item" key={before.id}><div className="event-pair">{[[before,'原事项'],[after,'新事项']].map(([m,label])=><div key={label}><strong>{label}：{m.title}</strong><p>{m.sourceTitle||m.title} · 材料 v{m.materialRevision}</p><p>{m.eventFocus.actor} · {m.eventFocus.action} · {m.eventFocus.object} · {m.eventFocus.stage}</p><blockquote>{m.eventFocus.quote}</blockquote><EventTime event={m.eventFocus}/><small>研究 ID：{m.id}</small></div>)}</div></article>)}</section>;
+ return <section aria-label="事项延续依据"><p>{replacement.correspondence?'系统逐一核对旧版事项与同文档新版候选，唯一对应且新版归组一致后延续；旧材料仅作历史依据，不计入当前成员。':replacement.method==='system-complete-pair-same-document-new-revision'?'系统比较新版全部事项与保留成员后，保存唯一的事项对应；原研究与版本保留，事实仍未核实。':'本人核对同一材料更新前后的事项对应；此决定不代表模型已验证两个版本是同一事件。'}</p>{replacement.mappings.map(({before,after})=><article className="source-item" key={before.id}><div className="event-pair">{[[before,'原事项'],[after,'新事项']].map(([m,label])=><div key={label}><strong>{label}：{m.title}</strong><p>{m.sourceTitle||m.title} · 材料 v{m.materialRevision}</p><p>{m.eventFocus.actor} · {m.eventFocus.action} · {m.eventFocus.object} · {m.eventFocus.stage}</p><blockquote>{m.eventFocus.quote}</blockquote><EventTime event={m.eventFocus}/><small>研究 ID：{m.id}</small></div>)}</div></article>)}{replacement.correspondence&&<details><summary>新旧对应的完整比较依据 · {replacement.correspondence.pairs.length} 对</summary>{replacement.correspondence.pairs.map(p=><article className="source-item" key={p.basis.runId}><strong>{p.left.title} → {p.right.title}</strong><p>旧材料 v{p.left.materialRevision} / 新材料 v{p.right.materialRevision} · {semanticKinds[p.basis.comparison.relation]}</p><p>{p.basis.comparison.reason}</p><blockquote>旧版：{p.basis.comparison.left.quote}</blockquote><blockquote>新版：{p.basis.comparison.right.quote}</blockquote><small>模型 {p.basis.model} · 比较 {p.basis.runId}</small></article>)}</details>}</section>;
 }
 export default function ClusterReplacement({record,group,batchId,busy,onSaved,onWorkingChange=()=>{}}){
  const [mapping,setMapping]=useState({}),[note,setNote]=useState(''),[preview,setPreview]=useState(null),[error,setError]=useState(''),[working,setWorking]=useState(false);

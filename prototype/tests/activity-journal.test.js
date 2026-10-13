@@ -46,3 +46,30 @@ test('opt-in idle backoff is bounded, leaves acquisition lanes unchanged and man
  let clock=now();const scheduler=createPersistentScheduler(db,{fixtureIdle:()=>({skipped:'no-queued-items'}),fixtureQuote:()=>({skipped:'cooldown'})},{now:()=>clock,intervals:{fixtureIdle:10000,fixtureQuote:10000},idleBackoff:['fixtureIdle']});
  try{await scheduler.run('fixtureIdle');assert.equal(Date.parse(scheduler.snapshot().fixtureIdle.nextRunAt)-clock,30000);clock+=30000;await scheduler.run('fixtureIdle');assert.equal(Date.parse(scheduler.snapshot().fixtureIdle.nextRunAt)-clock,60000);await scheduler.run('fixtureQuote');assert.equal(Date.parse(scheduler.snapshot().fixtureQuote.nextRunAt)-clock,10000);await scheduler.run('fixtureIdle',{force:true});assert.equal(scheduler.history()[0].name,'fixtureIdle');}finally{await scheduler.stop();}
 }));
+
+test('child financial activity filters and opens the owning research instead of the source root, without changing journal rows',()=>fixture(({db,service})=>{
+ const item='financial-parent',other='other-parent',root='source-root',child='financial-child',unrelated='unrelated-child';
+ for(const [id,topic] of [[item,root],[other,'other-root']])db.prepare('INSERT INTO research_pipeline_items VALUES(?,?,?,?,?,?,?,?)').run(id,(id===item?'a':'b').repeat(64),1,'rules','completed',topic,null,JSON.stringify({title:topic}));
+ for(const [id,parent,topic] of [['financial-job',item,child],['unrelated-job',other,unrelated]])db.prepare('INSERT INTO research_pipeline_event_jobs VALUES(?,?,?,?,?,NULL,?)').run(id,parent,topic,'dossier','completed','{}');
+ const audit=(action,payload)=>db.prepare('INSERT INTO research_pipeline_audit(item_id,action,at,payload) VALUES(?,?,?,?)').run(item,action,at,JSON.stringify(payload));
+ audit('holdings-financial-started',{symbol:'NVDA.US',topicId:child,attempt:1});audit('holdings-financial-updated',{symbol:'NVDA.US',jobId:'financial-job'});audit('holdings-financial-failed',{symbol:'NVDA.US',topicId:child,attempt:1,retry:true,reason:'Synthetic timeout'});
+ audit('preparing',{});audit('holdings-financial-started',{topicId:unrelated,jobId:'unrelated-job'});
+ const raw=db.prepare('SELECT * FROM activity_journal').all(),changes=db.prepare('SELECT total_changes() n').get().n;
+ const events=service.activity({topic:child}).items;assert.equal(events.length,3);assert(events.every(e=>e.topicId===child&&e.newsId==='a'.repeat(64)));
+ assert.equal(service.activity({topic:root}).items.length,2);assert.equal(service.activity({topic:unrelated}).items.length,0);
+ const issues=service.activity({topic:child,issues:'1'}).items;assert.deepEqual(issues.map(x=>x.action),['holdings-financial-failed']);assert.match(activityText(issues[0]),/NVDA.US.*后台等待重试.*本轮第 1 次.*Synthetic timeout/);
+ assert.deepEqual(db.prepare('SELECT * FROM activity_journal').all(),raw);assert.equal(db.prepare('SELECT total_changes() n').get().n,changes);
+}));
+
+test('active automatic model provenance is projected separately from manual runs and includes retry ownership',()=>fixture(({db,service})=>{
+ const job='financial-job';db.prepare('INSERT INTO research_pipeline_event_jobs VALUES(?,?,?,?,?,NULL,?)').run(job,'source-item','financial-child','dossier','queued',JSON.stringify({automatic:true}));
+ for(const run of ['automatic-financial','manual-research'])db.prepare('INSERT INTO model_research_runs VALUES(?,?,?,?,?,?)').run(run,'financial-child','running',at,now()+60000,JSON.stringify({createdAt:at,model:'synthetic'}));
+ db.prepare('INSERT INTO research_pipeline_attempts(item_id,run_id,at) VALUES(?,?,?)').run(job,'automatic-financial',at);
+ const processing=service.activity({}).processing;assert.equal(processing.find(x=>x.id==='automatic-financial').automatic,true);assert.equal(processing.find(x=>x.id==='manual-research').automatic,false);
+}));
+
+test('financial monitoring activity uses readable outcomes without creating an approval request',()=>{
+ for(const [action,expected] of [['holdings-financial-started','开始检查持仓财报'],['holdings-financial-unchanged','财报未变化，继续跟踪'],['holdings-financial-updated','新财报已保存，等待更新研判'],['holdings-financial-failed','本轮财报检查未完成，稍后继续']]){
+  const text=activityText({kind:'pipeline',lane:'discovery',action,detail:{symbol:'NVDA.US',attempt:3,retry:false}});assert.ok(text.includes(expected));assert.match(text,/NVDA.US/);assert.doesNotMatch(text,/holdings-financial|本人|审批/);
+ }
+});

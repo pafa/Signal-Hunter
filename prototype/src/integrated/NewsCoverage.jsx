@@ -11,6 +11,7 @@ export default function NewsCoverage({data,mutate,busy}){
  const settings=dirty?form:data?.settings||{};
  const update=(key,value)=>{setForm({...settings,[key]:value});setDirty(true);};
  return <details className="news-coverage"><summary>新闻入口与覆盖记录</summary>
+ {data?.newsIntake?.inventory&&<p className="m-note" aria-label="新闻库条目与链接口径">当前新闻库：{data.newsIntake.inventory.sourceEntries} 条来源记录 · {data.newsIntake.inventory.distinctLinks} 个不同链接 · {data.newsIntake.inventory.repeatedLinkEntries} 条重复链接记录{data.newsIntake.inventory.unresolvedLinkEntries>0&&<> · {data.newsIntake.inventory.unresolvedLinkEntries} 条链接不明</>}。同一链接可来自多个入口；原记录全部保留。按保存的链接精确计数，含原文补读入口，不是本轮新增、有效文章数或独立证据数；正文与事件去重另行判断。</p>}
  <p className="m-note">Reuters两路共用聚合源；官方入口独立收取，但多个发布者不自动等于同一事实有独立佐证。只保存标题、来源与原始响应，不代表阅读全文或全市场覆盖。旧实例的新来源默认关闭。</p>
  {mutate&&<><form className="m-form" onSubmit={async e=>{e.preventDefault();const result=await mutate('/api/settings','PATCH',settings);if(result)setDirty(false);}}>
  <label className="company-check"><input type="checkbox" checked={settings.newsDiscoveryEnabled!==false} onChange={e=>update('newsDiscoveryEnabled',e.target.checked)}/>广泛事件发现（不受下方关键词限制）</label>

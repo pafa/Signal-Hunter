@@ -24,7 +24,7 @@ test('malformed, overlapping and unbounded table spans fail instead of publishin
  for(const html of ['<div><tr><td>Lost table context</td></tr></div>','<table><tr><td colspan="0">X</td></tr></table>','<table><tr><td colspan="257">X</td></tr></table>','<table><tr><td rowspan="2">X</td></tr></table>','<table><tr><td colspan="x">X</td></tr></table>','<table><tr><td>A</td><td rowspan="2">B</td></tr><tr><td colspan="2">Overlap</td></tr></table>',Array(51).fill('<table><tr><td>A</td></tr></table>').join(''),'<table>'+Array(1001).fill('<tr><td>X</td></tr>').join('')+'</table>'])assert.throws(()=>render(html),/表格结构/);
 });
 test('extraction preserves table text in place while ordinary article text remains plain and bounded',()=>{
- const article=extractArticle(page,'https://ir.acme.com/report');assert.equal(article.method,'public-article-7');assert.match(article.body,/r3 c5 td "110"/);assert(article.body.indexOf(prose.trim())<article.body.indexOf('[HTML table'));assert(article.body.indexOf('[/HTML table')<article.body.indexOf('End of source.'));assert.doesNotMatch(article.body,/<table|<td/);assert.equal(render('<p>Before &amp; after</p>'),'Before & after');
+ const article=extractArticle(page,'https://ir.acme.com/report');assert.equal(article.method,'public-article-13');assert.match(article.body,/r3 c5 td "110"/);assert(article.body.indexOf(prose.trim())<article.body.indexOf('[HTML table'));assert(article.body.indexOf('[/HTML table')<article.body.indexOf('End of source.'));assert.doesNotMatch(article.body,/<table|<td/);assert.equal(render('<p>Before &amp; after</p>'),'Before & after');
  const huge='<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>'+Array(900).fill('<tr><td>'+('x'.repeat(80))+'</td><td>1</td></tr>').join('')+'</tbody></table>';assert.throws(()=>extractArticle(page.replace(table,huge),'https://ir.acme.com/report'),/表格结构/);assert.throws(()=>extractArticle(page.replace(prose,prose.repeat(220)),'https://ir.acme.com/report'),/8 万/);
 });
 test('table extraction appends a new material revision, freezes old bodies and reaches research and comparison packets',async()=>{
@@ -33,4 +33,12 @@ test('table extraction appends a new material revision, freezes old bodies and r
  try{let t=research.create({title:'Fictional table',summary:'Only a parser test'});const request={url,stance:'unverified',family:'earnings',step:'fact',interpretation:'Fictional test'};t=await research.readMaterial(t.id,{version:t.version,...request});const old=research.materialList(t.id).materials[0],before=JSON.stringify(immutableMaterialSnapshot(store.db,{id:old.id,revision:1}));source=current;t=await research.readMaterial(t.id,{version:t.version,...request});const next=research.materialList(t.id).materials.find(m=>m.revision===2);assert(next);assert.equal(JSON.stringify(immutableMaterialSnapshot(store.db,{id:old.id,revision:1})),before);assert.equal(materialComparisonSnapshot(store.db,{id:next.id,revision:2}).body,current.body);assert(research.packet(t.id).input.evidence.some(e=>e.material?.body===current.body));assert.equal((await research.readMaterial(t.id,{version:t.version,...request})).version,t.version);
   source={...current,body:'unused'};const badResearch=openResearch(store,{seed:false,sourceReader:async()=>extractArticle(page.replace(table,'<table><tr><th>Metric</th><th>Value</th></tr><tr><td colspan="257">bad</td></tr></table>'),url)});await assert.rejects(badResearch.readMaterial(t.id,{version:t.version,...request}),/表格结构/);assert.equal(badResearch.get(t.id).version,t.version);assert.equal(badResearch.materialList(t.id).materials.length,2);assert.equal(badResearch.materialList(t.id).attempts[0].state,'failed');
  }finally{store.close();}
+});
+
+
+test('plain extraction does not depend on a text-node method shadowed by a named source image when no table is converted',()=>{
+ const dom=new JSDOM('<html><body><img name="createTextNode">Archived source without a table.</body></html>');try{
+  assert.equal(typeof dom.window.document.createTextNode,'object');
+  assert.equal(articleTableText(dom.window.document,'<p>Plain &amp; preserved source.</p>'),'Plain & preserved source.');
+ }finally{dom.window.close();}
 });

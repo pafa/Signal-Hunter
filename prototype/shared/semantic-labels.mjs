@@ -1,6 +1,8 @@
 export const semanticKinds={repeat:'同一信息重复',followup:'同一事件进展',reversal:'同一事件反向变化',related:'有关联，尚非同一事件',analogy:'不同事件的类比',unrelated:'没有足够关联',uncertain:'无法判断'};
 export const semanticStates={running:'生成中',candidate:'待本人核对',failed:'生成失败',cancelled:'已取消',interrupted:'调用中断'};
 export function semanticRunLabel(run){
+ if(run.status==='candidate'&&run.decision?.runId===run.id&&run.decision.actor?.kind==='system')return run.stale?'系统判断已过期':'系统判断已保存';
+ if(run.status==='candidate'&&run.automatic&&run.decision?.runId!==run.id)return '系统比较结果，仍未核实';
  if(run.status!=='candidate'||run.decision?.runId!==run.id)return semanticStates[run.status];
  return run.decision.action==='accept'?(run.stale?'采纳已过期':'已采纳'):run.decision.action==='reject'?'未采纳':'采纳已撤销';
 }

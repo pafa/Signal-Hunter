@@ -1,3 +1,8 @@
+import {digest as financialRecoveryHash} from './codex-research.mjs';
+import {HOLDINGS_FINANCIAL_VERSION} from './holdings-financial-basis.mjs';
+import {FINANCIAL_RECOVERY_VERSION} from './financial-recovery.mjs';
+import {researchActor,SYSTEM_RESEARCH_ACTOR} from './research-actor.mjs';
+import {PDF_SCOPE_SCHEMA} from '../shared/pdf-source.mjs';
 import {researchHistoryPage,researchHistoryDetail} from './research-history.mjs';
 import {validateDossierSections} from '../shared/research-dossier.mjs';
 import {researchReadiness} from '../shared/research-readiness.mjs';
@@ -11,9 +16,14 @@ import {classifyHeadline,evidenceCoverage,RULES_VERSION} from './triage.mjs';
 import {researchSeeds} from './research-seeds.mjs';
 import {validateResearchBrief} from './research-brief.mjs';
 import {openMaterials,immutableMaterialSnapshot} from './research-materials.mjs';
+import {MAXIMUM_FILING_EXHIBITS} from './financial-filing-material.mjs';
+import {researchVolumeComparison,volumeComparisonNote} from './research-volume-comparison.mjs';
 import {checkMaterialitySources} from './materiality-source-check.mjs';
 import {validateMaterialityReviews} from './materiality-review.mjs';
+import {validateCompanyAssessments} from './company-assessment.mjs';
+import {validateSourceRequests} from './source-links.mjs';
 import {readPublicArticle,publicSourceUrl} from './source-reader.mjs';
+import {publicReadReceipt} from './public-read-receipt.mjs';
 import {RELATION_KINDS,relatedCandidates} from '../shared/research-links.mjs';
 import {semanticResearchCandidates,freezeSemanticBasis,semanticBasisStatus} from './semantic-research.mjs';
 
@@ -46,7 +56,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
  };
  const withSemanticStatus=topic=>!topic.relatedEvents?.some(l=>l.semanticBasis)?topic:{...topic,relatedEvents:topic.relatedEvents.map(l=>l.semanticBasis?{...l,basisStatus:semanticBasisStatus(semanticEvents,topic,get(l.topicId),l.semanticBasis)}:l)};
  const newsEvidence=(n,at)=>({id:`news:${n.id}:v${n.revision}`,newsId:n.id,newsRevision:n.revision,claim:n.title,sourceName:n.publisher,url:n.url,publishedAt:n.publishedAt,datePrecision:n.datePrecision||'instant',firstSeen:n.revisionFirstSeen,articleFirstSeen:n.articleFirstSeen,revisionFirstSeen:n.revisionFirstSeen,availableAt:n.revisionFirstSeen,originKey:n.publisher,verification:'unverified',contentScope:'headline-only',addedAt:at});
- const commit=(topic,reason,expectedVersion,beforeWrite=()=>{})=>{
+ const commit=(topic,reason,expectedVersion,beforeWrite=()=>{},afterWrite=()=>{})=>{
   db.exec('BEGIN IMMEDIATE');try{
    const old=db.prepare('SELECT payload FROM research_topics WHERE id=?').get(topic.id);const current=old?JSON.parse(old.payload):null;
    if(current&&expectedVersion!==current.version)throw new Error('研究已更新，请刷新后再保存，避免覆盖其他修改');
@@ -54,7 +64,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    beforeWrite();
    db.prepare('INSERT INTO research_topics VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(topic.id,payload);
    db.prepare('INSERT INTO research_versions VALUES(?,?,?,?,?)').run(topic.id,next.version,payload,next.updatedAt,reason);
-   db.exec('COMMIT');return next;
+   afterWrite(next);db.exec('COMMIT');return next;
   }catch(e){db.exec('ROLLBACK');throw e;}
  };
  if(seed){for(const topic of seeds(clock()))if(!db.prepare('SELECT 1 FROM research_topics WHERE id=?').get(topic.id))commit(topic,'回溯案例初始化：不是当时发现');}
@@ -74,31 +84,54 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   const topics=rows.map(r=>JSON.parse(r.payload)),lookup=availabilityLookup(topics);
   return topics.map((raw,i)=>{const topic=withAvailability(raw,lookup);return {...topic,coverage:evidenceCoverage(topic),changeSummary:researchDelta(topic,rows[i].prior?JSON.parse(rows[i].prior):null)};}).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||(a.type==='cluster'?0:1)-(b.type==='cluster'?0:1)||a.id.localeCompare(b.id));
  };
- const linkMaterial=(id,data,input,method,beforeWrite=()=>{})=>{
+ const linkMaterial=(id,data,input,method,beforeWrite=()=>{},readReceipt=null)=>{
   const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，材料未关联；请刷新后重试');
   if(!enums.stance.includes(data.stance)||!enums.family.includes(data.family)||!topic.chain.some(s=>s.id===data.step))throw new Error('材料作用、类别或因果环节无效');
   const interpretation=assertText(data.interpretation,'材料与本事件的关系',1200),prepared=materials.prepare(id,input,method),m=prepared.material;
   if(topic.evidence.some(e=>e.materialId===m.id))return topic;
   if(topic.evidence.length>=150)throw new Error('一个主题最多保存 150 条证据');
   topic.evidence.push({id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,datePrecision:m.datePrecision,firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:clock(),originKey:m.url?new URL(m.url).hostname:m.sourceName,verification:'unverified',contentScope:m.scope,stance:data.stance,family:data.family,step:data.step,interpretation});
-  return commit(topic,'补充研究材料：阅读范围与不可变正文快照已保存；内容尚待核验',data.version,()=>{beforeWrite();prepared.persist();materials.attempt(id,{state:'saved',url:m.url,materialId:m.id,method});});
+  return commit(topic,'补充研究材料：阅读范围与不可变正文快照已保存；内容尚待核验',data.version,()=>{beforeWrite();prepared.persist();materials.attempt(id,{state:'saved',url:m.url,materialId:m.id,method,...(readReceipt?{readReceipt:{...readReceipt,materialId:m.id,materialRevision:m.revision}}:{})});});
  };
  return {
   process,get,list,screenings,
-  directorySelection:text=>securityDirectory?.selection(text)||null,
+  directorySelection:(text,basis)=>securityDirectory?.selection(text,basis)||null,
   newsItem(id){const news=store.newsById(id);if(!news)throw new Error('新闻不存在');return {...news,triage:classifyHeadline(news)};},
   materialList(id,options){return materials.list(get(id),options);},
   materialDetail(id,materialId){return materials.detail(get(id),materialId);},
   packet(id){return materials.packet(withSemanticStatus(withAvailability(get(id))));},
-  adoptModelDraft(id,data,candidate,beforeWrite=()=>{}){
+  prepareMonitoringResearch(id,{version,review},actor,beforeWrite=()=>{},afterWrite=()=>{}){
+   const topic=get(id);if(actor!==SYSTEM_RESEARCH_ACTOR||topic.version!==version||topic.status!=='active'||topic.dossier?.actor?.policy!==SYSTEM_RESEARCH_ACTOR.policy||review?.schema!=='holdings-trigger-review/1'||review.baseRunId!==topic.dossier?.sourceModelRun?.id||review.baseVersion!==version)throw Error('持仓复核只能接续当前系统研判');
+   topic.monitoringReview=structuredClone(review);if(review.resetPrices)topic.researchPrices=[];
+   return commit(topic,'后台按已触发条件准备新版研判；原判断与账户保持',version,beforeWrite,afterWrite);
+  },
+  prepareDocumentResearch(id,{version,context,sourceJobId,baseRunId},actor,beforeWrite=()=>{},afterWrite=()=>{}){
+   if(actor!==SYSTEM_RESEARCH_ACTOR)throw Error('附件接续只能由后台内部准备');
+   const topic=get(id);if(topic.version!==version||topic.status!=='active'||topic.dossier?.actor?.kind!=='system'||topic.dossier.sourceModelRun?.id!==baseRunId||context?.schema!=='linked-document-context/1')throw Error('原系统研判已变化');
+   topic.evidence=topic.evidence.filter(e=>e.documentRole!=='linked-attachment'||context.documents.some(d=>d.material.id===e.materialId&&d.material.revision===e.materialRevision));
+   const refs=new Map(topic.evidence.filter(e=>e.materialId).map(e=>[e.materialId,e.id]));
+   for(const doc of context.documents){const m=immutableMaterialSnapshot(db,doc.material);if(refs.has(m.id))continue;
+    if(topic.evidence.length>=150)throw Error('一个主题最多保存150条证据');
+    const e={id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,availableAt:m.availableAt,addedAt:clock(),originKey:new URL(m.url).hostname,verification:'unverified',contentScope:m.scope,stance:'unverified',family:'other',step:'fact',interpretation:'原通知明确链接的附件上下文；同源材料，事项与事实仍待核实',documentRole:'linked-attachment'};
+    topic.evidence.push(e);refs.set(m.id,e.id);
+   }
+   topic.documentContext={schema:'document-research/1',sourceJobId,baseVersion:version,baseRunId,entries:context.entries.map(e=>({...e,...(e.status==='available'?{evidenceId:refs.get(e.materialId)}:{})}))};
+   return commit(topic,'后台纳入已读附件并准备新版研判；旧判断和未读范围保留',version,beforeWrite,afterWrite);
+  },
+  adoptModelDraft(id,data,candidate,beforeWrite=()=>{},actor){
+   const provenance=researchActor(actor);
    const topic=get(id),packet=materials.packet(withSemanticStatus(withAvailability(topic)));
    if(data.version!==topic.version||candidate?.trace?.inputHash!==packet.inputHash||candidate?.trace?.topicId!==id||candidate?.trace?.topicVersion!==topic.version||candidate?.status!=='candidate')throw new Error('模型候选与当前研究不匹配，请重新生成');
    const sections=validateDossierSections(candidate.sections,topic.evidence);
    const reviews=validateMaterialityReviews(candidate.materialityReviews,packet);
-   topic.dossier={sections,reviewStatus:'draft',revisionReason:'本人采纳 Codex 候选为待复核草稿',preparedBy:'Codex 模型候选 · 本人采纳，尚待复核',preparedAt:clock(),basedOnResearchVersion:topic.version+1,sourceModelRun:{id:data.runId,...candidate.trace},missingEvidence:candidate.missingEvidence};
+   const sourceRequests=validateSourceRequests(candidate.sourceRequests,packet);
+   const assessments=validateCompanyAssessments(candidate.companyAssessments,packet);
+   topic.dossier={sections,...provenance,reviewStatus:'draft',revisionReason:actor?'系统形成研判草稿；事实与交易条件未获人工确认':'本人采纳 Codex 候选为待复核草稿',preparedBy:actor?'Codex 模型研判 · 系统生成，尚待复核':'Codex 模型候选 · 本人采纳，尚待复核',preparedAt:clock(),basedOnResearchVersion:topic.version+1,sourceModelRun:{id:data.runId,...candidate.trace},missingEvidence:candidate.missingEvidence};
    if(reviews?.length)topic.dossier.materialityReview={...packet.input.materialityReview,checks:reviews,topicVersion:topic.version,inputHash:packet.inputHash};
+   if(sourceRequests!==undefined)topic.dossier.sourceRequests=sourceRequests;
+   if(assessments!==undefined)topic.dossier.companyAssessment={...packet.input.companyAssessment,assessments,inputHash:packet.inputHash,inputTopicVersion:topic.version,savedInResearchVersion:topic.version+1,sourceModelRunId:data.runId,preparedAt:topic.dossier.preparedAt};
    topic.researchUpdatedAt=clock();
-   return commit(topic,'采纳模型研判草稿：未标记完成、未提交交易',data.version,()=>{
+   return commit(topic,actor?'系统生成研判草稿：未标记完成、未提交交易':'采纳模型研判草稿：未标记完成、未提交交易',data.version,()=>{
     if(materials.packet(withSemanticStatus(withAvailability(get(id)))).inputHash!==candidate.trace.inputHash)throw new Error('研究或材料已变化；此候选保留在历史中，请重新生成');
     beforeWrite();
    });
@@ -126,7 +159,65 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
     if(data.active&&semanticBasis&&freezeSemanticBasis(semanticEvents,topic,currentTarget,data.semanticBasis).hash!==semanticBasis.hash)throw new Error('比较依据已变化或不属于这两份研究，请刷新后重新核对');
    });
   },
+  recordPriceSource(id,data,result,material,beforeWrite=()=>{},afterWrite=()=>{}){
+   const topic=get(id);if(data.version!==topic.version||!topic.companies.some(c=>c.symbol===result.symbol)||!['1d','1m'].includes(result.interval)||!['saved','unavailable'].includes(result.status)||topic.researchPrices?.some(x=>x.symbol===result.symbol&&x.interval===result.interval))throw Error('研究价量对象或版本已变化');
+   let prepared=null;const evidenceCount=topic.evidence.length;
+   if(result.status==='saved'){
+    if(material?.marketSource?.symbol!==result.symbol||material.marketSource.interval!==result.interval)throw Error('研究价量证券或周期不匹配');
+    prepared=materials.prepare(id,material,'public-market');const m=prepared.material;
+    if(topic.evidence.length>=150)throw Error('一个主题最多保存150条证据');
+    if(!topic.evidence.some(e=>e.materialId===m.id))topic.evidence.push({id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:null,datePrecision:'unknown',firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:clock(),originKey:new URL(m.url).hostname,verification:'unverified',contentScope:'excerpt',stance:'context',family:'other',step:topic.chain.at(-1).id,interpretation:'系统在本次研判前留存公开价量选段；不证明实时、可成交、事件因果或历史可交易性。'});
+    result={...result,materialId:m.id,materialRevision:m.revision};
+   }else if(material)throw Error('失败研究价量不能带入材料');
+   const other=topic.researchPrices?.find(x=>x.symbol===result.symbol&&x.interval!==result.interval);
+   if(other){
+    const pair=[other.status==='saved'?materials.get(other.materialId):null,prepared?.material||null];
+    const comparison=researchVolumeComparison(result.symbol,pair,sha=>material?.marketDocuments?.find(d=>hash(d.body)===sha)?.body||db.prepare('SELECT body FROM research_source_documents WHERE sha256=?').get(sha)?.body);
+    result={...result,volumeComparison:comparison};
+    const note=volumeComparisonNote(comparison);
+    // Preserve earlier evidence exactly: attachment identity continuation checks
+    // the append-only preparation chain. Only the new material gets this note.
+    for(const e of topic.evidence.slice(evidenceCount))e.interpretation+=' '+note;
+   }
+   topic.researchPrices=[...(topic.researchPrices||[]),{...result,at:clock(),method:'system-public-market'}];
+   return commit(topic,'系统补充冻结价量与覆盖记录',data.version,()=>{beforeWrite();prepared?.persist();materials.attempt(id,{state:prepared?'saved':'failed',method:'public-market',url:prepared?.material.url||'',symbol:result.symbol,interval:result.interval,materialId:result.materialId||null,error:result.reason||null});},afterWrite);
+  },
+  recordFinancialSource(id,data,result,material,beforeWrite=()=>{},afterWrite=()=>{},replacement=null){
+   const topic=get(id),previous=topic.financialSources?.find(x=>x.symbol===result.symbol);if(data.version!==topic.version||!topic.companies.some(c=>c.symbol===result.symbol)||!['saved','unavailable','unsupported'].includes(result.status)||!!previous!==!!replacement)throw Error('财务补证对象或版本已变化');
+   if(replacement&&(replacement.actor!==SYSTEM_RESEARCH_ACTOR||![FINANCIAL_RECOVERY_VERSION,HOLDINGS_FINANCIAL_VERSION].includes(replacement.schema)||replacement.previousResultHash!==financialRecoveryHash(previous)||!['saved','unavailable'].includes(result.status)||![1,2,3].includes(replacement.attempt)))throw Error('财务恢复只接受原后台依据');
+   let prepared=null,preparedFilings=[];
+   if(result.status==='saved'){
+    if(!material?.financialSource||material.financialSource.issuer.symbol!==result.symbol)throw Error('财务材料证券不匹配');
+    prepared=materials.prepare(id,material,'public-financial');const m=prepared.material;
+    if(topic.evidence.length>=150)throw Error('一个主题最多保存150条证据');
+    if(!topic.evidence.some(e=>e.materialId===m.id))topic.evidence.push({id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:null,datePrecision:'unknown',firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:clock(),originKey:'sec.gov',verification:'unverified',contentScope:'excerpt',stance:'context',family:'earnings',step:topic.chain.find(s=>s.id==='earnings')?.id||topic.chain.at(-1).id,interpretation:'系统按已关联证券补充发行人财务背景；不证明事件影响、市场预期或历史可交易性。'});
+    result={...result,materialId:m.id,materialRevision:m.revision};
+    if(material.filingMaterials!==undefined){
+     if(!Array.isArray(material.filingMaterials)||material.filingMaterials.length>2*(1+MAXIMUM_FILING_EXHIBITS))throw Error('申报原件数量无效');
+     preparedFilings=material.filingMaterials.map(f=>{if(f.filingSource?.issuer.symbol!==result.symbol)throw Error('申报原件证券不匹配');return materials.prepare(id,f,'public-filing');});
+     const primaries=preparedFilings.filter(p=>!p.material.filingSource.exhibit);
+     if(primaries.length>2||preparedFilings.some(p=>p.material.filingSource.exhibit&&!primaries.some(a=>a.material.url===p.material.filingSource.filing.url))||primaries.some(p=>preparedFilings.filter(a=>a.material.filingSource.exhibit&&a.material.filingSource.filing.url===p.material.url).length>MAXIMUM_FILING_EXHIBITS))throw Error('申报附件缺少对应主申报或超过读取范围');
+     if(new Set(preparedFilings.map(f=>f.material.id)).size!==preparedFilings.length)throw Error('申报原件重复');
+     for(const {material:f} of preparedFilings){
+      if(topic.evidence.some(e=>e.materialId===f.id))continue;if(topic.evidence.length>=150)throw Error('一个主题最多保存150条证据');
+      topic.evidence.push({id:`material:${f.id}`,materialId:f.id,materialRevision:f.revision,claim:f.title,sourceName:f.sourceName,url:f.url,publishedAt:null,datePrecision:'unknown',firstSeen:f.availableAt,availableAt:f.availableAt,addedAt:clock(),originKey:'sec.gov',verification:'unverified',contentScope:'excerpt',stance:'context',family:'earnings',step:topic.chain.find(s=>s.id==='earnings')?.id||topic.chain.at(-1).id,interpretation:f.filingSource.exhibit?'系统沿主申报明确链接读取附件并选段；同一申报不代表与当前事件一致，未选内容与附件内链接未分析，不证明新增事件影响。':'系统沿官方申报目录读取原件并选段；仅作原事件背景与核对材料，未分析全文或附件，不证明新增事件影响。'});
+     }
+     result={...result,filings:(result.filings||[]).map(entry=>{const p=preparedFilings.find(p=>p.material.url===entry.url);if(entry.status==='saved'&&!p)throw Error('申报读取记录缺少原件');return p?{...entry,materialId:p.material.id,materialRevision:p.material.revision}:entry;})};
+     if(preparedFilings.some(p=>!result.filings.some(e=>e.status==='saved'&&e.materialId===p.material.id)))throw Error('申报原件缺少读取记录');
+    }
+   }else if(material)throw Error('失败财务补证不能带入材料');
+   const entry={...result,at:clock(),method:'system-official-financial'};
+   if(replacement){const {actor,...basis}=replacement,recovery={...basis,outcome:result.status,at:clock(),...(result.reason?{reason:result.reason}:{})};topic.financialSources=topic.financialSources.map(x=>x.symbol===result.symbol?(result.status==='saved'?{...entry,recovery}:{...x,recovery}):x);}
+   else topic.financialSources=[...(topic.financialSources||[]),entry];
+   return commit(topic,'系统补充官方财务依据与覆盖记录；旧研究和交易不变',data.version,()=>{beforeWrite();prepared?.persist();for(const f of preparedFilings)f.persist();for(const f of result.filings||[])materials.attempt(id,{state:f.status==='saved'?'saved':'failed',method:'public-filing',url:f.url,symbol:result.symbol,materialId:f.materialId||null,error:f.status==='saved'?null:f.reason});materials.attempt(id,{state:prepared?'saved':'failed',method:'public-financial',url:prepared?.material.url||'',symbol:result.symbol,materialId:result.materialId||null,error:result.reason||null});},afterWrite);
+  },
   saveMaterial(id,data){return linkMaterial(id,data,{...data,scope:data.scope==='extracted-text'?null:data.scope},'manual');},
+  useStoredMaterial(id,data,ref,beforeWrite=()=>{}){
+   const material=immutableMaterialSnapshot(db,ref);
+   if(material.method!=='public-web')throw Error('仅复用已归档的公开正文');
+   const sourceDocument=material.extractionEvidence?.schema===PDF_SCOPE_SCHEMA?db.prepare('SELECT body FROM research_source_documents WHERE sha256=?').get(material.extractionEvidence.sha256)?.body:null;
+   return linkMaterial(id,data,{...material,...(sourceDocument?{sourceDocument:Buffer.from(sourceDocument)}:{})},'public-web',beforeWrite);
+  },
   async readMaterial(id,data,beforeWrite=()=>{}){
    const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再读取');
    if(!enums.stance.includes(data.stance)||!enums.family.includes(data.family)||!topic.chain.some(s=>s.id===data.step))throw new Error('材料作用、类别或因果环节无效');
@@ -137,7 +228,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
    try{
     let material;
     try{material=await sourceReader(url);}catch(error){const unavailable=new Error(String(error?.message||error));unavailable.code='SOURCE_READ_UNAVAILABLE';throw unavailable;}
-    return linkMaterial(id,data,material,'public-web',beforeWrite);
+    return linkMaterial(id,data,material,'public-web',beforeWrite,publicReadReceipt(material,url));
    }
    catch(error){materials.attempt(id,{state:'failed',url,method:'public-web',error:String(error.message).slice(0,300)});throw error;}
    finally{sourceJobs.delete(id);}
@@ -208,10 +299,11 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
   create(data){const at=clock(),title=assertText(data.title,'主题标题',140),summary=assertText(data.summary,'研究假设');
    return commit({id:randomUUID(),title,summary,type:'cluster',label:'自建主题',origin:'user',status:'active',createdAt:at,chain:[{id:'fact',title:'事实变化',question:'什么证据能证实变化？'},{id:'mechanism',title:'影响机制',question:'变化如何传到目标公司的业务？'},{id:'earnings',title:'财务兑现',question:'如何改变预期与盈利？'}],evidence:[],companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'添加支持、反对或待核实线索，建立可证伪的因果链。'},'用户创建主题');
   },
-  createFromMaterialEvent(snapshot,basis,beforeWrite){
+  createFromMaterialEvent(snapshot,basis,beforeWrite,actor){
+   const provenance=researchActor(actor);
    const m=materials.get(snapshot.id),at=clock(),title=assertText(basis.event.title,'事项标题',140),summary='待核对事项：'+title;
-   const topic={id:randomUUID(),title,summary,type:'event',label:'材料拆分 · 待核对',origin:'material-event-review',status:'active',createdAt:at,chain:defaultChain(),eventExtraction:structuredClone(basis),companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'核对原文事项边界、主体身份及反证；共享材料不构成独立佐证。',evidence:[{id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,datePrecision:m.datePrecision,firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:at,originKey:m.url?new URL(m.url).hostname:m.sourceName,verification:'unverified',contentScope:m.scope,stance:'unverified',family:'other',step:'fact',interpretation:basis.reviewNote}]};
-   return commit(topic,'本人选择材料拆分事项建立研究；共享原材料，未完成研判或创建交易',undefined,()=>beforeWrite(topic));
+   const topic={id:randomUUID(),title,summary,type:'event',label:actor?'系统识别事项 · 待核实':'材料拆分 · 待核对',origin:actor?'material-event-system':'material-event-review',status:'active',createdAt:at,chain:defaultChain(),eventExtraction:structuredClone({...basis,...provenance}),companies:[],hypothesis:{logic:summary,trigger:'',invalidation:'',industryHorizon:'',holdingHorizon:'',reviewAt:'',action:'observe'},nextEvidence:'核对原文事项边界、主体身份及反证；共享材料不构成独立佐证。',evidence:[{id:`material:${m.id}`,materialId:m.id,materialRevision:m.revision,claim:m.title,sourceName:m.sourceName,url:m.url,publishedAt:m.publishedAt,datePrecision:m.datePrecision,firstSeen:m.availableAt,availableAt:m.availableAt,addedAt:at,originKey:m.url?new URL(m.url).hostname:m.sourceName,verification:'unverified',contentScope:m.scope,stance:'unverified',family:'other',step:'fact',interpretation:basis.reviewNote}]};
+   return commit(topic,actor?'系统识别事项建立研究；共享原材料，未核实事实或创建交易':'本人选择材料拆分事项建立研究；共享原材料，未完成研判或创建交易',undefined,()=>beforeWrite(topic));
   },
   update(id,data){const topic=get(id);if(data.version!==topic.version)throw new Error('研究已更新，请刷新后再保存');
    const allowed=['version','status','hypothesis','assessment','nextEvidence','dossier'];if(Object.keys(data).some(k=>!allowed.includes(k)))throw new Error('不支持的研究修改');
@@ -232,7 +324,7 @@ export function openResearch(store,{seed=true,clock=()=>new Date().toISOString()
     const d=data.dossier;if(!d||Object.keys(d).some(k=>!['sections','reviewStatus','revisionReason'].includes(k))||!['draft','complete'].includes(d.reviewStatus))throw new Error('研判修改字段无效');
     const sections=validateDossierSections(d.sections,topic.evidence,{allowIncomplete:d.reviewStatus==='draft'}),reason=assertText(d.revisionReason,'研判修订原因',1000);
     if(d.reviewStatus==='complete'&&(researchReadiness(topic).gaps.length||sections.some(s=>!s.sourceIds.length)))throw new Error('完成研判前需补齐研究记录并为每章关联来源；未知事项须说明核查方法');
-    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1,...(topic.dossier?.sourceModelRun?{sourceModelRun:topic.dossier.sourceModelRun}:{}),...(topic.dossier?.materialityReview?{materialityReview:topic.dossier.materialityReview}:{})};topic.researchUpdatedAt=clock();
+    topic.dossier={sections,reviewStatus:d.reviewStatus,revisionReason:reason,preparedBy:'本人 · 人工结构化研判',preparedAt:clock(),basedOnResearchVersion:topic.version+1,...(topic.dossier?.sourceModelRun?{sourceModelRun:topic.dossier.sourceModelRun}:{}),...(topic.dossier?.companyAssessment?{companyAssessment:topic.dossier.companyAssessment}:{}),...(topic.dossier?.materialityReview?{materialityReview:topic.dossier.materialityReview}:{})};topic.researchUpdatedAt=clock();
    }
    return commit(topic,data.status?'主题归档状态变更':data.dossier?'保存详细研判与人工完成状态（未提交交易）':data.assessment?'保存消息状态、概率与影响评估（未提交交易）':'保存交易假设（未提交交易申请）',data.version);
   },

@@ -29,11 +29,12 @@ export function marketReviewCandidates(snapshot,topics){
   candidates.push({key,state,reason,accountId,fingerprint:digest([policy,identity]),hit:{kind:'market-review',accountId,title:topic?`${b.profile?.name||accountId} · ${topic.title}`:b.profile?.name||accountId,topicId:topic?.id||null,topicVersion:topic?.version??null,reason,symbols,affectedPositions:refs(lots),input}});
  };
  for(const l of b.lots){
-  const t=byTopic.get(l.topicId),scope=`lot:${l.id}`,opening=b.orders.find(o=>o.id===b.fills.find(f=>f.id===l.id)?.orderId)?.researchSnapshot;
+  const link=snapshot.holdingResearchLinks?.find(x=>x.lotId===l.id),t=link?.status==='current'||l.researchBinding?(snapshot.researchTopics||[]).find(t=>t.id===(link?.topicId||l.topicId)):byTopic.get(l.topicId),scope=`lot:${l.id}`,opening=b.orders.find(o=>o.id===b.fills.find(f=>f.id===l.id)?.orderId)?.researchSnapshot;
+  if(link&&link.status!=='legacy')add(scope,'research-continuity',link.status==='waiting'?'hit':link.relation.kind!=='same-research'?'hit':'clear',link.reason,{lots:[l],topic:t,identity:link,metrics:{holdingResearchLink:link}});
   add(scope,'research-status',!t||t.status!=='active'?'hit':'clear',!t?'持仓关联研究缺失，需核对':'持仓关联研究已归档，需核对',{lots:[l],topic:t,identity:t?.status||'missing',metrics:{openingTopicId:l.topicId}});
-  add(scope,'research-version',t&&t.status==='active'&&t.version!==l.topicVersion?'hit':'clear','持仓关联研究版本已变化，需复核原交易假设',{lots:[l],topic:t,identity:t?.version,metrics:{openingVersion:l.topicVersion,currentVersion:t?.version??null}});
-  const old=new Set((opening?.evidence||[]).map(evidenceStamp)),against=(t?.evidence||[]).filter(e=>e.stance==='against'&&!old.has(evidenceStamp(e)));
-  add(scope,'counterevidence',!t?'unknown':against.length?'hit':'clear','持仓研究出现开仓基线之外的反向线索',{lots:[l],topic:t,identity:against.map(evidenceStamp).sort(),evidence:against,metrics:{openingBaselineAvailable:!!opening}});
+  add(scope,'research-version',t&&t.status==='active'&&(t.id!==l.topicId||t.version!==l.topicVersion||l.researchBinding&&l.researchBinding.runId!==t.researchSubject?.runId)?'hit':'clear','持仓关联研究版本已变化，需复核原交易假设',{lots:[l],topic:t,identity:{topicId:t?.id,version:t?.version,binding:t?.researchSubject?.runId},metrics:{openingVersion:l.topicVersion,currentVersion:t?.version??null,holdingResearchLink:link||null}});
+  const old=new Set((opening?.evidence||[]).map(e=>evidenceStamp(link?.current?.kind==='event-cluster'&&l.researchBinding?.kind!=='event-cluster'?{...e,id:`${l.topicId}:${e.id}`}:e))),against=(t?.evidence||[]).filter(e=>e.stance==='against'&&!old.has(evidenceStamp(e)));
+  add(scope,'counterevidence',!t||link?.status==='waiting'?'unknown':against.length?'hit':'clear','持仓研究出现开仓基线之外的反向线索',{lots:[l],topic:t,identity:against.map(evidenceStamp).sort(),evidence:against,metrics:{openingBaselineAvailable:!!opening}});
   const due=Date.parse(l.holdUntil);
   add(scope,'holding-review',!Number.isFinite(due)?'unknown':due<=Date.parse(at)?'hit':'clear','持仓复核截止已到，需本人决定下一步',{lots:[l],topic:t,identity:l.holdUntil,metrics:{holdUntil:l.holdUntil}});
   const value=v.positions.find(p=>p.id===l.id),priceKnown=value?.valueCents!=null&&!!l.entryPrice;
@@ -47,11 +48,11 @@ export function marketReviewCandidates(snapshot,topics){
  const nav=v.navCents,known=nav!==null&&nav>0;
  add('pool','cash-floor',!known?'unknown':v.availableCashCents/nav*100<b.config.cashFloorPct?'hit':'clear','扣除已批准买单预算后的可用现金低于本池底线',{lots:b.lots,identity:b.orders.filter(o=>['approved','partial'].includes(o.status)&&o.side==='buy').map(o=>o.id).sort(),metrics:{availableCashCents:v.availableCashCents,reservedCents:v.reservedCents,navCents:nav,observedPct:known?v.availableCashCents/nav*100:null,thresholdPct:b.config.cashFloorPct}});
  for(const [field,kind,threshold] of [['issuerId','issuer-cap',b.config.issuerCapPct],['topicId','theme-cap',b.config.themeCapPct]]){
-  const groups=Map.groupBy(v.positions,p=>p[field]);
+  const groups=Map.groupBy(v.positions,p=>field==='topicId'?(snapshot.holdingResearchLinks?.find(l=>l.lotId===p.id&&l.status==='current')?.topicId||p.topicId):p[field]);
   for(const [id,positions] of groups){
    const identityOK=field!=='issuerId'||positions.every(p=>quotes[p.symbol]?.issuerId===p.issuerId);
    const value=known&&identityOK?positions.reduce((n,p)=>n+p.valueCents,0):null,pct=value===null?null:value/nav*100;
-   add(`${kind}:${id}`,kind,pct===null?'unknown':pct>threshold?'hit':'clear',field==='issuerId'?'同一发行人跨市场持仓超过本池上限':'同一研究主题持仓超过本池上限',{lots:b.lots.filter(l=>l[field]===id),topic:field==='topicId'?byTopic.get(id):null,identity:positions.map(p=>p.id).sort(),metrics:{groupId:id,valueCents:value,navCents:nav,observedPct:pct,thresholdPct:threshold,identityVerified:identityOK}});
+   add(`${kind}:${id}`,kind,pct===null?'unknown':pct>threshold?'hit':'clear',field==='issuerId'?'同一发行人跨市场持仓超过本池上限':'同一研究主题持仓超过本池上限',{lots:b.lots.filter(l=>positions.some(p=>p.id===l.id)),topic:field==='topicId'?((snapshot.researchTopics||[]).find(t=>t.id===id)||byTopic.get(id)):null,identity:positions.map(p=>p.id).sort(),metrics:{groupId:id,valueCents:value,navCents:nav,observedPct:pct,thresholdPct:threshold,identityVerified:identityOK}});
   }
  }
  return candidates;

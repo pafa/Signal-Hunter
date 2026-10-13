@@ -1,6 +1,7 @@
 name: Signal Hunter checks
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -11,7 +12,7 @@ concurrency:
 jobs:
   node:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: prototype
@@ -23,6 +24,7 @@ jobs:
           cache: npm
           cache-dependency-path: prototype/package-lock.json
       - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=high
       - run: npm test
       - run: npm run build
       - run: npm run release:check

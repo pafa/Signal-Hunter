@@ -1,7 +1,7 @@
 const key='signal-hunter-research-context-v1';
 export function normalizeContext(value={}){
  if(!value||typeof value!=='object'||Array.isArray(value))value={};
- return {range:[1,3,6].includes(value.range)?value.range:3,view:['grid','compare','table'].includes(value.view)?value.view:'grid',scope:value.scope==='all'?'all':'topic',
+ return {range:[1,3,6].includes(value.range)?value.range:3,view:['grid','compare','table'].includes(value.view)?value.view:'grid',scope:value.scope==='all'?'all':'topic',page:Number.isSafeInteger(value.page)&&value.page>=0&&value.page<=100?value.page:0,
   picks:Array.isArray(value.picks)?[...new Set(value.picks.filter(s=>typeof s==='string'&&/^[A-Z0-9.-]{1,20}$/.test(s)))].slice(0,6):[],symbol:typeof value.symbol==='string'?value.symbol.slice(0,20):''};
 }
 export function researchContexts(){try{const x=JSON.parse(sessionStorage.getItem(key)||'[]');return Array.isArray(x)?x.filter(r=>r&&typeof r.id==='string').slice(-12):[];}catch{return [];}}

@@ -14,7 +14,7 @@ function HistoryVersion({topicId,row,initialOpen}){
  return <details className="m-history-version" open={open} onToggle={e=>{setOpen(e.currentTarget.open);if(e.currentTarget.open)setRequested(true);}}><summary><b>v{row.version}</b> {time(row.recordedAt)} · {row.reason}</summary>{open&&(error?<div role="alert">{error}<Button onClick={()=>setRetry(n=>n+1)}>重试读取此版研究</Button></div>:data?<HistoryContent r={data}/>:<p role="status">正在读取研究 v{row.version}…</p>)}</details>;
 }
 
-export default function ResearchHistory({topic}){
+export default function ResearchHistory({topic,focusVersion}){
  const [page,setPage]=useState(null),[paths,setPaths]=useState([null]),[index,setIndex]=useState(0),[working,setWorking]=useState(false),[error,setError]=useState('');
  const active=useRef(true),locked=useRef(false),pending=useRef(null);
  async function load(input){
@@ -23,9 +23,9 @@ export default function ResearchHistory({topic}){
   try{const result=await request(`/api/research/${topic.id}/history?${params}`);if(active.current){setPage(result);setPaths(input.paths);setIndex(input.index);}}
   catch(e){if(active.current)setError(e.message);}finally{locked.current=false;if(active.current)setWorking(false);}
  }
- useEffect(()=>{active.current=true;load({before:null,paths:[null],index:0});return()=>{active.current=false;};},[]);
+ useEffect(()=>{active.current=true;load({before:null,paths:[null],index:0,...(Number.isSafeInteger(focusVersion)&&focusVersion>0&&focusVersion<=topic.version?{ceiling:focusVersion}:{})});return()=>{active.current=false;};},[]);
  return <div className="m-history"><h3>来源时间线</h3><p className="m-note">来源发布时间与系统首次获知是两种时间。历史资料是本轮补入，不能用于声称提前发现。</p>{[...topic.evidence].filter(e=>e.publishedAt).sort((a,b)=>a.publishedAt.localeCompare(b.publishedAt)).map(e=><div className="m-source-history" key={e.id}><time>{e.publishedAt.slice(0,10)}</time><p>{e.claim}<small>本版可用 {time(e.newsId?e.availableAt:e.firstSeen)} · {verificationNames[e.verification]}</small></p></div>)}
- <h3>研究版本</h3><p className="m-note">按当时保存的证据和判断复核；旧版本不覆盖。每页25版，展开后读取该版详情。</p>
+ <h3>研究版本</h3>{focusVersion&&<p>从持仓建仓版本 v{focusVersion} 进入；此处显示当时保存的判断，较新的研究仍保留，可切换到最新。</p>}<p className="m-note">按当时保存的证据和判断复核；旧版本不覆盖。每页25版，展开后读取该版详情。</p>
  {page&&<p role="status">第 {index+1} 页 · 本次共 {page.total} 个版本 · 固定至 v{page.ceiling}{topic.version>page.ceiling?'；已有新版本，可刷新到最新':''}</p>}
  <nav aria-label="研究历史分页"><Button aria-disabled={working||index===0} onClick={()=>{if(index>0)load({before:paths[index-1],ceiling:page.ceiling,paths,index:index-1});}}>上一页研究版本</Button><Button aria-disabled={working||!page?.nextCursor} onClick={()=>{if(page?.nextCursor)load({before:page.nextCursor,ceiling:page.ceiling,paths:[...paths.slice(0,index+1),page.nextCursor],index:index+1});}}>下一页研究版本</Button><Button aria-disabled={working} onClick={()=>load({before:null,paths:[null],index:0})}>刷新到最新研究版本</Button></nav>
  {working&&<p role="status">正在读取研究版本列表…</p>}{error&&<div role="alert">{error}<Button disabled={working} onClick={()=>load(pending.current)}>重试读取版本列表</Button></div>}

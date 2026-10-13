@@ -1,3 +1,4 @@
+import {hydrateActualChecks} from '../../shared/actual-check-transport.mjs';
 let instanceId=null,datasetChanged=false;
 let topicsCache=null,cacheEpoch=0,readSequence=0,cacheSequence=0;
 export const currentInstanceId=()=>instanceId||'legacy';
@@ -8,12 +9,12 @@ export async function request(path,method='GET',data){
  // must not repopulate it. Each request retains its own revalidation baseline.
  if(method!=='GET'){topicsCache=null;cacheEpoch++;}
  const workbench=method==='GET'&&path==='/api/data',cached=workbench?topicsCache:null,epoch=cacheEpoch,sequence=++readSequence;
- const headers={...(method==='GET'?{}:{'Content-Type':'application/json'}),...(instanceId?{'X-Signal-Instance':instanceId}:{}),...(cached?{'X-Signal-Topics-Hash':cached.hash}:{})};
+ const headers={'X-Signal-Holding-Checks':'summary-v1',...(method==='GET'?{}:{'Content-Type':'application/json'}),...(instanceId?{'X-Signal-Instance':instanceId}:{}),...(cached?{'X-Signal-Topics-Hash':cached.hash}:{})};
  const response=await fetch(path,{method,headers,body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(55000)});
  if(!(response.headers.get('content-type')||'').includes('application/json'))throw new Error('本地数据服务未连接，请启动 npm run api');
  const result=await response.json();
  if(response.status===409&&result.error===changedMessage)datasetChanged=true;
- if(!response.ok)throw new Error(result.error||'请求失败');
+ if(!response.ok){const error=new Error(result.error||'请求失败');error.status=response.status;throw error;}
  const identity=result.runtime?.instance?.id||result.instance?.id;
  if(instanceId&&identity&&instanceId!==identity){datasetChanged=true;throw new Error(changedMessage);}
  if(identity)instanceId=identity;
@@ -30,7 +31,7 @@ export async function request(path,method='GET',data){
     ?(unchanged?cached:{hash,identity,topics:structuredClone(result.research.topics)}):null;
   }
  }
- return result;
+ return hydrateActualChecks(result);
 }
 export const time=value=>value?/^\d{4}-\d{2}-\d{2}$/.test(value)?`${value}（仅日期）`:new Date(value).toLocaleString('zh-CN',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'未知';
 export const stanceNames={supports:'支持',against:'反向约束',context:'背景',unverified:'待核实'};

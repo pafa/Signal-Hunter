@@ -1,3 +1,7 @@
+import {MAX_PDF_TEXT} from './pdf-source.mjs';
+// Scan the complete admitted source, including the tail of a longer PDF.
+// Other material types retain their own smaller admission limits.
+export const MAX_LITERAL_SOURCE_TEXT=MAX_PDF_TEXT;
 // Literal extraction only: no inference of financial metrics, periods or forecasts.
 export const QUANTITY_VERSION='source-quantity-literals/2';
 const currency='US\\$|HK\\$|USD|HKD|CNY|RMB|人民币|美元|港元|港币|\\$|¥|￥';
@@ -26,7 +30,7 @@ function decimal(literal,power){
  digits=digits.replace(/^0+(?=\d)/,'');return (negative&&/[1-9]/.test(digits)?'-':'')+digits;
 }
 export function sourceQuantities(text){
- if(typeof text!=='string'||text.length>80000)throw Error('数值来源文本无效');
+ if(typeof text!=='string'||text.length>MAX_LITERAL_SOURCE_TEXT)throw Error('数值来源文本无效');
  const found=[];money.lastIndex=0;
  for(const match of text.matchAll(money)){
   const raw=match[0].trim(),start=match.index+match[0].indexOf(raw),end=start+raw.length,{prefix,number,scale,suffix}=match.groups;

@@ -32,6 +32,17 @@ test('scheduler executes every pair once and retains unrelated outputs without a
  assert.deepEqual(f.batch.list().batches[0].counts,{candidate:3});
  }finally{await f.close();}
 });
+test('progress reports exact persisted counts and reuse without resolving comparison evidence or writing state',async()=>{
+ const f=fixture();try{
+  const first=f.create();await f.step();const completed=await f.finish(first.id),runId=completed.items.find(i=>i.runId).runId;
+  const plan=f.batch.preview({inputs:f.inputs}),next=f.batch.create({inputs:f.inputs,planHash:plan.planHash,requestId:randomUUID()},{reuseRunIds:[runId]});
+  const inspector=openSemanticBatches(f.store,{status:()=>({enabled:true}),get:()=>{throw Error('progress must not resolve full evidence');}},{enabled:true,config});
+  const before=f.store.db.prepare('SELECT total_changes() n').get().n,p=inspector.progress(next.id);
+  assert.equal(p.state,'active');assert.equal(p.inputCount,3);assert.equal(p.pairCount,3);assert.equal(p.reusedPairs,1);assert.deepEqual(p.counts,{candidate:1,queued:2});assert.equal(p.items,undefined);
+  assert.equal(f.store.db.prepare('SELECT total_changes() n').get().n,before);
+  f.batch.control(next.id,{action:'pause'});assert.equal(inspector.progress(next.id).state,'paused');f.batch.control(next.id,{action:'cancel'});assert.equal(inspector.progress(next.id).state,'cancelled');assert.deepEqual(inspector.progress(next.id).counts,{candidate:1,cancelled:2});
+ }finally{await f.close();}
+});
 test('mixed material and news plans freeze bodies internally but return only source summaries',async()=>{
  const f=fixture();try{let topic=f.service.research.create({title:'合成材料主题',summary:'混合输入'});topic=f.service.research.saveMaterial(topic.id,{version:topic.version,title:'合成材料',sourceName:'测试',url:'https://example.invalid/material',body:'正文只留在冻结快照中',scope:'excerpt',publishedAt:'2026-10-01',stance:'unverified',family:'other',step:'fact',interpretation:'合成'});const m=topic.evidence[0],inputs=[f.inputs[0],{kind:'material',id:m.materialId,revision:m.materialRevision}],p=f.batch.preview({inputs});assert.equal(p.inputs[1].body,undefined);const b=f.create(inputs);await f.step();await f.finish(b.id);const r=f.service.semanticEvents.get(f.batch.get(b.id).items[0].runId);assert.equal(r.packet.input.right.body,'正文只留在冻结快照中');assert.equal(f.batch.get(b.id).inputs[1].body,undefined);
  }finally{await f.close();}

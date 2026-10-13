@@ -1,0 +1,4 @@
+.research-dossier .company-assessment,.company-assessment{margin:16px 0;padding:14px;border:1px solid var(--t-border,#303942);border-radius:8px;min-width:0}
+.company-assessment h3{margin-top:0}.company-assessment dl{margin:10px 0}.assessment-dimension{padding:10px 0;border-bottom:1px solid var(--t-border,#303942);min-width:0;overflow-wrap:anywhere}
+.assessment-dimension dt{font-weight:600}.assessment-dimension dt small{margin-left:8px;font-weight:400;color:var(--muted,#9da7b2)}.assessment-dimension dd{margin:4px 0 0}.assessment-dimension p{margin:6px 0;line-height:1.6}
+.company-assessment summary{cursor:pointer;padding:6px 0}.company-assessment blockquote{margin:8px 0;padding:8px 12px;border-left:2px solid var(--t-border,#303942);background:rgba(128,128,128,.04)}.company-assessment pre{max-height:360px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.6}

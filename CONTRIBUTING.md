@@ -15,6 +15,7 @@
 ```sh
 cd prototype
 npm ci --ignore-scripts
+npm audit --audit-level=high
 npm test
 npm run build
 npm run release:check

@@ -62,8 +62,8 @@ export async function replayPipeline(root,recipe,{databasePath,signal}={}){
  const fetcher=async url=>{const r=await fetchRaw(url);return new Response([204,205,304].includes(r.status)?null:r.body,{status:r.status,headers:r.headers});};
  const sourceReader=url=>article.readPublicArticle(url,{resolver:async()=>[{address:'93.184.216.34',family:4}],request:async url=>{const r=await fetchRaw(url.href);return {status:r.status,headers:r.headers,body:r.body};}});
  const contracts={
-  research:p=>({prompt:codex.codexPrompt(p),schema:typeof codex.codexDraftSchema==='function'?codex.codexDraftSchema(p):codex.CODEX_DRAFT_SCHEMA,promptVersion:codex.CODEX_PROMPT_VERSION,...(codex.CODEX_SCHEMA_VERSION?{schemaVersion:codex.CODEX_SCHEMA_VERSION}:{})}),
-  semantic:p=>({prompt:semantic.comparisonPrompt(p),schema:p.schema===semantic.SEMANTIC_VERSION?semantic.SEMANTIC_SCHEMA:semantic.MATERIAL_SEMANTIC_SCHEMA,promptVersion:`${p.schema}/${time.TIME_PROMPT_VERSION}${p.schema!==semantic.SEMANTIC_VERSION?'/'+scope.ARTICLE_SCOPE_VERSION:''}`}),
+  research:(p,c)=>({prompt:codex.codexPrompt(p,c.researchFeedback),schema:typeof codex.codexDraftSchema==='function'?codex.codexDraftSchema(p):codex.CODEX_DRAFT_SCHEMA,promptVersion:codex.CODEX_PROMPT_VERSION,...(codex.CODEX_SCHEMA_VERSION?{schemaVersion:codex.CODEX_SCHEMA_VERSION}:{})}),
+  semantic:p=>typeof semantic.comparisonContract==='function'?semantic.comparisonContract(p):({prompt:semantic.comparisonPrompt(p),schema:p.schema===semantic.SEMANTIC_VERSION?semantic.SEMANTIC_SCHEMA:semantic.MATERIAL_SEMANTIC_SCHEMA,promptVersion:`${p.schema}/${time.TIME_PROMPT_VERSION}${p.schema!==semantic.SEMANTIC_VERSION?'/'+scope.ARTICLE_SCOPE_VERSION:''}`}),
   material:p=>({prompt:material.materialEventsPrompt(p),schema:material.MATERIAL_EVENTS_SCHEMA,promptVersion:material.MATERIAL_EVENTS_VERSION}),
   company:p=>({prompt:company.companyEntitiesPrompt(p),schema:company.COMPANY_ENTITIES_SCHEMA,promptVersion:company.COMPANY_ENTITIES_VERSION})
  };
@@ -71,7 +71,7 @@ export async function replayPipeline(root,recipe,{databasePath,signal}={}){
  const runner=lane=>async(packet,config)=>{
   const wallTime=()=>new Date(globalThis.__signalReplayWallNow?.()??Date.now()).toISOString();
   const call={stepId,at,lane,packet,status:'running',wallStartedAt:wallTime()};calls.push(call);
-  try{const c=contracts[lane](packet),contract={packetHash:hash(packet),inputHash:packet.inputHash,promptHash:hash(c.prompt),schemaHash:hash(c.schema),promptVersion:c.promptVersion,...(c.schemaVersion?{schemaVersion:c.schemaVersion}:{}),model:config.model,effort:config.effort};Object.assign(call,{contract,prompt:c.prompt,schema:c.schema});let result;
+  try{const c=contracts[lane](packet,config),contract={packetHash:hash(packet),inputHash:packet.inputHash,promptHash:hash(c.prompt),schemaHash:hash(c.schema),promptVersion:c.promptVersion,...(c.schemaVersion?{schemaVersion:c.schemaVersion}:{}),model:config.model,effort:config.effort};Object.assign(call,{contract,prompt:c.prompt,schema:c.schema});let result;
    if(recipe.model.mode==='live-codex')result=await generators[lane](packet,config);
    else{const r=recipe.model.records.find(r=>r.at<=at&&r.lane===lane&&hash(r.contract)===hash(contract)&&!usedRecords.has(r.id));if(!r)throw new codex.CodexResearchError('packet');usedRecords.add(r.id);call.recordId=r.id;result=structuredClone(r.result);}
    for(const [k,v] of Object.entries(contract))if(!['packetHash'].includes(k)&&result.trace?.[k]!==v)throw new codex.CodexResearchError('output');

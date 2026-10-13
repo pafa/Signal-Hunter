@@ -7,10 +7,11 @@ export function publicationProfile(url){
 }
 // Date profiles evolve independently of the immutable article-extraction profile.
 // v1/v2 evidence must continue resolving with the rules that created it.
-export function datePublicationProfile(url,format='publication-date-5'){
- if(['publication-date-3','publication-date-4','publication-date-5'].includes(format))try{const u=new URL(url);if(u.protocol==='https:'&&!u.port&&!u.username&&!u.password){
-  if(format==='publication-date-5'&&u.hostname==='www.hkma.gov.hk'&&/^\/eng\/news-and-media\/press-releases\/\d{4}\/\d{2}\/\d{8}(?:-\d+)?\/$/.test(u.pathname))return 'hkma-english-date-1';
-  if(['publication-date-4','publication-date-5'].includes(format)){
+export function datePublicationProfile(url,format='publication-date-6'){
+ if(['publication-date-3','publication-date-4','publication-date-5','publication-date-6'].includes(format))try{const u=new URL(url);if(u.protocol==='https:'&&!u.port&&!u.username&&!u.password){
+  if(format==='publication-date-6'&&u.hostname==='www.federalreserve.gov'&&/^\/newsevents\/pressreleases\/[a-z]+\d{8}[a-z]?\.htm$/.test(u.pathname))return 'fed-press-release-1';
+  if(['publication-date-5','publication-date-6'].includes(format)&&u.hostname==='www.hkma.gov.hk'&&/^\/eng\/news-and-media\/press-releases\/\d{4}\/\d{2}\/\d{8}(?:-\d+)?\/$/.test(u.pathname))return 'hkma-english-date-1';
+  if(['publication-date-4','publication-date-5','publication-date-6'].includes(format)){
    if(u.hostname==='news.microsoft.com'&&/^\/source\/\d{4}\/\d{2}\/\d{2}\/[a-z0-9-]+\/$/.test(u.pathname))return 'microsoft-source-1';
    if(u.hostname==='blogs.microsoft.com'&&/^\/blog\/\d{4}\/\d{2}\/\d{2}\/[a-z0-9-]+\/$/.test(u.pathname))return 'microsoft-blog-1';
   }
@@ -37,6 +38,13 @@ export function matchesPageGeneration(raw,context){
  return !!m&&raw.trim()===m[1];
 }
 export function profileCandidates(document,profile,add){
+ if(profile==='fed-press-release-1'){
+  const headings=[...document.querySelectorAll('#article > .heading')].filter(n=>!n.closest('nav,footer,aside,.related,.related-articles,.recommendations'));
+  if(headings.length===1&&headings[0].querySelectorAll(':scope > h3.title').length===1){
+   for(const node of headings[0].querySelectorAll(':scope > p.article__time'))add('fed:heading-date',node.textContent.trim());
+   for(const node of headings[0].querySelectorAll(':scope > p.releaseTime'))if(/^For release at\b/.test(node.textContent.trim()))add('fed:release-time',node.textContent.trim());
+  }
+ }
  if(['microsoft-source-1','microsoft-blog-1'].includes(profile)){
   const headingSelector=profile==='microsoft-source-1'?'.post-header__content > h1':'article > header.entry-header > h1.entry-title';
   const headings=[...document.querySelectorAll(headingSelector)].filter(n=>!n.closest('nav,footer,aside,.related,.related-articles,.recommendations'));

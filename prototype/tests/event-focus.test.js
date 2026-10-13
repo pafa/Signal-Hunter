@@ -6,6 +6,7 @@ import {openPaper} from '../server/paper.mjs';
 import {createService} from '../server/service.mjs';
 import {assessTopic} from '../server/workflow.mjs';
 import {classifyHeadline} from '../server/triage.mjs';
+import {routeEvent} from '../server/event-routing.mjs';
 import {createScheduler} from '../server/scheduler.mjs';
 import {planExit} from '../server/risk-rules.mjs';
 import {orderedTopics,dataHealth} from '../src/integrated/decision-model.js';
@@ -17,6 +18,17 @@ test('general event routing covers new issuers without inventing company associa
  for(const [title,rule] of [['FDA approves Nova therapy for rare disease','approval'],['Nova clinical trial fails primary endpoint','clinical'],['Manufacturer recalls 80000 vehicles','recall'],['Railway wins $2 billion contract','order'],['Miner halts production at copper mine','supply'],['Company announces share repurchase','capital'],['Company plans acquisition of rival','deal']]){const r=classifyHeadline({title});assert.equal(r.bucket,'review',title);assert.ok(r.matchedRules.includes(rule),title);assert.equal(r.tradeSignal,false);assert.deepEqual(r.companies,[]);}
  for(const title of ['Court orders witness to appear','Muse band announces concert','Scientists study ancient tools'])assert.equal(classifyHeadline({title}).bucket,'quiet',title);
  assert.notEqual(classifyHeadline({title:'Weather service raises temperature forecast'}).category,'经营指引变化');
+});
+test('headline routing retains same-line evidence without rescanning long irrelevant prefixes',()=>{
+ const ids=text=>routeEvent(text).matches.map(m=>m.id);
+ for(const separator of ['\n','\r','\r\n','\u2028','\u2029']){
+  assert(ids(`Routine bulletin${separator}FDA approves Nova therapy`).includes('approval'));
+  assert(!ids(`FDA therapy${separator}Company approves schedule`).includes('approval'));
+ }
+ assert(ids('Routine bulletin: force majeure').includes('project-risk'));
+ assert(ids('公司公告：不可抗力').includes('project-risk'));
+ assert.deepEqual(ids('例'.repeat(50000)),[]);
+ assert(ids('例'.repeat(50000)+' FDA approves Nova therapy').includes('approval'));
 });
 test('rumor, denial and cancellation stay distinct and do not imply completion',()=>{
  const rumor=classifyHeadline({title:'Nova reportedly in talks for acquisition of rival'});assert.equal(rumor.messageStatus,'rumor');assert.equal(rumor.bucket,'review');

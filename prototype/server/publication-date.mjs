@@ -1,5 +1,6 @@
 import {datePublicationProfile,profileCandidates,profileDateText,matchesPageGeneration} from './publication-profiles.mjs';
-const schema='publication-date-5',limit=20;
+import {fedReleaseDate} from './fed-publication-date.mjs';
+const schema='publication-date-6',limit=20;
 const months=['january','february','march','april','may','june','july','august','september','october','november','december'];
 const day=(year,month,date)=>{const value=`${year}-${String(month).padStart(2,'0')}-${String(date).padStart(2,'0')}`;try{return new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value?value:null;}catch{return null;}};
 // Never ask Date.parse to guess the machine's timezone, date order or missing year.
@@ -13,7 +14,7 @@ function parseLegacyDate(raw){
  return null;
 }
 export function parsePublicationDate(raw,{format=schema}={}){
- const legacy=parseLegacyDate(raw);if(legacy!==null||format!==schema||typeof raw!=='string'||raw.length>200)return legacy;
+ const legacy=parseLegacyDate(raw);if(legacy!==null||!['publication-date-5',schema].includes(format)||typeof raw!=='string'||raw.length>200)return legacy;
  const s=raw.trim().replace(/\s+/g,' ');let m;
  const month=text=>{const key=text.toLowerCase().replace(/\.$/,'');const i=months.findIndex(name=>name===key||name.slice(0,3)===key||name==='september'&&key==='sept');return i+1;};
  if((m=/^(\d{4})([/.])(\d{1,2})\2(\d{1,2})$/.exec(s)))return day(m[1],m[3],m[4]);
@@ -31,11 +32,12 @@ export function resolvePublicationDate(candidates,truncated=false,{profile='gene
  if(truncated)return {status:'overflow',publishedAt:null};
  if(!candidates.length)return {status:'missing',publishedAt:null};
  const unzoned=c=>c.source==='jsonld:datePublished'&&/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?$/.test(c.raw.trim());
- const calendarOnly=['publication-date-4',schema].includes(format)&&['microsoft-source-1','microsoft-blog-1'].includes(profile)&&candidates.some(unzoned);
+ const calendarOnly=['publication-date-4','publication-date-5',schema].includes(format)&&['microsoft-source-1','microsoft-blog-1'].includes(profile)&&candidates.some(unzoned);
  if(calendarOnly&&!candidates.some(c=>c.source==='microsoft:visible-date'))return {status:'invalid',publishedAt:null};
  // The verified page heading corroborates only a calendar day. Appending Z
  // here validates components, not the missing timezone; no instant is returned.
- const values=candidates.map(c=>calendarOnly&&unzoned(c)?(parsePublicationDate(c.raw.trim()+'Z',{format})?c.raw.trim().slice(0,10):null):parsePublicationDate(profileDateText(c,profile),{format}));
+ const fed=format===schema&&profile==='fed-press-release-1'?fedReleaseDate(candidates,raw=>parsePublicationDate(raw,{format})):undefined;
+ const values=candidates.map(c=>fed!==undefined&&['fed:heading-date','fed:release-time'].includes(c.source)?fed:calendarOnly&&unzoned(c)?(parsePublicationDate(c.raw.trim()+'Z',{format})?c.raw.trim().slice(0,10):null):parsePublicationDate(profileDateText(c,profile),{format}));
  if(values.some(v=>v===null))return {status:'invalid',publishedAt:null};
  const days=values.filter(v=>v.length===10),instants=values.filter(v=>v.length>10);
  if(new Set(days).size>1||new Set(instants.map(v=>Date.parse(v))).size>1||days.length&&instants.some(v=>v.slice(0,10)!==days[0]))return {status:'conflict',publishedAt:null};
@@ -80,18 +82,19 @@ export function publicationDateResult(collected){
 export function validatePublicationEvidence(value,publishedAt,url){
  const fail=()=>{throw new Error('来源日期读取依据无效');};
  const legacy=value?.schema==='publication-date-1';
- if(!value||Array.isArray(value)||Object.keys(value).sort().join(',')!==(legacy?'candidates,schema,status,truncated':'candidates,excluded,profile,schema,status,truncated')||!['publication-date-1','publication-date-2','publication-date-3','publication-date-4',schema].includes(value.schema)||typeof value.truncated!=='boolean'||!Array.isArray(value.candidates)||value.candidates.length>limit)fail();
+ if(!value||Array.isArray(value)||Object.keys(value).sort().join(',')!==(legacy?'candidates,schema,status,truncated':'candidates,excluded,profile,schema,status,truncated')||!['publication-date-1','publication-date-2','publication-date-3','publication-date-4','publication-date-5',schema].includes(value.schema)||typeof value.truncated!=='boolean'||!Array.isArray(value.candidates)||value.candidates.length>limit)fail();
  if(!legacy){
   if(value.profile!==datePublicationProfile(url,value.schema)||!Array.isArray(value.excluded)||value.excluded.length+value.candidates.length>limit)fail();
   for(const x of value.excluded)if(!x||Object.keys(x).sort().join(',')!=='context,raw,reason,source'||value.profile!=='csrc-article-1'||x.source!=='meta:pubdate'||x.reason!=='page-generation'||typeof x.raw!=='string'||x.raw.length>200||typeof x.context!=='string'||x.context.length>200||!matchesPageGeneration(x.raw,x.context))fail();
  }
  const candidates=value.candidates.map(c=>{if(!c||Array.isArray(c)||Object.keys(c).sort().join(',')!=='raw,source'||typeof c.source!=='string'||!c.source.trim()||c.source.length>160||typeof c.raw!=='string'||c.raw.length>200)fail();return {source:c.source,raw:c.raw};});
- const profiled=['publication-date-3','publication-date-4',schema].includes(value.schema);
+ const profiled=['publication-date-3','publication-date-4','publication-date-5',schema].includes(value.schema);
  if(profiled)for(const c of candidates){
-  if(value.schema===schema&&c.source.startsWith('hkma:')&&(!['hkma-release-1','hkma-english-date-1'].includes(value.profile)||c.source!=='hkma:release-date'))fail();
+  if(['publication-date-5',schema].includes(value.schema)&&c.source.startsWith('hkma:')&&(!['hkma-release-1','hkma-english-date-1'].includes(value.profile)||c.source!=='hkma:release-date'))fail();
+  if(c.source.startsWith('fed:')&&(value.schema!==schema||value.profile!=='fed-press-release-1'||!['fed:heading-date','fed:release-time'].includes(c.source)))fail();
   if(c.source.startsWith('adobe:')&&(value.profile!=='adobe-news-1'||!['adobe:heading-date','adobe:card-date'].includes(c.source)))fail();
   if(c.source.startsWith('amgen:')&&(value.profile!=='amgen-release-1'||c.source!=='amgen:wire-date'))fail();
-  if(['publication-date-4',schema].includes(value.schema)&&c.source.startsWith('microsoft:')&&(!['microsoft-source-1','microsoft-blog-1'].includes(value.profile)||!['microsoft:visible-date','microsoft:date-attribute'].includes(c.source)||c.source==='microsoft:date-attribute'&&value.profile!=='microsoft-blog-1'))fail();
+  if(['publication-date-4','publication-date-5',schema].includes(value.schema)&&c.source.startsWith('microsoft:')&&(!['microsoft-source-1','microsoft-blog-1'].includes(value.profile)||!['microsoft:visible-date','microsoft:date-attribute'].includes(c.source)||c.source==='microsoft:date-attribute'&&value.profile!=='microsoft-blog-1'))fail();
  }
  const resolved=resolvePublicationDate(candidates,value.truncated,{profile:profiled?value.profile:'generic',format:value.schema});if(resolved.status!==value.status||resolved.publishedAt!==publishedAt)fail();
  return {schema:value.schema,status:value.status,candidates,truncated:value.truncated,...(!legacy?{profile:value.profile,excluded:value.excluded.map(x=>({...x}))}:{})};

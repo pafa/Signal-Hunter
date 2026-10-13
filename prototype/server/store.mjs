@@ -13,6 +13,7 @@ export function openStore(path) {
     CREATE TABLE IF NOT EXISTS news(id TEXT PRIMARY KEY,payload TEXT NOT NULL,hash TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,revision INTEGER NOT NULL,selected INTEGER NOT NULL DEFAULT 0,read INTEGER NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS revisions(news_id TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,received_at TEXT NOT NULL,PRIMARY KEY(news_id,version));
     CREATE TABLE IF NOT EXISTS watches(symbol TEXT PRIMARY KEY,created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS watch_removals(symbol TEXT PRIMARY KEY,removed_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS quotes(symbol TEXT PRIMARY KEY,payload TEXT NOT NULL,received_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS bars(symbol TEXT NOT NULL,provider_time TEXT NOT NULL,close REAL NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(symbol,provider_time));
     CREATE TABLE IF NOT EXISTS quote_bars(symbol TEXT NOT NULL,provider TEXT NOT NULL,timezone TEXT NOT NULL,provider_time TEXT NOT NULL,close REAL NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(symbol,provider,timezone,provider_time));
@@ -29,7 +30,7 @@ export function openStore(path) {
   };
   const selectNews='SELECT n.*,r.received_at AS revision_first_seen FROM news n LEFT JOIN revisions r ON r.news_id=n.id AND r.version=n.revision';
   const mapNews=row=>({...JSON.parse(row.payload),firstSeen:row.first_seen,articleFirstSeen:row.first_seen,revisionFirstSeen:row.revision_first_seen||null,lastSeen:row.last_seen,revision:row.revision,selected:!!row.selected,read:!!row.read,note:row.note});
-  const newsRows=()=>db.prepare(selectNews+' ORDER BY n.last_seen DESC LIMIT 500').all().map(mapNews).sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt));
+  const newsRows=()=>db.prepare(selectNews+' ORDER BY n.last_seen DESC LIMIT 500').all().map(mapNews).sort((a,b)=>(b.publishedAt||'').localeCompare(a.publishedAt||''));
   return {
     db,getSettings,setSettings,
     news:newsRows,
@@ -56,8 +57,9 @@ export function openStore(path) {
     },
     revisions(id){return db.prepare('SELECT version,payload,received_at FROM revisions WHERE news_id=? ORDER BY version DESC').all(id).map(r=>({...JSON.parse(r.payload),version:r.version,receivedAt:r.received_at}));},
     watchlist(){return db.prepare('SELECT symbol,created_at AS createdAt FROM watches ORDER BY created_at').all();},
-    addWatch(value){const {symbol}=instrument(value);if(!db.prepare('SELECT 1 FROM watches WHERE symbol=?').get(symbol)&&db.prepare('SELECT COUNT(*) n FROM watches').get().n>=40)throw new Error('工作台最多关注 40 个标的');db.prepare('INSERT OR IGNORE INTO watches VALUES(?,?)').run(symbol,new Date().toISOString());return symbol;},
-    removeWatch(symbol){db.prepare('DELETE FROM watches WHERE symbol=?').run(symbol);},
+    watchRemoved(symbol){return !!db.prepare('SELECT 1 FROM watch_removals WHERE symbol=?').get(symbol);},
+    addWatch(value,{automatic=false}={}){const {symbol}=instrument(value);if(automatic&&db.prepare('SELECT 1 FROM watch_removals WHERE symbol=?').get(symbol))throw new Error('已手动移出行情关注');if(!db.prepare('SELECT 1 FROM watches WHERE symbol=?').get(symbol)&&db.prepare('SELECT COUNT(*) n FROM watches').get().n>=40)throw new Error('工作台最多关注 40 个标的');db.exec('SAVEPOINT watch_change');try{db.prepare('INSERT OR IGNORE INTO watches VALUES(?,?)').run(symbol,new Date().toISOString());if(!automatic)db.prepare('DELETE FROM watch_removals WHERE symbol=?').run(symbol);db.exec('RELEASE watch_change');}catch(e){db.exec('ROLLBACK TO watch_change; RELEASE watch_change');throw e;}return symbol;},
+    removeWatch(value){const {symbol}=instrument(value);db.exec('SAVEPOINT watch_change');try{db.prepare('DELETE FROM watches WHERE symbol=?').run(symbol);db.prepare('INSERT OR REPLACE INTO watch_removals VALUES(?,?)').run(symbol,new Date().toISOString());db.exec('RELEASE watch_change');}catch(e){db.exec('ROLLBACK TO watch_change; RELEASE watch_change');throw e;}},
     quote(symbol){const row=db.prepare('SELECT * FROM quotes WHERE symbol=?').get(symbol);return row?{...JSON.parse(row.payload),receivedAt:row.received_at}:null;},
     daily(symbol){const row=db.prepare('SELECT payload FROM daily_quotes WHERE symbol=?').get(symbol);return row?JSON.parse(row.payload):null;},
     saveDaily(quote,{activate=true}={}){

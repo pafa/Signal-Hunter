@@ -1,3 +1,4 @@
+import DocumentResearchScope from './DocumentResearchScope';
 import SourceMaterial from './SourceMaterial';
 import useEditorDraft from './useEditorDraft';
 import CompanyEntities from './CompanyEntities';
@@ -31,11 +32,14 @@ export default function SourceResearch(props){
  const instance=props.instanceId??currentInstanceId();
  return <SourceResearchBody key={JSON.stringify([instance,props.topic.id,props.topic.createdAt||''])} {...props} instance={instance}/>;
 }
-function SourceResearchBody({topic,busy,mutate,instance}){
+function SourceResearchBody({topic,busy,mutate,instance,focusMaterials=0}){
  const initial=()=>({mode:'manual',form:{url:'',title:'',sourceName:'',publishedAt:'',body:'',scope:'excerpt',stance:'unverified',family:'other',step:topic.chain[0]?.id||'',interpretation:''}});
  const editor=useEditorDraft(topic,'source-material',initial,v=>v&&['manual','web'].includes(v.mode)&&v.form&&Object.keys(initial().form).every(k=>typeof v.form[k]==='string')&&v.form.body.length<=80000,instance),{draft}=editor,{mode,form}=draft.value,base=draft.base;
  const [data,setData]=useState(null),[error,setError]=useState(''),[refresh,setRefresh]=useState(0),[packet,setPacket]=useState(null),[working,setWorking]=useState(''),[readVersion,setReadVersion]=useState(0),[needsReview,setNeedsReview]=useState(false);
  const active=useRef(true),flight=useRef(false),currentTopic=useRef(topic),ready=useRef(false);currentTopic.current=topic;
+ const materialHeading=useRef(null),focusedMaterials=useRef(0);
+ const showMaterials=()=>{materialHeading.current?.focus({preventScroll:true});materialHeading.current?.scrollIntoView({block:'start'});};
+ useEffect(()=>{if(data&&focusMaterials&&focusedMaterials.current!==focusMaterials){focusedMaterials.current=focusMaterials;showMaterials();}},[data,focusMaterials]);
  const locked=busy||!!working,readReady=readVersion===topic.version&&ready.current,actionsBlocked=locked||!readReady||needsReview||topic.status==='archived';
  useEffect(()=>{active.current=true;return()=>{active.current=false;};},[]);
  useEffect(()=>{let current=true;ready.current=false;setReadVersion(0);request(`/api/research/${topic.id}/materials?view=summary`).then(r=>{if(!current)return;const value=checkedList(r,topic);setData(value);setReadVersion(topic.version);ready.current=true;}).catch(e=>{if(current){ready.current=false;setReadVersion(0);setError(e.message);}});return()=>{current=false;};},[topic.id,topic.version,refresh]);
@@ -59,6 +63,9 @@ function SourceResearchBody({topic,busy,mutate,instance}){
   }catch(e){if(active.current)setError(e.message);}finally{end();}
  }
  return <div className="research-materials">
+ <DocumentResearchScope topic={topic} onMaterials={showMaterials}/>
+ <h3 ref={materialHeading} tabIndex={-1}>已关联材料 <small>{data?.materials.length??'…'} 份</small></h3>
+ {!data?<p className="m-note">正在加载材料…</p>:!data.materials.length?<p className="m-note">目前只有已有线索，尚未保存正文材料。补充来源后可逐版复核。</p>:data.materials.map(m=><SourceMaterial key={`${topic.id}:${m.id}`} topicId={topic.id} material={m} busy={actionsBlocked} label={topic.documentContext?.entries.find(e=>e.status==='available'&&e.materialId===m.id&&e.materialRevision===m.revision)?.label}/>)}
  <ModelResearch key={`model:${topic.id}`} topic={topic} busy={locked} instanceId={instance} mutate={mutate}/>
  {topic.sourceRevisionOf&&<details><summary>同一来源的新修订 · 旧研究保留</summary><p>本研究对应新闻 v{topic.sourceNewsRevision}，上一研究来自新闻 v{topic.sourceRevisionOf.newsRevision}。研判材料包固定引用上一研究 v{topic.sourceRevisionOf.topicVersion} 的已保存材料与判断，只用于历史对照，不增加独立证据。</p><a href={`/?topic=${encodeURIComponent(topic.sourceRevisionOf.topicId)}`}>打开原研究及版本记录</a></details>}
  {topic.eventExtraction&&<details><summary>此研究来自材料事项拆分 · 待核对</summary><p>原研究 v{topic.eventExtraction.sourceTopicVersion}；事项 {topic.eventExtraction.eventIndex+1}。共用材料不是独立佐证；原文及模型判断保留在原拆分记录中。</p><p>{topic.eventExtraction.event.actor} · {topic.eventExtraction.event.action} · {topic.eventExtraction.event.object}</p><p>来源候选阶段：{topic.eventExtraction.event.stage} · <EventTime event={topic.eventExtraction.event}/></p><p>{topic.eventExtraction.reviewNote}</p><blockquote>{topic.eventExtraction.event.quote}</blockquote><a href={`/?range=3&view=grid&topic=${encodeURIComponent(topic.eventExtraction.sourceTopicId)}`}>打开来源研究及拆分记录</a></details>}
@@ -69,15 +76,14 @@ function SourceResearchBody({topic,busy,mutate,instance}){
  {packet&&<details className="source-packet" open><summary>研判材料包 · 研究 v{packet.input.topicVersion} · {packet.inputHash.slice(0,12)}</summary><p className="m-note">包括事实、传闻、反证、公司关系、期限与买卖条件的分析要求。可复制给研究助手；生成材料包本身不会调用模型。此包固定于生成时的版本。{packet.input.topicVersion!==topic.version?' 当前研究已有更新，请重新生成。':''}</p><textarea readOnly aria-label="研判材料包" rows={9} value={JSON.stringify(packet,null,2)} onFocus={e=>e.target.select()}/></details>}
  <details className="source-add" open={draft.dirty||!data?.materials.length}><summary>＋ 补充正文 / 公告材料</summary><nav className="source-modes" aria-label="材料导入方式">{[['manual','粘贴材料'],['web','读取公开网页']].map(([v,label])=><Button key={v} aria-pressed={mode===v} disabled={locked} onClick={()=>setMode(v)}>{label}</Button>)}</nav>
  <form className="m-form" onSubmit={save}><p className="m-note">未保存材料仅保存在本标签页，关闭或刷新可恢复；尚未写入研究库。关闭标签页可能丢失，请及时保存。</p>{draft.volatile&&<p role="alert">会话存储不可用，材料草稿仅保留在当前页面。</p>}<fieldset className="m-editor-fields" disabled={locked}>
- <p className="m-note">{mode==='web'?'读取公开 HTML 正文，最长等待 20 秒；付费、登录、PDF 或无法提取的来源可自行阅读后粘贴。提取成功不表示内容已证实。':'记录原文或摘录，保留其阅读范围；不要把研判意见混入来源正文。保存时仅存本机；主动调用 Codex 时会发送当前事件材料用于研判。'}</p>
+ <p className="m-note">{mode==='web'?'读取公开 HTML 正文或含文字层的 PDF；付费、登录、扫描件或无法提取的来源可自行阅读后粘贴。提取成功不表示内容已证实。':'记录原文或摘录，保留其阅读范围；不要把研判意见混入来源正文。保存时仅存本机；主动调用 Codex 时会发送当前事件材料用于研判。'}</p>
  <label>来源链接{mode==='manual'?'（可选）':''}<input type="url" required={mode==='web'} maxLength={2000} value={form.url} onChange={e=>change('url',e.target.value)} placeholder="https://…"/></label>
  {mode==='manual'&&<><label>材料标题<input required maxLength={200} value={form.title} onChange={e=>change('title',e.target.value)}/></label><div className="m-form-row"><label>来源名称<input required maxLength={160} value={form.sourceName} onChange={e=>change('sourceName',e.target.value)}/></label><label>来源日期（未知可留空）<input type="date" value={form.publishedAt} onChange={e=>change('publishedAt',e.target.value)}/></label></div><label>阅读范围<select value={form.scope} onChange={e=>change('scope',e.target.value)}><option value="excerpt">部分摘录</option><option value="user-supplied-text">人工提供正文</option></select></label><label>材料正文<textarea required rows={7} maxLength={80000} value={form.body} onChange={e=>change('body',e.target.value)}/><small>{form.body.length.toLocaleString()} / 80,000 字符</small></label></>}
  <EvidenceFields topic={topic} form={form} setForm={setForm}/>
  {base!==topic.version&&<p className="m-warning">研究已从 v{base} 更新到 v{topic.version}，输入仍保留。请查看历史，再明确核对后继续，或丢弃草稿载入最新版本。</p>}
  <div className="m-form-actions"><span>按实际获取时间入库 · 尚待核验</span><Button type="button" onClick={()=>{if(!busy&&!flight.current)editor.reset();}} disabled={locked}>丢弃材料草稿并载入最新版本</Button>{base!==topic.version&&<Button type="button" onClick={()=>{if(!busy&&!flight.current&&readReady&&!needsReview)editor.change(v=>v,topic.version);}} disabled={actionsBlocked}>已核对更新，保留材料草稿继续编辑</Button>}<Button primary type="submit" disabled={actionsBlocked||base!==topic.version}>{working==='save'?'读取 / 保存中…':mode==='web'?'读取并保存正文':'保存材料快照'}</Button></div>
  </fieldset></form></details>
- <h3>已关联材料 <small>{data?.materials.length??'…'} 份</small></h3>
- {!data?<p className="m-note">正在加载材料…</p>:!data.materials.length?<p className="m-note">目前只有已有线索，尚未保存正文材料。补充来源后可逐版复核。</p>:data.materials.map(m=><SourceMaterial key={`${topic.id}:${m.id}`} topicId={topic.id} material={m} busy={actionsBlocked}/>)}
+
  {data?.attempts.some(a=>a.state==='failed')&&<details className="source-failures" open><summary>读取失败记录</summary>{data.attempts.filter(a=>a.state==='failed').map((a,i)=><p key={`${a.at}:${i}`}><b>{time(a.at)}</b> · {a.error}<small>{a.url}</small></p>)}</details>}
  </div>;
 }

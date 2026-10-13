@@ -1,10 +1,14 @@
+import {currentDocumentResearch} from './research-document-context.mjs';
+import {researchActor,SYSTEM_RESEARCH_ACTOR} from './research-actor.mjs';
 import {initializeModelLease,claimModelLease,releaseModelLease} from './model-lease.mjs';
 import {randomUUID} from 'node:crypto';
-import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest,rejectedOutputDiagnostic} from './codex-research.mjs';
+import {generateCodexDraft,validatePacket,validateCodexDraft,CodexResearchError,digest,rejectedOutputDiagnostic,codexPrompt,codexDraftSchema,CODEX_DRAFT_SCHEMA,CODEX_PROMPT_VERSION,CODEX_SCHEMA_VERSION} from './codex-research.mjs';
+import {researchOutputFeedback} from './research-output-feedback.mjs';
+import {useStoredOutputContract} from './research-output-contract.mjs';
 
 export function validateCandidate(result,packet,{model,topicId}){
  validatePacket(packet);
- const output={sections:result?.sections,missingEvidence:result?.missingEvidence,...(result?.materialityReviews===undefined?{}:{materialityReviews:result.materialityReviews})};
+ const output={sections:result?.sections,missingEvidence:result?.missingEvidence,...(result?.companyAssessments===undefined?{}:{companyAssessments:result.companyAssessments}),...(result?.materialityReviews===undefined?{}:{materialityReviews:result.materialityReviews}),...(result?.sourceRequests===undefined?{}:{sourceRequests:result.sourceRequests})};
  validateCodexDraft(output,packet);
  if(result.status!=='candidate'||result.reviewStatus!=='unreviewed'||packet.input.topicId!==topicId||result.trace?.inputHash!==packet.inputHash||result.trace?.model!==model||result.trace?.topicVersion!==packet.input.topicVersion||result.trace?.topicId!==topicId||typeof result.rawOutput!=='string'||digest(result.rawOutput)!==result.trace.outputHash)throw new CodexResearchError('output');
  let raw;try{raw=validateCodexDraft(JSON.parse(result.rawOutput),packet);}catch{throw new CodexResearchError('output');}
@@ -39,11 +43,7 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
   }catch{throw new Error('模型生成请求记录不完整，请核对运行记录');}
   return summary(run);
  }
- const api={
-  status(){return {enabled:enabled&&!closed,provider:'local-codex-cli',model:config.model||null,effort:config.effort||'high'};},
-  list(topicId){research.get(topicId);return db.prepare('SELECT payload,expires_at FROM model_research_runs WHERE topic_id=? ORDER BY rowid DESC LIMIT 50').all(topicId).map(row=>summary(expiredView(JSON.parse(row.payload),row.expires_at)));},
-  get(topicId,id){const run=read(id);if(run.topicId!==topicId)throw new Error('模型研判不属于此研究');return run;},
-  start(topicId,data={},beforeCommit=()=>{}){
+ function start(topicId,data={},beforeCommit=()=>{},systemPacket=null,previousRunId=null,storedPacket=null){
    if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(key=>!['version','requestId'].includes(key))||!Number.isSafeInteger(data.version)||data.version<1||Object.hasOwn(data,'requestId')&&(typeof data.requestId!=='string'||!/^[-a-zA-Z0-9]{16,80}$/.test(data.requestId)))throw new Error('模型生成请求参数无效');
    const {version,requestId}=data;
    if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw new Error('恢复副本需先完成核对确认');
@@ -51,10 +51,24 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
    const prior=priorRequest(topicId,version,requestId);if(prior)return prior;
    if(!enabled)throw new Error('当前未启用本机 Codex 研判');
    if(!config.binary||!config.model)throw new Error('请先配置本机 Codex 路径与模型');
-   const packet=validatePacket(research.packet(topicId));if(version!==packet.input.topicVersion)throw new Error('研究已更新，请刷新后再生成');
-   if(research.get(topicId).status==='archived')throw new Error('归档研究不能开始模型研判');
+   let packet=validatePacket(systemPacket||research.packet(topicId));if(version!==packet.input.topicVersion)throw new Error('研究已更新，请刷新后再生成');
+   if(storedPacket){validatePacket(storedPacket);if(storedPacket.inputHash!==packet.inputHash)throw Error('原队列研究输入已变化');packet=validatePacket(useStoredOutputContract(packet,storedPacket));}
+   if(!systemPacket&&research.get(topicId).status==='archived')throw new Error('归档研究不能开始模型研判');
    const timeoutMs=config.timeoutMs??180000;if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>600000)throw new Error('模型超时配置无效');
-   const run={id:randomUUID(),topicId,status:'running',packet,model:config.model,effort:config.effort||'high',createdAt:new Date(now()).toISOString(),...(requestId?{requestId}:{})};
+   const stable={...packet};delete stable.generatedAt;
+   const executionHash=digest({inputHash:packet.inputHash,prompt:codexPrompt(stable),schema:typeof codexDraftSchema==='function'?codexDraftSchema(stable):CODEX_DRAFT_SCHEMA,promptVersion:CODEX_PROMPT_VERSION,schemaVersion:CODEX_SCHEMA_VERSION,config:{binary:config.binary,model:config.model,effort:config.effort||'high',timeoutMs}});
+   let repair=null;
+   if(previousRunId){
+    // Only an internal retry of this exact failed input and contract can carry
+    // feedback. Cancelled, successful, stale and legacy runs remain untouched.
+    try{const previous=read(previousRunId);validatePacket(previous.packet);
+     if(previous.status==='failed'&&previous.failure?.code==='output'&&previous.topicId===topicId&&previous.executionHash===executionHash&&previous.packet.inputHash===packet.inputHash&&previous.failure.trace?.inputHash===packet.inputHash&&previous.failure.trace?.outputHash===previous.outputDiagnostic?.outputHash){
+      const feedback=researchOutputFeedback(previous.outputDiagnostic,packet);
+      if(feedback)repair={previousRunId,feedback};
+     }
+    }catch{} // Missing or ineligible diagnostics use the normal queue retry.
+   }
+   const run={...(systemPacket?{actor:SYSTEM_RESEARCH_ACTOR,subject:'event-cluster'}:{}),id:randomUUID(),topicId,status:'running',packet,executionHash,...(repair?{repair}:{}),model:config.model,effort:config.effort||'high',createdAt:new Date(now()).toISOString(),...(requestId?{requestId}:{})};
    db.exec('BEGIN IMMEDIATE');try{
     // Another process may have registered this identity since the first lookup.
     const committed=priorRequest(topicId,version,requestId);if(committed){db.exec('COMMIT');return committed;}
@@ -65,10 +79,11 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
     onStart(run);beforeCommit(run);db.exec('COMMIT');
    }catch(error){db.exec('ROLLBACK');throw error;}
    const controller=new AbortController();
-   const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal})).then(result=>{
+   const done=Promise.resolve().then(()=>runner(structuredClone(packet),{...config,timeoutMs,signal:controller.signal,researchFeedback:repair?structuredClone(repair.feedback):null})).then(result=>{
     if(controller.signal.aborted)throw new CodexResearchError('cancelled');
     // Independently revalidate injected/provider output before persisting it as a candidate.
     validateCandidate(result,packet,{model:run.model,topicId});
+    if(repair&&(result.trace?.researchFeedbackHash!==digest(repair.feedback)||result.trace?.promptHash!==digest(codexPrompt(packet,repair.feedback))))throw new CodexResearchError('output');
     write({...run,status:'candidate',finishedAt:new Date(now()).toISOString(),candidate:result});
    }).catch(error=>{
     const failure=error instanceof CodexResearchError?{code:error.code,message:error.message,trace:error.trace}:{code:'process',message:'模型调用失败；原研究保留，可检查配置后重试'};
@@ -78,20 +93,46 @@ export function openModelResearchRuns(store,research,{enabled=false,config={},ru
    // The initial input record remains available for interrupted-run recovery; do not log raw SQL.
    void done.catch(()=>console.error('模型研判记录保存失败；候选未确认落库，请检查本机存储。'));
    jobs.set(run.id,{controller,done});return summary(run);
+ }
+ const api={
+  status(){return {enabled:enabled&&!closed,provider:'local-codex-cli',model:config.model||null,effort:config.effort||'high'};},
+  list(topicId){research.get(topicId);return db.prepare('SELECT payload,expires_at FROM model_research_runs WHERE topic_id=? ORDER BY rowid DESC LIMIT 50').all(topicId).map(row=>summary(expiredView(JSON.parse(row.payload),row.expires_at)));},
+  get(topicId,id){const run=read(id);if(run.topicId!==topicId)throw new Error('模型研判不属于此研究');return run;},
+  start(topicId,data,beforeCommit,storedPacket){return start(topicId,data,beforeCommit,null,null,storedPacket);},
+  startAutomatic(topicId,data,beforeCommit,actor,previousRunId,storedPacket){
+   if(actor!==SYSTEM_RESEARCH_ACTOR)throw Error('自动研判只能由后台内部调用');
+   return start(topicId,data,beforeCommit,null,previousRunId,storedPacket);
+  },
+  startCluster(packet,beforeCommit,actor,previousRunId){
+   if(actor!==SYSTEM_RESEARCH_ACTOR||packet?.input?.eventSynthesis?.version!=='event-synthesis/1'||packet.input.topicId!==`event-cluster:${packet.input.eventSynthesis.clusterId}`)throw Error('事件综合研判只能由自动研究内部调用');
+   return start(packet.input.topicId,{version:packet.input.topicVersion},beforeCommit,packet,previousRunId);
+  },
+  completeCluster(id,packet,actor,beforeCommit){
+   if(actor!==SYSTEM_RESEARCH_ACTOR)throw Error('事件综合研判只能由自动研究内部保存');
+   const run=read(id);validateCandidate(run.candidate,run.packet,{model:run.model,topicId:run.topicId});validatePacket(packet);
+   if(run.subject!=='event-cluster'||run.status!=='candidate'||run.packet.inputHash!==packet.inputHash)throw Error('事件综合研判输入或状态已变化');
+   db.exec('BEGIN IMMEDIATE');try{
+    if(db.prepare("SELECT value FROM settings WHERE key='restore_review_required'").get()?.value==='1')throw Error('恢复副本需先完成核对确认');
+    if(digest(read(id))!==digest(run))throw Error('事件综合研判已有新状态');
+    beforeCommit(run);write({...run,actor,status:'adopted',acceptedVersion:packet.input.topicVersion,acceptedAt:new Date(now()).toISOString()});db.exec('COMMIT');
+   }catch(error){db.exec('ROLLBACK');throw error;}
+   return read(id);
   },
   async wait(id){await jobs.get(id)?.done;return read(id);},
   cancel(topicId,id){api.get(topicId,id);const job=jobs.get(id);if(!job)throw new Error('此调用不在本实例运行；已结束或等待中断恢复');job.controller.abort();return {id,status:'cancelling'};},
-  adopt(topicId,id,{version}={}){
+  adopt(topicId,id,{version}={},actor){
+   const provenance=researchActor(actor);
    const run=api.get(topicId,id);if(run.status!=='candidate')throw new Error('此模型结果不可采纳或已经处理');
    validateCandidate(run.candidate,run.packet,{model:run.model,topicId});
    const packet=research.packet(topicId);if(version!==packet.input.topicVersion||packet.inputHash!==run.packet.inputHash)throw new Error('研究或材料已变化；此候选保留在历史中，请重新生成');
    return research.adoptModelDraft(topicId,{version,runId:id},run.candidate,()=>{
     const current=read(id);if(current.status!=='candidate')throw new Error('此候选已被处理');
+    if(actor===SYSTEM_RESEARCH_ACTOR&&run.packet.input.documentContext&&!currentDocumentResearch(store,research,research.get(topicId)))throw Error('附件来源已变化，旧结果保留，不保存为当前研判');
     // Bind the transaction to the exact stored record checked above, including
     // its original model configuration, rather than today's configured model.
     if(digest(current)!==digest(run))throw new CodexResearchError('output');
-    write({...run,status:'adopted',acceptedVersion:version+1,acceptedAt:new Date(now()).toISOString()});
-   });
+    write({...run,...provenance,status:'adopted',acceptedVersion:version+1,acceptedAt:new Date(now()).toISOString()});
+   },actor);
   },
   async close(){closed=true;for(const job of jobs.values())job.controller.abort();await Promise.allSettled([...jobs.values()].map(job=>job.done));}
  };

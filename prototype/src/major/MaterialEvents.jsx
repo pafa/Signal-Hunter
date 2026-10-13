@@ -20,7 +20,7 @@ export function EventReview({event,index,history,disabled,onDecision,note='',onN
    <label>事项 {index+1} 核对说明<textarea maxLength={1200} rows={2} disabled={disabled} value={note} onChange={e=>onNoteChange(e.target.value)}/></label>
    <div className="m-form-actions">{latest?.action==='reject'?<Button disabled={disabled||!note.trim()} onClick={()=>onDecision(index,latest.version,'reopen',note)}>重新核对</Button>:<><Button primary disabled={disabled||!note.trim()} onClick={()=>onDecision(index,latest?.version||0,'create',note)}>为此事项建立研究</Button><Button disabled={disabled||!note.trim()} onClick={()=>onDecision(index,latest?.version||0,'reject',note)}>排除此事项</Button></>}</div>
   </>}
-  {!!history?.length&&<details><summary>核对历史 · {history.length} 次</summary>{history.map(h=><p key={h.version}>v{h.version} · {time(h.at)} · {({create:'建立研究',reject:'排除',reopen:'重新核对'})[h.action]}：{h.note}</p>)}</details>}
+  {!!history?.length&&<details><summary>核对历史 · {history.length} 次</summary>{history.map(h=><p key={h.version}>v{h.version} · {h.actor?.kind==='system'?'系统处理':'本人处理'} · {time(h.at)} · {({create:'建立研究',reject:'排除',reopen:'重新核对'})[h.action]}：{h.note}</p>)}</details>}
  </article>;
 }
 const emptyEvent=()=>({note:''});
