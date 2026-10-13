@@ -8,7 +8,7 @@ export function retentionPolicy(input={}){
  if(!input||typeof input!=='object'||Array.isArray(input))throw new Error('保留策略必须是对象');
  if(Object.keys(input).some(key=>!Object.hasOwn(DEFAULT_RETENTION_POLICY,key)))throw new Error('未知保留策略字段');
  const policy={...DEFAULT_RETENTION_POLICY,...input};
- if(policy.automaticDeletion!==false)throw new Error('本版本仅支持只读预览，自动删除必须关闭');
+ if(policy.automaticDeletion!==false)throw new Error('该预览接口仅支持只读检查，自动删除必须关闭');
  for(const key of ['keepNewest','maxAgeDays','maxBackupBytes','minFreeBytes'])if(!Number.isSafeInteger(policy[key])||policy[key]<1)throw new Error('保留策略数值必须是正安全整数');
  return policy;
 }
