@@ -5,7 +5,7 @@ import {safeErrorText,safeDiagnosticPayload} from '../shared/safe-errors.mjs';
 import {runtimeConfig,assertDatabaseMode,checkDatabaseFile} from './runtime.mjs';
 import http from 'node:http';
 import {createStaticHandler} from './static-site.mjs';
-import {createBackup} from './backup.mjs';
+import {createManagedBackup,loadBackupPolicy} from './backup-lifecycle.mjs';
 import {fileURLToPath} from 'node:url';
 import {existsSync,realpathSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
@@ -240,15 +240,20 @@ export function createHandler(store,service,{apiPort=4179,frontendPort=4178,stat
 
 if(process.argv[1]&&existsSync(process.argv[1])&&realpathSync(process.argv[1])===realpathSync(fileURLToPath(import.meta.url))){
   const config=runtimeConfig();
+  const backupPolicy=await loadBackupPolicy(process.env.SIGNAL_BACKUP_POLICY_PATH);
   const executionConfig=process.env.SIGNAL_EXECUTION_CONFIG?loadExecutionConfig(process.env.SIGNAL_EXECUTION_CONFIG):null;
   checkDatabaseFile(config);
   const store=openStore(config.dbPath);
   try{assertDatabaseMode(store,config.mode);}catch(error){store.close();throw error;}
   const staticHandler=config.production?createStaticHandler(fileURLToPath(new URL('../dist',import.meta.url))):null;
   const modelConfig=process.env.SIGNAL_CODEX_BIN&&process.env.SIGNAL_CODEX_MODEL?{binary:process.env.SIGNAL_CODEX_BIN,model:process.env.SIGNAL_CODEX_MODEL,effort:process.env.SIGNAL_CODEX_EFFORT||'high',timeoutMs:Number(process.env.SIGNAL_CODEX_TIMEOUT_MS||420000)}:null;
-  const service=createService(store,{mode:config.mode,instance:config.instance,executionConfig,modelConfig,storageConfig:{databasePath:config.dbPath,backupRoot:resolve(dirname(config.dbPath),'backups')},backupTask:async()=>{
-    const result=await createBackup(config.dbPath,resolve(dirname(config.dbPath),'backups'));
-    store.status('backup',{state:'ok',receivedAt:result.createdAt,directory:result.directory,sha256:result.sha256});return {ok:true};
+  const backupRoot=resolve(dirname(config.dbPath),'backups');
+  const {keepNewest,maxAgeDays,maxBackupBytes,minFreeBytes}=backupPolicy;
+  const service=createService(store,{mode:config.mode,instance:config.instance,executionConfig,modelConfig,storageConfig:{databasePath:config.dbPath,backupRoot,policy:{keepNewest,maxAgeDays,maxBackupBytes,minFreeBytes}},backupTask:async context=>{
+    try{
+      const result=await createManagedBackup(config.dbPath,backupRoot,{policy:backupPolicy,signal:context.signal,assertActive:context.assertActive});
+      store.status('backup',{state:'ok',receivedAt:result.createdAt,directory:result.directory,sha256:result.sha256,retention:result.retention});return {ok:true};
+    }catch(error){store.status('backup',{state:'error',attemptedAt:new Date().toISOString(),error:safeErrorText(error),policy:backupPolicy,retention:error.retention});throw error;}
   }}),server=http.createServer(createHandler(store,service,{...config,staticHandler}));
   server.on('error',error=>{console.error(safeErrorText(error));store.close();process.exit(1);});
   const port=config.production?config.frontendPort:config.apiPort;
